@@ -31,6 +31,17 @@ go:mod:
     - diff -u go.mod.bak go.mod
     - diff -u go.sum.bak go.sum
 
+go:fmt:
+  extends: .go-base
+  script:
+    - |
+      unformatted=$(gofmt -l .)
+      if [ -n "$unformatted" ]; then
+        echo "gofmt needed:"
+        echo "$unformatted"
+        exit 1
+      fi
+
 go:vet:
   extends: .go-base
   script:

@@ -1,0 +1,29 @@
+# Copy via: gitboard init  (writes ~/.config/gitboard/config.yaml)
+#
+# llm.api_key is optional for local Polypus; set when the endpoint requires it.
+# Env overrides: GITBOARD_LLM_BASE_URL, GITBOARD_LLM_MODEL, GITBOARD_LLM_API_KEY,
+# POLYPUS_BASE_URL, OPENAI_API_KEY, GITBOARD_POLL_SECONDS.
+# Config path override: GITBOARD_CONFIG.
+
+llm:
+  base_url: http://127.0.0.1:1320/v1
+  model: cf_local/@cf/zai-org/glm-4.7-flash
+  api_key: ""
+
+ui:
+  poll_seconds: 30
+
+# Optional: scan these trees for local checkouts (incl. git worktrees).
+# Match is via origin remote → project host/path. Override per project with local_path.
+local:
+  roots: []
+
+sync:
+  github:
+    orgs: []
+  gitlab:
+    groups: []
+
+# Curated by: gitboard sync
+# Optional per project: local_path: ~/code/my-clone
+projects: []

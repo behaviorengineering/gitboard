@@ -1,6 +1,8 @@
 bin/
 .env
+config.yaml
 projects.yaml
+.gitboard/
 .gomodcache/
 .gocache/
 .DS_Store

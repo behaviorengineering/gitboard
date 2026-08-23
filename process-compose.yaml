@@ -1,0 +1,49 @@
+# Gitboard dashboard (standalone process-compose project).
+# Start: make serve  (or: scripts/pc-up.sh)
+# Stop:  make serve-down
+# File watch rebuilds on .go / static changes (process-compose >= v1.122.0).
+# Disable watching: process-compose up --no-watch …  or PC_NO_WATCH=1
+
+version: "0.5"
+
+log_level: info
+log_length: 500
+
+environment:
+  - "GITBOARD_DIR=${GITBOARD_DIR}"
+  - "GITBOARD_BIN=${GITBOARD_BIN}"
+  - "GITBOARD_CONFIG=${GITBOARD_CONFIG}"
+  - "GITBOARD_ADDR=${GITBOARD_ADDR}"
+
+processes:
+  dashboard:
+    command: >-
+      go build -o bin/gitboard ./cmd/gitboard
+      && ./bin/gitboard serve -config ${GITBOARD_CONFIG} -addr ${GITBOARD_ADDR}
+    working_dir: "${GITBOARD_DIR}"
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 1325
+        path: /api/health
+      period_seconds: 3
+      failure_threshold: 10
+    availability:
+      restart: on_failure
+      backoff_seconds: 2
+    shutdown:
+      signal: 15
+      timeout_seconds: 10
+    watch:
+      debounce: 400ms
+      paths:
+        - path: .
+          include:
+            - "**/*.go"
+            - "internal/server/static/**"
+            - "go.mod"
+            - "go.sum"
+          exclude:
+            - "**/*_test.go"
+            - "bin/**"
+            - ".gitboard/**"

@@ -18,7 +18,7 @@ body {
 }
 
 .top, main, .detail {
-  max-width: 1100px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 1rem 1.25rem;
 }
@@ -30,7 +30,471 @@ body {
   gap: 1rem;
   align-items: center;
   margin: 1rem 0;
+  flex-wrap: wrap;
 }
+
+.poll-label, .status {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tool-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.host-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-width: 4.25rem;
+}
+
+.host-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  opacity: 0.95;
+}
+
+.host-cell .host-icon {
+  width: 3.25rem;
+  height: 3.25rem;
+}
+
+.host-label {
+  display: block;
+  text-transform: lowercase;
+  font-size: 0.8rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.ci-cell {
+  min-width: 7rem;
+}
+
+.ci-latest {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.ci-status-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ci-status-text {
+  font-size: 0.85rem;
+  text-transform: lowercase;
+}
+
+.ci-status-text.is-ok { color: var(--ok); }
+.ci-status-text.is-bad { color: var(--bad); }
+.ci-status-text.is-run { color: var(--warn); }
+.ci-status-text.is-muted { color: var(--muted); }
+
+.ci-on {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.ci-on code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.ci-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.ci-link:hover {
+  text-decoration: underline;
+}
+
+
+.project-cell {
+  min-width: 10rem;
+}
+
+.project-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.project-org {
+  font-size: 0.75rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  margin-bottom: 0.2rem;
+  font-weight: 500;
+}
+
+.project-local-path-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  max-width: 100%;
+}
+
+.project-local-path {
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.25;
+  word-break: break-all;
+}
+
+button.copy-path-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+button.copy-path-btn:hover {
+  color: var(--link);
+  background: rgba(124, 183, 255, 0.12);
+}
+
+button.copy-path-btn.is-copied {
+  color: var(--ok);
+}
+
+button.copy-path-btn .mark-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.branch-ci {
+  display: none;
+}
+
+.branch-item--ci-bad .branch-name {
+  color: var(--bad);
+}
+
+button.branch-inspect {
+  padding: 0.12rem 0.4rem;
+  font-size: 0.68rem;
+  border-radius: 6px;
+  line-height: 1.2;
+}
+
+.project-open {
+  display: inline-flex;
+  color: var(--link);
+  opacity: 0.9;
+}
+
+.project-open:hover {
+  opacity: 1;
+}
+
+.branch-chip--ok {
+  color: var(--ok);
+  border-color: rgba(62, 207, 142, 0.35);
+}
+
+.branch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 22rem;
+  max-width: 34rem;
+}
+
+.branch-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(4.5rem, auto) auto;
+  align-items: center;
+  column-gap: 0.55rem;
+  row-gap: 0.15rem;
+  padding: 0.45rem 0.15rem;
+  border-bottom: 1px solid #243041;
+  min-height: 1.35rem;
+}
+
+.branch-item--head {
+  padding-top: 0;
+  padding-bottom: 0.25rem;
+  border-bottom-color: #2d3a49;
+  min-height: 0;
+}
+
+.branch-item--head + .branch-item {
+  padding-top: 0.35rem;
+}
+
+.branch-head-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.branch-head-label--end {
+  text-align: right;
+  justify-self: end;
+}
+
+.branch-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0.15rem;
+}
+
+.branch-item:first-child {
+  padding-top: 0.15rem;
+}
+
+.branch-item--review {
+  background: rgba(240, 193, 75, 0.06);
+  margin: 0 -0.25rem;
+  padding-left: 0.4rem;
+  padding-right: 0.4rem;
+  border-radius: 4px;
+}
+
+.branch-item--conflict,
+.branch-item--local-only {
+  background: rgba(255, 107, 107, 0.06);
+}
+
+.branch-item--local-only {
+  background: rgba(124, 183, 255, 0.06);
+}
+
+.branch-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.branch-local {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 4.5rem;
+  min-height: 1.6rem;
+  flex-wrap: wrap;
+  padding: 0.2rem 0.4rem;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.branch-local-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.branch-local-sync {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.branch-local-empty {
+  color: var(--muted);
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.branch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  justify-self: end;
+  min-height: 1.6rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+/* Alternating Local + CI cell backgrounds (skip header row). */
+.branch-list > .branch-item:not(.branch-item--head):nth-child(even) .branch-local,
+.branch-list > .branch-item:not(.branch-item--head):nth-child(even) .branch-actions {
+  background: rgba(231, 236, 243, 0.04);
+}
+
+.branch-list > .branch-item:not(.branch-item--head):nth-child(odd) .branch-local,
+.branch-list > .branch-item:not(.branch-item--head):nth-child(odd) .branch-actions {
+  background: rgba(231, 236, 243, 0.09);
+}
+
+.branch-item--head .branch-local,
+.branch-item--head .branch-actions {
+  background: transparent;
+  padding-top: 0;
+  padding-bottom: 0;
+  min-height: 0;
+}
+
+.branch-actions .branch-inspect {
+  margin-left: 0.1rem;
+}
+
+.branch-ci-slot {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+}
+
+.branch-goto {
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.15rem;
+  align-items: center;
+  justify-content: center;
+  color: var(--link);
+  opacity: 0.85;
+}
+
+.branch-goto:hover {
+  opacity: 1;
+}
+
+.branch-goto .mark-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.branch-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.45rem;
+  align-items: center;
+}
+
+.branch-chip {
+  font-size: 0.7rem;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  border: 1px solid #2d3a49;
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+}
+
+.branch-chip--review {
+  color: var(--warn);
+  border-color: rgba(240, 193, 75, 0.35);
+}
+
+.branch-chip--bad {
+  color: var(--bad);
+  border-color: rgba(255, 107, 107, 0.35);
+}
+
+.branch-chip--stale {
+  color: var(--muted);
+}
+
+.branch-when {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.mark--stale { color: var(--muted); }
+
+
+.branch-marks {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.15rem;
+  align-items: center;
+  min-width: 2.5rem;
+  flex-wrap: nowrap;
+}
+
+.mark {
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.15rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.mark-icon {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
+.mark--default { color: var(--link); }
+.mark--review { color: var(--warn); }
+.mark--ok { color: var(--ok); }
+.mark--bad { color: var(--bad); }
+.mark--run { color: var(--warn); }
+.mark--muted { color: var(--muted); opacity: 0.85; }
+
+.branch-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.branch-title .mark {
+  flex: 0 0 auto;
+}
+
+.branch-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+  color: var(--text);
+  text-decoration: none;
+  word-break: break-all;
+  line-height: 1.2;
+}
+
+a.branch-name:hover {
+  color: var(--link);
+  text-decoration: underline;
+}
+
+.branch-tag {
+  display: none;
+}
+
+.branch-tag--default,
+.branch-tag--review {
+  display: none;
+}
+
+
+
+
 
 button {
   background: var(--panel);

@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/behaviorengineering/gitboard/internal/config"
 )
 
 // Request is the triage input from the dashboard.
@@ -40,21 +41,19 @@ type Analyzer struct {
 	Client  *http.Client
 }
 
-// NewFromEnv builds an analyzer from GITBOARD_LLM_* or POLYPUS_BASE_URL.
-func NewFromEnv() *Analyzer {
-	base := firstNonEmpty(
-		os.Getenv("GITBOARD_LLM_BASE_URL"),
-		os.Getenv("POLYPUS_BASE_URL"),
-	)
-	if base != "" && !strings.HasSuffix(base, "/v1") {
-		base = strings.TrimRight(base, "/") + "/v1"
-	}
+// New builds an analyzer from effective LLM settings (file + env overlay).
+func New(llm config.LLM) *Analyzer {
 	return &Analyzer{
-		BaseURL: strings.TrimRight(base, "/"),
-		APIKey:  firstNonEmpty(os.Getenv("GITBOARD_LLM_API_KEY"), os.Getenv("OPENAI_API_KEY")),
-		Model:   firstNonEmpty(os.Getenv("GITBOARD_LLM_MODEL"), "cf_local/@cf/zai-org/glm-4.7-flash"),
+		BaseURL: strings.TrimRight(strings.TrimSpace(llm.BaseURL), "/"),
+		APIKey:  strings.TrimSpace(llm.APIKey),
+		Model:   firstNonEmpty(llm.Model, "cf_local/@cf/zai-org/glm-4.7-flash"),
 		Client:  &http.Client{Timeout: 120 * time.Second},
 	}
+}
+
+// NewFromEnv builds an analyzer from environment only (no config file).
+func NewFromEnv() *Analyzer {
+	return New(config.File{}.EffectiveLLM())
 }
 
 func (a *Analyzer) Enabled() bool {
@@ -65,7 +64,7 @@ func (a *Analyzer) Enabled() bool {
 func (a *Analyzer) Analyze(ctx context.Context, req Request) (Response, error) {
 	if !a.Enabled() {
 		return Response{
-			Unavailable: "set GITBOARD_LLM_BASE_URL (or POLYPUS_BASE_URL) for AI triage",
+			Unavailable: "set llm.base_url in config.yaml (or GITBOARD_LLM_BASE_URL / POLYPUS_BASE_URL) for AI triage",
 		}, nil
 	}
 	logText := strings.TrimSpace(req.Log)

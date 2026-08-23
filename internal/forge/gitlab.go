@@ -45,9 +45,38 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 		return summary, nil
 	}
 	repo := p.Path
+	branches := newBranchAccum()
+
+	encoded := strings.ReplaceAll(repo, "/", "%2F")
+	if raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"?simple=true"); err == nil {
+		var meta struct {
+			DefaultBranch string `json:"default_branch"`
+		}
+		if json.Unmarshal(raw, &meta) == nil {
+			branches.setDefault(meta.DefaultBranch)
+		}
+	}
+
+	if raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"/repository/branches?per_page=100"); err == nil {
+		var heads []struct {
+			Name   string `json:"name"`
+			WebURL string `json:"web_url"`
+			Commit struct {
+				CommittedDate string `json:"committed_date"`
+				AuthoredDate  string `json:"authored_date"`
+			} `json:"commit"`
+		}
+		if json.Unmarshal(raw, &heads) == nil {
+			for _, h := range heads {
+				updated := firstNonEmpty(h.Commit.CommittedDate, h.Commit.AuthoredDate)
+				branches.addRemote(h.Name, updated, h.WebURL)
+			}
+		}
+	}
+
 	raw, err := g.Run.RunJSON(ctx, "glab", "ci", "list",
 		"-R", repo,
-		"-P", "1",
+		"-P", "20",
 		"--output", "json",
 	)
 	if err != nil {
@@ -66,41 +95,59 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 		summary.Error = err.Error()
 		return summary, nil
 	}
-	if len(pipelines) > 0 {
-		pl := pipelines[0]
-		sha := pl.SHA
-		if len(sha) > 8 {
-			sha = sha[:8]
+	for i, pl := range pipelines {
+		branches.setCI(pl.Ref, pl.Status, pl.WebURL, pl.UpdatedAt, fmt.Sprintf("%d", pl.ID))
+		if i == 0 {
+			summary.CI = &CIStatus{
+				Status:    pl.Status,
+				Ref:       pl.Ref,
+				Name:      "pipeline",
+				WebURL:    pl.WebURL,
+				UpdatedAt: pl.UpdatedAt,
+				RunID:     fmt.Sprintf("%d", pl.ID),
+			}
 		}
-		summary.CI = &CIStatus{
-			Status:    pl.Status,
-			Ref:       pl.Ref,
-			Name:      "pipeline",
-			WebURL:    pl.WebURL,
-			UpdatedAt: pl.UpdatedAt,
-			RunID:     fmt.Sprintf("%d", pl.ID),
-		}
-		_ = sha
 	}
+
 	mrRaw, err := g.Run.RunJSON(ctx, "glab", "mr", "list",
 		"-R", repo,
-		"--state", "opened",
 		"--output", "json",
 	)
 	if err != nil {
 		if summary.Error == "" {
 			summary.Error = err.Error()
 		}
+		summary.Branches = branches.list()
 		return summary, nil
 	}
-	var mrs []json.RawMessage
+	var mrs []struct {
+		IID          int    `json:"iid"`
+		SourceBranch string `json:"source_branch"`
+		WebURL       string `json:"web_url"`
+		UpdatedAt    string `json:"updated_at"`
+		HasConflicts bool   `json:"has_conflicts"`
+		MergeStatus  string `json:"merge_status"`
+		Draft        bool   `json:"draft"`
+		WorkInProg   bool   `json:"work_in_progress"`
+	}
 	if err := json.Unmarshal(mrRaw, &mrs); err != nil {
 		if summary.Error == "" {
 			summary.Error = err.Error()
 		}
+		summary.Branches = branches.list()
 		return summary, nil
 	}
 	summary.OpenItems.MergeRequests = len(mrs)
+	for _, mr := range mrs {
+		branches.setOpenReview(mr.SourceBranch, reviewInfo{
+			ID:        mr.IID,
+			URL:       mr.WebURL,
+			Conflict:  gitlabHasConflict(mr.HasConflicts, mr.MergeStatus),
+			UpdatedAt: mr.UpdatedAt,
+			Draft:     mr.Draft || mr.WorkInProg,
+		})
+	}
+	summary.Branches = branches.list()
 	return summary, nil
 }
 
@@ -152,4 +199,60 @@ func (g *GitLab) JobLog(ctx context.Context, p config.Project, _, jobID string) 
 		return "", err
 	}
 	return truncateLog(string(out)), nil
+}
+
+// ListGroupRepos lists non-archived projects in a GitLab group (including subgroups).
+func (g *GitLab) ListGroupRepos(ctx context.Context, group string) ([]RepoRef, error) {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return nil, fmt.Errorf("missing gitlab group")
+	}
+	var out []RepoRef
+	for page := 1; page <= 50; page++ {
+		raw, err := g.Run.RunJSON(ctx, "glab", "repo", "list",
+			"--group", group,
+			"--include-subgroups",
+			"--archived=false",
+			"--per-page", "100",
+			"--page", fmt.Sprintf("%d", page),
+			"--output", "json",
+		)
+		if err != nil {
+			return nil, err
+		}
+		var rows []struct {
+			PathWithNamespace string `json:"path_with_namespace"`
+			Name              string `json:"name"`
+			Archived          bool   `json:"archived"`
+		}
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return nil, fmt.Errorf("parse glab repo list: %w", err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, r := range rows {
+			if r.Archived {
+				continue
+			}
+			path := strings.Trim(r.PathWithNamespace, "/")
+			parts := strings.Split(path, "/")
+			if len(parts) < 2 {
+				continue
+			}
+			name := r.Name
+			if name == "" {
+				name = parts[len(parts)-1]
+			}
+			out = append(out, RepoRef{
+				Host: config.HostGitLab,
+				Path: path,
+				Name: name,
+			})
+		}
+		if len(rows) < 100 {
+			break
+		}
+	}
+	return out, nil
 }

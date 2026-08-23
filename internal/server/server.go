@@ -19,10 +19,12 @@ var staticFS embed.FS
 
 // Options configures the HTTP server.
 type Options struct {
-	Addr     string
-	Projects []config.Project
-	Dash     *dashboard.Service
-	Triage   *triage.Analyzer
+	Addr        string
+	Projects    []config.Project
+	Local       config.Local
+	Dash        *dashboard.Service
+	Triage      *triage.Analyzer
+	PollSeconds int
 }
 
 // NewMux returns the gitboard HTTP handler.
@@ -36,6 +38,16 @@ func NewMux(opts Options) http.Handler {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 
+	mux.HandleFunc("/api/meta", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"poll_interval_seconds": opts.PollSeconds,
+		})
+	})
+
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -43,7 +55,8 @@ func NewMux(opts Options) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		payload := opts.Dash.Collect(ctx, opts.Projects)
+		payload := opts.Dash.Collect(ctx, config.File{Projects: opts.Projects, Local: opts.Local})
+		payload.PollIntervalSeconds = opts.PollSeconds
 		writeJSON(w, payload)
 	})
 

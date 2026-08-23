@@ -23,15 +23,65 @@ type OpenItems struct {
 	MergeRequests int `json:"merge_requests"`
 }
 
+// BranchRef is a branch surfaced on the dashboard.
+type BranchRef struct {
+	Name       string `json:"name"`
+	Default    bool   `json:"default,omitempty"`
+	OpenReview bool   `json:"open_review,omitempty"`
+	ReviewID   int    `json:"review_id,omitempty"`
+	Draft      bool   `json:"draft,omitempty"`
+	Conflict   bool   `json:"conflict,omitempty"`
+	Stale      bool   `json:"stale,omitempty"`
+	CIStatus   string `json:"ci_status,omitempty"`
+	CIURL      string `json:"ci_url,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
+	WebURL     string `json:"web_url,omitempty"`
+}
+
 // ProjectSummary is one row in the dashboard.
 type ProjectSummary struct {
-	ID        string     `json:"id"`
-	Label     string     `json:"label"`
-	Host      string     `json:"host"`
-	OpenURL   string     `json:"open_url"`
-	CI        *CIStatus  `json:"ci,omitempty"`
-	OpenItems OpenItems  `json:"open_items"`
-	Error     string     `json:"error,omitempty"`
+	ID        string       `json:"id"`
+	Label     string       `json:"label"`
+	Host      string       `json:"host"`
+	Path      string       `json:"path,omitempty"`
+	Org       string       `json:"org,omitempty"`
+	OpenURL   string       `json:"open_url"`
+	CI        *CIStatus    `json:"ci,omitempty"`
+	Branches  []BranchRef  `json:"branches,omitempty"`
+	OpenItems OpenItems    `json:"open_items"`
+	Local     *LocalStatus `json:"local,omitempty"`
+	Error     string       `json:"error,omitempty"`
+}
+
+// LocalStatus is checkout / worktree health on disk.
+type LocalStatus struct {
+	Mapped        bool            `json:"mapped"`
+	Path          string          `json:"path,omitempty"`
+	Error         string          `json:"error,omitempty"`
+	Branch        string          `json:"branch,omitempty"`
+	Detached      bool            `json:"detached,omitempty"`
+	Dirty         bool            `json:"dirty,omitempty"`
+	Ahead         int             `json:"ahead,omitempty"`
+	Behind        int             `json:"behind,omitempty"`
+	Upstream      string          `json:"upstream,omitempty"`
+	DefaultBranch string          `json:"default_branch,omitempty"`
+	DefaultBehind int             `json:"default_behind,omitempty"`
+	DefaultAhead  int             `json:"default_ahead,omitempty"`
+	Worktrees     []LocalWorktree `json:"worktrees,omitempty"`
+}
+
+// LocalWorktree is one git worktree for a mapped project.
+type LocalWorktree struct {
+	Path     string `json:"path"`
+	Branch   string `json:"branch,omitempty"`
+	Detached bool   `json:"detached,omitempty"`
+	Bare     bool   `json:"bare,omitempty"`
+	Main     bool   `json:"main,omitempty"`
+	Dirty    bool   `json:"dirty,omitempty"`
+	Ahead    int    `json:"ahead,omitempty"`
+	Behind   int    `json:"behind,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
 }
 
 // FailedJob is a failed CI job suitable for triage.
@@ -58,9 +108,18 @@ type Tooling struct {
 
 // Dashboard is the aggregated pane payload.
 type Dashboard struct {
-	GeneratedAt string           `json:"generated_at"`
-	Tooling     Tooling          `json:"tooling"`
-	Projects    []ProjectSummary `json:"projects"`
+	GeneratedAt         string           `json:"generated_at"`
+	PollIntervalSeconds int              `json:"poll_interval_seconds"`
+	Tooling             Tooling          `json:"tooling"`
+	Projects            []ProjectSummary `json:"projects"`
+}
+
+// RepoRef is a discoverable repository from an org or group.
+type RepoRef struct {
+	Host     config.Host
+	Path     string // owner/repo
+	Name     string
+	Archived bool
 }
 
 // Client summarizes one forge via its official CLI.
