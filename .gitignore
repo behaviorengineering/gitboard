@@ -1,0 +1,6 @@
+bin/
+.env
+projects.yaml
+.gomodcache/
+.gocache/
+.DS_Store
