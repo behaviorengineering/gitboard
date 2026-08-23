@@ -1,0 +1,16 @@
+# Copy to projects.yaml (gitignored) or pass -projects /path/to/projects.yaml
+projects:
+  - id: consilium
+    label: Consilium
+    host: gitlab
+    path: behaviorengineering/consilium
+
+  - id: renderforge
+    label: Renderforge
+    host: gitlab
+    path: behaviorengineering/renderforge
+
+  - id: polypus
+    label: Polypus
+    host: github
+    path: behaviorengineering/polypus

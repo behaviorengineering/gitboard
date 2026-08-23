@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gitboard</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="top">
+    <h1>Gitboard</h1>
+    <p class="lede">GitLab and GitHub project health in one pane. Uses <code>glab</code> and <code>gh</code> on your machine.</p>
+    <div class="toolbar">
+      <button id="refresh" type="button">Refresh</button>
+      <span id="status" class="status" aria-live="polite"></span>
+    </div>
+    <div id="tooling" class="tooling" aria-live="polite"></div>
+  </header>
+  <main>
+    <table class="board" id="board">
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th>Host</th>
+          <th>CI</th>
+          <th>Open</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </main>
+  <section id="detail" class="detail" hidden>
+    <h2 id="detail-title">Failure detail</h2>
+    <div id="jobs"></div>
+    <pre id="triage" class="triage" hidden></pre>
+  </section>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
