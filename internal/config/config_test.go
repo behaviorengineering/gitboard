@@ -205,3 +205,27 @@ func TestEffectivePollSeconds(t *testing.T) {
 	}
 }
 
+func TestEffectiveUpstreamSeconds(t *testing.T) {
+	doc := config.File{}
+	if got := doc.EffectiveHeadsSeconds(); got != config.DefaultHeadsSeconds {
+		t.Fatalf("heads default=%d", got)
+	}
+	if got := doc.EffectiveMergedSeconds(); got != config.DefaultMergedSeconds {
+		t.Fatalf("merged default=%d", got)
+	}
+	zero := 0
+	doc.Upstream.HeadsSeconds = &zero
+	doc.Upstream.MergedSeconds = &zero
+	if got := doc.EffectiveHeadsSeconds(); got != 0 {
+		t.Fatalf("heads explicit zero=%d", got)
+	}
+	if got := doc.EffectiveMergedSeconds(); got != 0 {
+		t.Fatalf("merged explicit zero=%d", got)
+	}
+	neg := -5
+	doc.Upstream.HeadsSeconds = &neg
+	if got := doc.EffectiveHeadsSeconds(); got != config.DefaultHeadsSeconds {
+		t.Fatalf("heads negative=%d", got)
+	}
+}
+

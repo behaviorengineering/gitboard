@@ -242,12 +242,15 @@ function branchesCell(branches, host, project) {
 
 function branchRow({ remote: b, localWt, local, host, project, reviewKind, localOnly }) {
   const failed = ['failed', 'failure', 'error'].includes(String(b.ci_status || '').toLowerCase());
+  const pruneHint = String(localWt?.prune_hint || '');
   const itemClass = [
     'branch-item',
     b.open_review ? 'branch-item--review' : '',
     b.conflict ? 'branch-item--conflict' : '',
     failed ? 'branch-item--ci-bad' : '',
     localOnly ? 'branch-item--local-only' : '',
+    pruneHint === 'safe' ? 'branch-item--prune-safe' : '',
+    pruneHint === 'likely' ? 'branch-item--prune-likely' : '',
   ].filter(Boolean).join(' ');
   const item = el('li', itemClass);
 
@@ -261,25 +264,45 @@ function branchRow({ remote: b, localWt, local, host, project, reviewKind, local
   const body = el('div', 'branch-body');
   const title = el('div', 'branch-title');
   if (b.default) title.appendChild(iconMark(ICONS.lock, 'mark--default', 'default branch'));
-  const name = el(b.web_url ? 'a' : 'span', 'branch-name', b.name || '');
-  if (b.web_url) {
-    name.href = b.web_url;
+  const nameHref = b.web_url || localWt?.merged_url || '';
+  const name = el(nameHref ? 'a' : 'span', 'branch-name', b.name || '');
+  if (nameHref) {
+    name.href = nameHref;
     name.target = '_blank';
     name.rel = 'noopener';
-    name.title = b.open_review ? `Open ${reviewKind}` : 'Open branch';
+    name.title = localWt?.merged_url
+      ? `Open merged ${reviewKind}`
+      : (b.open_review ? `Open ${reviewKind}` : 'Open branch');
   }
   title.appendChild(name);
   body.appendChild(title);
 
   const meta = el('div', 'branch-meta');
-  if (localOnly) meta.appendChild(el('span', 'branch-chip', 'local only'));
+  if (localOnly) meta.appendChild(el('span', 'branch-chip branch-chip--local', 'local only'));
+  const pruneCmd = pruneCommand(b.name, localWt, local);
+  if (pruneHint === 'safe') {
+    const chip = el('span', 'branch-chip branch-chip--ok', 'safe to remove');
+    const bits = [];
+    if (localWt.merged_id) bits.push(`merged ${reviewKind} #${localWt.merged_id}`);
+    const mergedWhen = relativeTime(localWt.merged_at);
+    if (mergedWhen) bits.push(mergedWhen);
+    if (pruneCmd) bits.push(pruneCmd);
+    chip.title = bits.join(' · ');
+    meta.appendChild(chip);
+  } else if (pruneHint === 'likely') {
+    const chip = el('span', 'branch-chip branch-chip--warn', 'likely removable');
+    chip.title = pruneCmd
+      ? `Remote head gone · check then: ${pruneCmd}`
+      : 'Remote head gone';
+    meta.appendChild(chip);
+  }
   if (b.open_review) {
     meta.appendChild(el('span', 'branch-chip branch-chip--review', b.review_id ? `${reviewKind} #${b.review_id}` : reviewKind));
   }
   if (b.conflict) meta.appendChild(el('span', 'branch-chip branch-chip--bad', 'conflicts'));
   if (b.stale) meta.appendChild(el('span', 'branch-chip branch-chip--stale', 'stale'));
   if (b.draft) meta.appendChild(el('span', 'branch-chip', 'draft'));
-  const when = relativeTime(b.updated_at);
+  const when = relativeTime(localOnly && localWt?.merged_at ? localWt.merged_at : b.updated_at);
   if (when) meta.appendChild(el('span', 'branch-when', when));
   if (meta.childNodes.length) body.appendChild(meta);
   item.appendChild(body);
@@ -300,12 +323,14 @@ function branchRow({ remote: b, localWt, local, host, project, reviewKind, local
     go.setAttribute('aria-label', go.title);
     go.insertAdjacentHTML('beforeend', ICONS.external);
     actions.appendChild(go);
-  } else if (b.web_url) {
+  } else if (nameHref) {
     const go = el('a', 'branch-goto');
-    go.href = b.web_url;
+    go.href = nameHref;
     go.target = '_blank';
     go.rel = 'noopener';
-    go.title = b.open_review ? `Open ${reviewKind}` : 'Open branch';
+    go.title = localWt?.merged_url
+      ? `Open merged ${reviewKind}`
+      : (b.open_review ? `Open ${reviewKind}` : 'Open branch');
     go.setAttribute('aria-label', go.title);
     go.insertAdjacentHTML('beforeend', ICONS.external);
     actions.appendChild(go);
@@ -323,6 +348,26 @@ function branchRow({ remote: b, localWt, local, host, project, reviewKind, local
 
   item.appendChild(actions);
   return item;
+}
+
+function shellQuote(value) {
+  const s = String(value || '');
+  if (/^[A-Za-z0-9_./:@+-]+$/.test(s)) return s;
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// Primary checkout: switch off the branch then delete it.
+// Linked worktree: remove the worktree path.
+function pruneCommand(branchName, localWt, local) {
+  const branch = shellQuote(branchName);
+  if (localWt?.main) {
+    const def = shellQuote(local?.default_branch || 'main');
+    return `git switch ${def} && git branch -d ${branch}`;
+  }
+  if (localWt?.path) {
+    return `git worktree remove ${shellQuote(localWt.path)}`;
+  }
+  return `git branch -d ${branch}`;
 }
 
 function renderTooling(tool) {
@@ -423,13 +468,14 @@ function schedulePoll() {
   }, pollSeconds * 1000);
 }
 
-async function loadDashboard({ quiet = false } = {}) {
+async function loadDashboard({ quiet = false, fresh = false } = {}) {
   if (loading) return;
   loading = true;
   const status = document.getElementById('status');
-  if (!quiet) status.textContent = 'Loading…';
+  if (!quiet) status.textContent = fresh ? 'Force refreshing…' : 'Loading…';
   try {
-    const res = await fetch('/api/dashboard', { cache: 'no-store' });
+    const url = fresh ? '/api/dashboard?fresh=1' : '/api/dashboard';
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (typeof data.poll_interval_seconds === 'number') {
@@ -523,6 +569,7 @@ async function runTriage(project, job, runID) {
 }
 
 document.getElementById('refresh').addEventListener('click', () => { void loadDashboard(); });
+document.getElementById('force-refresh').addEventListener('click', () => { void loadDashboard({ fresh: true }); });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void loadDashboard({ quiet: true });
 });

@@ -115,11 +115,14 @@ func runServe(args []string) error {
 		Addr:        *addr,
 		Projects:    doc.Projects,
 		Local:       doc.Local,
+		Upstream:    doc.Upstream,
 		Dash:        dash,
 		Triage:      triage.New(doc.EffectiveLLM()),
 		PollSeconds: doc.EffectivePollSeconds(),
 	})
-	log.Printf("gitboard: %s (%d projects, config %s, poll %ds)", *addr, len(doc.Projects), path, doc.EffectivePollSeconds())
+	log.Printf("gitboard: %s (%d projects, config %s, poll %ds, heads cache %ds, merged cache %ds)",
+		*addr, len(doc.Projects), path, doc.EffectivePollSeconds(),
+		doc.EffectiveHeadsSeconds(), doc.EffectiveMergedSeconds())
 	log.Printf("gitboard: uses gh and glab; local roots=%d; AI triage via llm in config", len(doc.Local.Roots))
 	return http.ListenAndServe(*addr, handler)
 }

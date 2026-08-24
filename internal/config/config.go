@@ -64,10 +64,20 @@ type UI struct {
 	PollSeconds *int `yaml:"poll_seconds"`
 }
 
+// Upstream holds server-side TTL seconds for forge CLI slices.
+// Explicit 0 disables caching for that slice (always refetch).
+type Upstream struct {
+	// HeadsSeconds caches remote branch list + default branch. nil → 120.
+	HeadsSeconds *int `yaml:"heads_seconds"`
+	// MergedSeconds caches merged PR/MR lists for prune hints. nil → 600.
+	MergedSeconds *int `yaml:"merged_seconds"`
+}
+
 // File is the full user config on disk.
 type File struct {
 	LLM      LLM         `yaml:"llm"`
 	UI       UI          `yaml:"ui"`
+	Upstream Upstream    `yaml:"upstream"`
 	Local    Local       `yaml:"local"`
 	Sync     SyncSources `yaml:"sync"`
 	Projects []Project   `yaml:"projects"`
@@ -81,6 +91,11 @@ const DefaultExample = `llm:
 
 ui:
   poll_seconds: 30
+
+# Server-side forge cache TTLs (0 = always refetch that slice).
+upstream:
+  heads_seconds: 120
+  merged_seconds: 600
 
 # Optional: scan these trees for local checkouts (incl. git worktrees).
 # Match is via origin remote → project host/path. Override per project with local_path.
@@ -100,6 +115,12 @@ projects: []
 
 // DefaultPollSeconds is used when ui.poll_seconds is unset (zero means use default on load).
 const DefaultPollSeconds = 30
+
+// DefaultHeadsSeconds caches remote heads when upstream.heads_seconds is omitted.
+const DefaultHeadsSeconds = 120
+
+// DefaultMergedSeconds caches merged reviews when upstream.merged_seconds is omitted.
+const DefaultMergedSeconds = 600
 
 // Dir returns ~/.config/gitboard (or $XDG_CONFIG_HOME/gitboard).
 func Dir() string {
@@ -322,6 +343,30 @@ func (f File) EffectivePollSeconds() int {
 		return DefaultPollSeconds
 	}
 	return *f.UI.PollSeconds
+}
+
+// EffectiveHeadsSeconds returns the remote-heads cache TTL in seconds.
+// Explicit 0 disables caching. Negative values fall back to the default.
+func (f File) EffectiveHeadsSeconds() int {
+	if f.Upstream.HeadsSeconds == nil {
+		return DefaultHeadsSeconds
+	}
+	if *f.Upstream.HeadsSeconds < 0 {
+		return DefaultHeadsSeconds
+	}
+	return *f.Upstream.HeadsSeconds
+}
+
+// EffectiveMergedSeconds returns the merged PR/MR cache TTL in seconds.
+// Explicit 0 disables caching. Negative values fall back to the default.
+func (f File) EffectiveMergedSeconds() int {
+	if f.Upstream.MergedSeconds == nil {
+		return DefaultMergedSeconds
+	}
+	if *f.Upstream.MergedSeconds < 0 {
+		return DefaultMergedSeconds
+	}
+	return *f.Upstream.MergedSeconds
 }
 
 func firstNonEmpty(values ...string) string {

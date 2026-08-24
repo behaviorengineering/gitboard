@@ -33,7 +33,7 @@ func (g *GitLab) AuthStatus(ctx context.Context) (bool, bool, string) {
 	return true, true, ""
 }
 
-func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectSummary, error) {
+func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (ProjectSummary, error) {
 	summary := baseSummary(p)
 	installed, authed, detail := g.AuthStatus(ctx)
 	if !installed {
@@ -45,43 +45,90 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 		return summary, nil
 	}
 	repo := p.Path
+	key := cacheKey(string(p.Host), repo)
 	branches := newBranchAccum()
 
+	heads, err := opts.Cache.GetOrLoadHeads(key, opts.HeadsTTL, opts.Fresh, func() (HeadsSnapshot, error) {
+		return g.loadHeads(ctx, repo)
+	})
+	if err != nil {
+		if summary.Error == "" {
+			summary.Error = err.Error()
+		}
+	} else {
+		if heads.DefaultBranch != "" {
+			branches.setDefault(heads.DefaultBranch)
+		}
+		names := make([]string, 0, len(heads.Heads))
+		for _, h := range heads.Heads {
+			branches.addRemote(h.Name, h.UpdatedAt, h.WebURL)
+			if n := trimBranch(h.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+		summary.RemoteNames = names
+	}
+
+	if err := g.loadCI(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
+		summary.Error = err.Error()
+	}
+	if err := g.loadOpenReviews(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
+		summary.Error = err.Error()
+	}
+
+	merged, mergedOK := opts.Cache.GetOrLoadMerged(key, opts.MergedTTL, opts.Fresh, func() ([]MergedReview, error) {
+		return g.loadMerged(ctx, repo)
+	})
+	summary.Merged = merged
+	summary.MergedOK = mergedOK
+	summary.Branches = branches.list()
+	return summary, nil
+}
+
+func (g *GitLab) loadHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
+	var snap HeadsSnapshot
 	encoded := strings.ReplaceAll(repo, "/", "%2F")
 	if raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"?simple=true"); err == nil {
 		var meta struct {
 			DefaultBranch string `json:"default_branch"`
 		}
 		if json.Unmarshal(raw, &meta) == nil {
-			branches.setDefault(meta.DefaultBranch)
+			snap.DefaultBranch = meta.DefaultBranch
 		}
 	}
-
-	if raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"/repository/branches?per_page=100"); err == nil {
-		var heads []struct {
-			Name   string `json:"name"`
-			WebURL string `json:"web_url"`
-			Commit struct {
-				CommittedDate string `json:"committed_date"`
-				AuthoredDate  string `json:"authored_date"`
-			} `json:"commit"`
-		}
-		if json.Unmarshal(raw, &heads) == nil {
-			for _, h := range heads {
-				updated := firstNonEmpty(h.Commit.CommittedDate, h.Commit.AuthoredDate)
-				branches.addRemote(h.Name, updated, h.WebURL)
-			}
-		}
+	raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"/repository/branches?per_page=100")
+	if err != nil {
+		return snap, err
 	}
+	var heads []struct {
+		Name   string `json:"name"`
+		WebURL string `json:"web_url"`
+		Commit struct {
+			CommittedDate string `json:"committed_date"`
+			AuthoredDate  string `json:"authored_date"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(raw, &heads); err != nil {
+		return snap, err
+	}
+	for _, h := range heads {
+		snap.Heads = append(snap.Heads, RemoteHead{
+			Name:      h.Name,
+			UpdatedAt: firstNonEmpty(h.Commit.CommittedDate, h.Commit.AuthoredDate),
+			WebURL:    h.WebURL,
+		})
+	}
+	return snap, nil
+}
 
+func (g *GitLab) loadCI(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
 	raw, err := g.Run.RunJSON(ctx, "glab", "ci", "list",
 		"-R", repo,
 		"-P", "20",
 		"--output", "json",
 	)
 	if err != nil {
-		summary.Error = err.Error()
-		return summary, nil
+		return err
 	}
 	var pipelines []struct {
 		ID        int    `json:"id"`
@@ -92,8 +139,7 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 		UpdatedAt string `json:"updated_at"`
 	}
 	if err := json.Unmarshal(raw, &pipelines); err != nil {
-		summary.Error = err.Error()
-		return summary, nil
+		return err
 	}
 	for i, pl := range pipelines {
 		branches.setCI(pl.Ref, pl.Status, pl.WebURL, pl.UpdatedAt, fmt.Sprintf("%d", pl.ID))
@@ -108,17 +154,16 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 			}
 		}
 	}
+	return nil
+}
 
+func (g *GitLab) loadOpenReviews(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
 	mrRaw, err := g.Run.RunJSON(ctx, "glab", "mr", "list",
 		"-R", repo,
 		"--output", "json",
 	)
 	if err != nil {
-		if summary.Error == "" {
-			summary.Error = err.Error()
-		}
-		summary.Branches = branches.list()
-		return summary, nil
+		return err
 	}
 	var mrs []struct {
 		IID          int    `json:"iid"`
@@ -131,11 +176,7 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 		WorkInProg   bool   `json:"work_in_progress"`
 	}
 	if err := json.Unmarshal(mrRaw, &mrs); err != nil {
-		if summary.Error == "" {
-			summary.Error = err.Error()
-		}
-		summary.Branches = branches.list()
-		return summary, nil
+		return err
 	}
 	summary.OpenItems.MergeRequests = len(mrs)
 	for _, mr := range mrs {
@@ -147,8 +188,42 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 			Draft:     mr.Draft || mr.WorkInProg,
 		})
 	}
-	summary.Branches = branches.list()
-	return summary, nil
+	return nil
+}
+
+func (g *GitLab) loadMerged(ctx context.Context, repo string) ([]MergedReview, error) {
+	raw, err := g.Run.RunJSON(ctx, "glab", "mr", "list",
+		"-R", repo,
+		"--merged",
+		"--per-page", "50",
+		"--output", "json",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var mrs []struct {
+		IID          int    `json:"iid"`
+		SourceBranch string `json:"source_branch"`
+		WebURL       string `json:"web_url"`
+		MergedAt     string `json:"merged_at"`
+	}
+	if err := json.Unmarshal(raw, &mrs); err != nil {
+		return nil, err
+	}
+	out := make([]MergedReview, 0, len(mrs))
+	for _, mr := range mrs {
+		name := trimBranch(mr.SourceBranch)
+		if name == "" {
+			continue
+		}
+		out = append(out, MergedReview{
+			Branch:   name,
+			ID:       mr.IID,
+			URL:      mr.WebURL,
+			MergedAt: mr.MergedAt,
+		})
+	}
+	return out, nil
 }
 
 func (g *GitLab) FailedJobs(ctx context.Context, p config.Project, pipelineID string) ([]FailedJob, error) {

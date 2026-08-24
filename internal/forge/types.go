@@ -39,19 +39,39 @@ type BranchRef struct {
 	WebURL     string `json:"web_url,omitempty"`
 }
 
+// MergedReview is a recently merged PR/MR keyed by source branch name.
+type MergedReview struct {
+	Branch   string `json:"branch"`
+	ID       int    `json:"id,omitempty"`
+	URL      string `json:"url,omitempty"`
+	MergedAt string `json:"merged_at,omitempty"`
+}
+
+// Prune hint values for local worktrees whose remote head is gone.
+const (
+	PruneSafe   = "safe"   // forge reports a merged PR/MR for this branch
+	PruneLikely = "likely" // remote gone, no open review, not dirty
+)
+
 // ProjectSummary is one row in the dashboard.
 type ProjectSummary struct {
-	ID        string       `json:"id"`
-	Label     string       `json:"label"`
-	Host      string       `json:"host"`
-	Path      string       `json:"path,omitempty"`
-	Org       string       `json:"org,omitempty"`
-	OpenURL   string       `json:"open_url"`
-	CI        *CIStatus    `json:"ci,omitempty"`
-	Branches  []BranchRef  `json:"branches,omitempty"`
-	OpenItems OpenItems    `json:"open_items"`
-	Local     *LocalStatus `json:"local,omitempty"`
-	Error     string       `json:"error,omitempty"`
+	ID        string         `json:"id"`
+	Label     string         `json:"label"`
+	Host      string         `json:"host"`
+	Path      string         `json:"path,omitempty"`
+	Org       string         `json:"org,omitempty"`
+	OpenURL   string         `json:"open_url"`
+	CI        *CIStatus      `json:"ci,omitempty"`
+	Branches  []BranchRef    `json:"branches,omitempty"`
+	Merged    []MergedReview `json:"merged,omitempty"`
+	OpenItems OpenItems      `json:"open_items"`
+	Local     *LocalStatus   `json:"local,omitempty"`
+	Error     string         `json:"error,omitempty"`
+
+	// RemoteNames is the uncapped remote head set for prune matching (not sent to UI).
+	RemoteNames []string `json:"-"`
+	// MergedOK is true when the merged slice was loaded successfully (live or cache).
+	MergedOK bool `json:"-"`
 }
 
 // LocalStatus is checkout / worktree health on disk.
@@ -73,15 +93,19 @@ type LocalStatus struct {
 
 // LocalWorktree is one git worktree for a mapped project.
 type LocalWorktree struct {
-	Path     string `json:"path"`
-	Branch   string `json:"branch,omitempty"`
-	Detached bool   `json:"detached,omitempty"`
-	Bare     bool   `json:"bare,omitempty"`
-	Main     bool   `json:"main,omitempty"`
-	Dirty    bool   `json:"dirty,omitempty"`
-	Ahead    int    `json:"ahead,omitempty"`
-	Behind   int    `json:"behind,omitempty"`
-	Upstream string `json:"upstream,omitempty"`
+	Path      string `json:"path"`
+	Branch    string `json:"branch,omitempty"`
+	Detached  bool   `json:"detached,omitempty"`
+	Bare      bool   `json:"bare,omitempty"`
+	Main      bool   `json:"main,omitempty"`
+	Dirty     bool   `json:"dirty,omitempty"`
+	Ahead     int    `json:"ahead,omitempty"`
+	Behind    int    `json:"behind,omitempty"`
+	Upstream  string `json:"upstream,omitempty"`
+	PruneHint string `json:"prune_hint,omitempty"` // safe | likely
+	MergedID  int    `json:"merged_id,omitempty"`
+	MergedURL string `json:"merged_url,omitempty"`
+	MergedAt  string `json:"merged_at,omitempty"`
 }
 
 // FailedJob is a failed CI job suitable for triage.
@@ -125,7 +149,7 @@ type RepoRef struct {
 // Client summarizes one forge via its official CLI.
 type Client interface {
 	AuthStatus(ctx context.Context) (installed, authed bool, detail string)
-	ProjectSummary(ctx context.Context, p config.Project) (ProjectSummary, error)
+	ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (ProjectSummary, error)
 	FailedJobs(ctx context.Context, p config.Project, runID string) ([]FailedJob, error)
 	JobLog(ctx context.Context, p config.Project, runID, jobID string) (string, error)
 }

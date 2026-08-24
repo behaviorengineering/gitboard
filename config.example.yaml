@@ -13,6 +13,11 @@ llm:
 ui:
   poll_seconds: 30
 
+# Server-side forge cache TTLs (0 = always refetch that slice).
+upstream:
+  heads_seconds: 120
+  merged_seconds: 600
+
 # Optional: scan these trees for local checkouts (incl. git worktrees).
 # Match is via origin remote → project host/path. Override per project with local_path.
 local:

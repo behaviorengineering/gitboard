@@ -1,0 +1,129 @@
+package forge
+
+import "testing"
+
+func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
+	summary := &ProjectSummary{
+		RemoteNames: []string{"main", "feat/open", "feat/still-remote"},
+		Branches: []BranchRef{
+			{Name: "main", Default: true},
+			{Name: "feat/open", OpenReview: true},
+		},
+		Merged: []MergedReview{
+			{Branch: "feat/merged", ID: 42, URL: "https://example/pr/42", MergedAt: "2026-08-20T10:00:00Z"},
+			{Branch: "feat/merged", ID: 41, URL: "https://example/pr/41", MergedAt: "2026-08-10T10:00:00Z"},
+		},
+		MergedOK: true,
+		Local: &LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []LocalWorktree{
+				{Path: "/repo", Branch: "main", Main: true},
+				{Path: "/repo-merged", Branch: "feat/merged"},
+				{Path: "/repo-likely", Branch: "feat/gone"},
+				{Path: "/repo-dirty", Branch: "feat/dirty", Dirty: true},
+				{Path: "/repo-remote", Branch: "feat/still-remote"},
+				{Path: "/repo-open", Branch: "feat/open"},
+			},
+		},
+	}
+
+	EnrichPruneHints(summary)
+
+	byBranch := map[string]LocalWorktree{}
+	for _, wt := range summary.Local.Worktrees {
+		byBranch[wt.Branch] = wt
+	}
+
+	if got := byBranch["feat/merged"]; got.PruneHint != PruneSafe || got.MergedID != 42 {
+		t.Fatalf("merged: %+v", got)
+	}
+	if got := byBranch["feat/gone"]; got.PruneHint != PruneLikely {
+		t.Fatalf("likely: %+v", got)
+	}
+	for _, name := range []string{"main", "feat/dirty", "feat/still-remote", "feat/open"} {
+		if got := byBranch[name]; got.PruneHint != "" {
+			t.Fatalf("%s should have no prune hint: %+v", name, got)
+		}
+	}
+}
+
+func TestEnrichPruneHintsUsesFullRemoteNames(t *testing.T) {
+	// Truncated Branches list omits feat/hidden-remote, but RemoteNames has it.
+	summary := &ProjectSummary{
+		RemoteNames: []string{"main", "feat/hidden-remote"},
+		Branches: []BranchRef{
+			{Name: "main", Default: true},
+		},
+		MergedOK: true,
+		Local: &LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []LocalWorktree{
+				{Path: "/wt", Branch: "feat/hidden-remote"},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != "" {
+		t.Fatalf("should not prune live remote outside UI list, got %q", got)
+	}
+}
+
+func TestEnrichPruneHintsMergedNotOKSuppressesLikely(t *testing.T) {
+	summary := &ProjectSummary{
+		RemoteNames: []string{"main"},
+		MergedOK:    false,
+		Local: &LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []LocalWorktree{
+				{Path: "/wt", Branch: "feat/gone"},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != "" {
+		t.Fatalf("likely suppressed when mergedOK=false, got %q", got)
+	}
+}
+
+func TestEnrichPruneHintsPrimaryCheckout(t *testing.T) {
+	summary := &ProjectSummary{
+		RemoteNames: []string{"main"},
+		Branches: []BranchRef{
+			{Name: "main", Default: true},
+		},
+		Merged: []MergedReview{
+			{Branch: "feat/primary-merged", ID: 7, URL: "https://example/pr/7", MergedAt: "2026-08-24T01:00:00Z"},
+		},
+		MergedOK: true,
+		Local: &LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []LocalWorktree{
+				{Path: "/repo", Branch: "feat/primary-merged", Main: true},
+				{Path: "/repo-gone", Branch: "feat/primary-gone", Main: true},
+			},
+		},
+	}
+
+	EnrichPruneHints(summary)
+
+	byBranch := map[string]LocalWorktree{}
+	for _, wt := range summary.Local.Worktrees {
+		byBranch[wt.Branch] = wt
+	}
+
+	if got := byBranch["feat/primary-merged"]; got.PruneHint != PruneSafe || got.MergedID != 7 {
+		t.Fatalf("primary checkout merged: %+v", got)
+	}
+	if got := byBranch["feat/primary-gone"]; got.PruneHint != PruneLikely {
+		t.Fatalf("primary checkout likely: %+v", got)
+	}
+}
+
+func TestEnrichPruneHintsNilSafe(t *testing.T) {
+	EnrichPruneHints(nil)
+	EnrichPruneHints(&ProjectSummary{})
+}

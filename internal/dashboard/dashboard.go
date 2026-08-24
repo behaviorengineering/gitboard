@@ -16,15 +16,17 @@ type Service struct {
 	GitHub *forge.GitHub
 	GitLab *forge.GitLab
 	Local  *localgit.Inspector
+	Cache  *forge.TTLCache
 }
 
-// New returns a dashboard service.
+// New returns a dashboard service with an in-memory upstream cache.
 func New(gh *forge.GitHub, gl *forge.GitLab, local *localgit.Inspector) *Service {
-	return &Service{GitHub: gh, GitLab: gl, Local: local}
+	return &Service{GitHub: gh, GitLab: gl, Local: local, Cache: forge.NewTTLCache()}
 }
 
 // Collect builds the dashboard for all configured projects.
-func (s *Service) Collect(ctx context.Context, doc config.File) forge.Dashboard {
+// When fresh is true, upstream TTL caches are bypassed for this request.
+func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forge.Dashboard {
 	projects := doc.Projects
 	out := forge.Dashboard{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
@@ -47,14 +49,22 @@ func (s *Service) Collect(ctx context.Context, doc config.File) forge.Dashboard 
 		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
 	}
 
+	opts := forge.SummaryOpts{
+		Fresh:     fresh,
+		Cache:     s.Cache,
+		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
+		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
+	}
+
 	rows := make([]forge.ProjectSummary, len(projects))
 	var wg sync.WaitGroup
 	for i, p := range projects {
 		wg.Add(1)
 		go func(i int, p config.Project) {
 			defer wg.Done()
-			row := s.summarize(ctx, p)
+			row := s.summarize(ctx, p, opts)
 			row.Local = s.attachLocal(ctx, p, disc)
+			forge.EnrichPruneHints(&row)
 			rows[i] = row
 		}(i, p)
 	}
@@ -113,7 +123,7 @@ func toForgeLocal(st localgit.Status) *forge.LocalStatus {
 	return out
 }
 
-func (s *Service) summarize(ctx context.Context, p config.Project) forge.ProjectSummary {
+func (s *Service) summarize(ctx context.Context, p config.Project, opts forge.SummaryOpts) forge.ProjectSummary {
 	switch p.Host {
 	case config.HostGitHub:
 		if s.GitHub == nil {
@@ -122,7 +132,7 @@ func (s *Service) summarize(ctx context.Context, p config.Project) forge.Project
 				OpenURL: p.OpenURL(), Error: "github client missing",
 			}
 		}
-		row, _ := s.GitHub.ProjectSummary(ctx, p)
+		row, _ := s.GitHub.ProjectSummary(ctx, p, opts)
 		return row
 	default:
 		if s.GitLab == nil {
@@ -131,7 +141,7 @@ func (s *Service) summarize(ctx context.Context, p config.Project) forge.Project
 				OpenURL: p.OpenURL(), Error: "gitlab client missing",
 			}
 		}
-		row, _ := s.GitLab.ProjectSummary(ctx, p)
+		row, _ := s.GitLab.ProjectSummary(ctx, p, opts)
 		return row
 	}
 }

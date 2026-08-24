@@ -91,7 +91,6 @@ func (in *Inspector) InspectPath(ctx context.Context, path string) Status {
 		}
 		detail, detailErr := in.inspectWorktree(ctx, trees[i].Path, trees[i].Main)
 		if detailErr != nil {
-			trees[i].Branch = trees[i].Branch
 			continue
 		}
 		detail.Main = trees[i].Main

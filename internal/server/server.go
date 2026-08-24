@@ -22,6 +22,7 @@ type Options struct {
 	Addr        string
 	Projects    []config.Project
 	Local       config.Local
+	Upstream    config.Upstream
 	Dash        *dashboard.Service
 	Triage      *triage.Analyzer
 	PollSeconds int
@@ -53,9 +54,15 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		fresh := r.URL.Query().Get("fresh") == "1" || strings.EqualFold(r.URL.Query().Get("fresh"), "true")
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		payload := opts.Dash.Collect(ctx, config.File{Projects: opts.Projects, Local: opts.Local})
+		doc := config.File{
+			Projects: opts.Projects,
+			Local:    opts.Local,
+			Upstream: opts.Upstream,
+		}
+		payload := opts.Dash.Collect(ctx, doc, fresh)
 		payload.PollIntervalSeconds = opts.PollSeconds
 		writeJSON(w, payload)
 	})
