@@ -183,14 +183,15 @@ function localColumn(wts, local, branchName) {
   for (const wt of list) {
     const label = wt.appearance_label || wt.appearance_path || wt.path || 'local checkout';
     const isPrimary = primaryPath && wt.appearance_path === primaryPath;
-    marks.appendChild(iconMark(
-      ICONS.laptop,
-      isPrimary || wt.main ? 'mark--default' : 'mark--muted',
-      label,
-    ));
+    let cls = 'mark--muted';
+    let title = label;
     if (wt.dirty) {
-      marks.appendChild(iconMark(ICONS.alert, 'mark--bad', `dirty: ${label}`));
+      cls = 'mark--warn';
+      title = `dirty: ${label}`;
+    } else if (isPrimary || wt.main) {
+      cls = 'mark--default';
     }
+    marks.appendChild(iconMark(ICONS.laptop, cls, title));
   }
   const preferred = pickLocalWorktree(list, local);
   if (preferred?.path) {
@@ -319,6 +320,18 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
       ? `Remote head gone · check then: ${pruneCmd}`
       : 'Remote head gone';
     meta.appendChild(chip);
+    const inv = el('button', 'branch-investigate', 'Investigate');
+    inv.type = 'button';
+    inv.title = 'Gather evidence into an agent session';
+    inv.addEventListener('click', () => {
+      void investigatePrune({
+        project_id: project.id,
+        branch: b.name,
+        worktree_path: localWt?.path || local?.path || '',
+        default_branch: local?.default_branch || 'main',
+      }, inv);
+    });
+    meta.appendChild(inv);
   }
   if (b.open_review) {
     meta.appendChild(el('span', 'branch-chip branch-chip--review', b.review_id ? `${reviewKind} #${b.review_id}` : reviewKind));
@@ -362,14 +375,6 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
     actions.appendChild(el('span', 'branch-ci-slot'));
   }
 
-  if (failed && b.run_id) {
-    const btn = el('button', 'branch-inspect', 'Inspect');
-    btn.type = 'button';
-    btn.title = 'Inspect failed jobs';
-    btn.addEventListener('click', () => showFailures(project, b));
-    actions.appendChild(btn);
-  }
-
   item.appendChild(actions);
   return item;
 }
@@ -404,7 +409,9 @@ function appearanceStatusMarks(app) {
     const br = el('span', 'appearance-branch', app.detached ? `detached ${app.branch}` : app.branch);
     marks.appendChild(br);
   }
-  if (app.dirty) marks.appendChild(iconMark(ICONS.alert, 'mark--bad', 'dirty working tree'));
+  if (app.dirty) {
+    marks.appendChild(iconMark(ICONS.laptop, 'mark--warn', 'dirty working tree'));
+  }
   const sync = [];
   if (app.ahead) sync.push(`↑${app.ahead}`);
   if (app.behind) sync.push(`↓${app.behind}`);
@@ -717,17 +724,6 @@ function renderRows(projects) {
     }
     tr.appendChild(titleCell);
     tr.appendChild(branchesCell(row.branches, row.host, row));
-
-    const actions = el('td', 'actions-cell');
-    const failedBranch = (row.branches || []).find((b) =>
-      ['failed', 'failure', 'error'].includes(String(b.ci_status || '').toLowerCase()) && b.run_id);
-    if (failedBranch) {
-      const btn = el('button', '', 'Inspect');
-      btn.type = 'button';
-      btn.addEventListener('click', () => showFailures(row, failedBranch));
-      actions.appendChild(btn);
-    }
-    tr.appendChild(actions);
     tbody.appendChild(tr);
   }
 }
@@ -784,6 +780,47 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
     status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
     loading = false;
+  }
+}
+
+async function investigatePrune(body, btn) {
+  const detail = document.getElementById('detail');
+  const jobsRoot = document.getElementById('jobs');
+  const triage = document.getElementById('triage');
+  detail.hidden = false;
+  triage.hidden = false;
+  document.getElementById('detail-title').textContent = `${body.project_id} / ${body.branch}: investigate`;
+  jobsRoot.innerHTML = '';
+  triage.textContent = 'Investigating…';
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/agents/prune/investigate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      triage.textContent = text;
+      return;
+    }
+    const data = JSON.parse(text);
+    const card = data.card || {};
+    const ev = data.evidence || {};
+    const lines = [
+      `Verdict: ${card.verdict || '?'}`,
+      card.summary && `Summary: ${card.summary}`,
+      card.bullets?.length && `Evidence:\n${card.bullets.map((b) => `• ${b}`).join('\n')}`,
+      card.command && `Proposed: ${card.command}`,
+      data.session_id && `Session: ${data.session_id}`,
+      ev.unique_commit_count != null && `Unique commits: ${ev.unique_commit_count}`,
+      ev.unique_file_count != null && `Unique files: ${ev.unique_file_count}`,
+    ].filter(Boolean);
+    triage.textContent = lines.join('\n\n');
+  } catch (err) {
+    triage.textContent = err instanceof Error ? err.message : String(err);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

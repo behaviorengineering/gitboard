@@ -17,6 +17,8 @@ import (
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
+	"github.com/behaviorengineering/gitboard/internal/observability"
+	"github.com/behaviorengineering/gitboard/internal/pruneagent"
 	"github.com/behaviorengineering/gitboard/internal/server"
 	"github.com/behaviorengineering/gitboard/internal/syncproj"
 	"github.com/behaviorengineering/gitboard/internal/triage"
@@ -108,9 +110,34 @@ func runServe(args []string) error {
 	if err != nil {
 		return fmt.Errorf("%w\nrun: gitboard init && gitboard sync", err)
 	}
+	oi := doc.EffectiveOpenInference()
+	var dumpDir string
+	if oi.Enabled != nil && *oi.Enabled && oi.FailureDump.Enabled != nil && *oi.FailureDump.Enabled {
+		dumpDir = oi.FailureDump.Dir
+	}
+	tp, err := observability.Init(observability.InitConfig{
+		ServiceName:            oi.ServiceName,
+		OTLPEndpoint:           oi.Endpoint,
+		FailureDumpDir:         dumpDir,
+		FailureDumpMaxAgeHours: oi.FailureDump.MaxAgeHours,
+		FailureDumpMaxFiles:    oi.FailureDump.MaxFiles,
+	})
+	if err != nil {
+		return fmt.Errorf("observability: %w", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = observability.Shutdown(ctx, tp)
+	}()
+
 	run := cliexec.New()
 	local := localgit.NewInspector(run)
 	dash := dashboard.New(forge.NewGitHub(run), forge.NewGitLab(run), local)
+	prune, err := pruneagent.New(config.AgentsDir(), run)
+	if err != nil {
+		return fmt.Errorf("prune agent: %w", err)
+	}
 	handler := server.NewMux(server.Options{
 		Addr:        *addr,
 		Projects:    doc.Projects,
@@ -118,12 +145,14 @@ func runServe(args []string) error {
 		Upstream:    doc.Upstream,
 		Dash:        dash,
 		Triage:      triage.New(doc.EffectiveLLM()),
+		Prune:       prune,
 		PollSeconds: doc.EffectivePollSeconds(),
 	})
 	log.Printf("gitboard: %s (%d projects, config %s, poll %ds, heads cache %ds, merged cache %ds)",
 		*addr, len(doc.Projects), path, doc.EffectivePollSeconds(),
 		doc.EffectiveHeadsSeconds(), doc.EffectiveMergedSeconds())
-	log.Printf("gitboard: uses gh and glab; local roots=%d; AI triage via llm in config", len(doc.Local.Roots))
+	log.Printf("gitboard: uses gh and glab; local roots=%d; AI triage via llm in config; agents %s",
+		len(doc.Local.Roots), config.AgentsDir())
 	return http.ListenAndServe(*addr, handler)
 }
 

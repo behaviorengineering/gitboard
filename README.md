@@ -83,3 +83,6 @@ The Local status sits beside each remote branch (laptop icon when checked out lo
 | `GET` | `/api/dashboard` | Aggregated rows |
 | `GET` | `/api/failures?project=&run_id=` | Failed jobs |
 | `POST` | `/api/triage` | AI log analysis |
+| `POST` | `/api/agents/prune/investigate` | Likely-removable branch evidence + session card |
+| `GET` | `/api/agents/sessions/:id` | Session meta, card, turns |
+| `GET` | `/api/agents/sessions/:id/failure` | Failure dump attachment when present |

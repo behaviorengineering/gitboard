@@ -41,6 +41,22 @@ type LLM struct {
 	APIKey  string `yaml:"api_key"`
 }
 
+// FailureDump holds error-only inference dump settings.
+type FailureDump struct {
+	Enabled     *bool  `yaml:"enabled"`
+	Dir         string `yaml:"dir"`
+	MaxAgeHours int    `yaml:"max_age_hours"`
+	MaxFiles    int    `yaml:"max_files"`
+}
+
+// OpenInference holds OTEL / dump settings for agent and LLM work.
+type OpenInference struct {
+	Enabled     *bool       `yaml:"enabled"`
+	Endpoint    string      `yaml:"endpoint"`
+	ServiceName string      `yaml:"service_name"`
+	FailureDump FailureDump `yaml:"failure_dump"`
+}
+
 // GitHubSync lists GitHub orgs to discover.
 type GitHubSync struct {
 	Orgs []string `yaml:"orgs"`
@@ -75,12 +91,13 @@ type Upstream struct {
 
 // File is the full user config on disk.
 type File struct {
-	LLM      LLM         `yaml:"llm"`
-	UI       UI          `yaml:"ui"`
-	Upstream Upstream    `yaml:"upstream"`
-	Local    Local       `yaml:"local"`
-	Sync     SyncSources `yaml:"sync"`
-	Projects []Project   `yaml:"projects"`
+	LLM           LLM           `yaml:"llm"`
+	OpenInference OpenInference `yaml:"openinference"`
+	UI            UI            `yaml:"ui"`
+	Upstream      Upstream      `yaml:"upstream"`
+	Local         Local         `yaml:"local"`
+	Sync          SyncSources   `yaml:"sync"`
+	Projects      []Project     `yaml:"projects"`
 }
 
 // DefaultExample is the template written by init.
@@ -88,6 +105,17 @@ const DefaultExample = `llm:
   base_url: http://127.0.0.1:1320/v1
   model: cf_local/@cf/zai-org/glm-4.7-flash
   api_key: ""
+
+# OpenInference tracing + error-only dumps for agent/LLM work.
+openinference:
+  enabled: true
+  endpoint: ""
+  service_name: gitboard
+  failure_dump:
+    enabled: true
+    dir: ""
+    max_age_hours: 48
+    max_files: 20
 
 ui:
   poll_seconds: 30
@@ -367,6 +395,51 @@ func (f File) EffectiveMergedSeconds() int {
 		return DefaultMergedSeconds
 	}
 	return *f.Upstream.MergedSeconds
+}
+
+// AgentsDir is where agentsession stores sessions (<config Dir>/agents).
+func AgentsDir() string {
+	return filepath.Join(Dir(), "agents")
+}
+
+// EffectiveOpenInference merges file settings with env for tracing dumps.
+func (f File) EffectiveOpenInference() OpenInference {
+	enabled := true
+	if f.OpenInference.Enabled != nil {
+		enabled = *f.OpenInference.Enabled
+	}
+	if v := strings.TrimSpace(os.Getenv("GITBOARD_OPENINFERENCE_ENABLED")); v != "" {
+		enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	dumpEnabled := true
+	if f.OpenInference.FailureDump.Enabled != nil {
+		dumpEnabled = *f.OpenInference.FailureDump.Enabled
+	}
+	en := enabled
+	den := dumpEnabled
+	dir := strings.TrimSpace(f.OpenInference.FailureDump.Dir)
+	if dir == "" {
+		dir = filepath.Join(Dir(), "logs", "inference-failures")
+	}
+	maxAge := f.OpenInference.FailureDump.MaxAgeHours
+	if maxAge <= 0 {
+		maxAge = 48
+	}
+	maxFiles := f.OpenInference.FailureDump.MaxFiles
+	if maxFiles <= 0 {
+		maxFiles = 20
+	}
+	return OpenInference{
+		Enabled:     &en,
+		Endpoint:    firstNonEmpty(os.Getenv("GITBOARD_OPENINFERENCE_ENDPOINT"), f.OpenInference.Endpoint),
+		ServiceName: firstNonEmpty(f.OpenInference.ServiceName, "gitboard"),
+		FailureDump: FailureDump{
+			Enabled:     &den,
+			Dir:         dir,
+			MaxAgeHours: maxAge,
+			MaxFiles:    maxFiles,
+		},
+	}
 }
 
 func firstNonEmpty(values ...string) string {

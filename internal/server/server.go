@@ -6,12 +6,18 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
+	"github.com/behaviorengineering/gitboard/internal/pruneagent"
 	"github.com/behaviorengineering/gitboard/internal/triage"
+	"github.com/behaviorengineering/strop/agentsession"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 )
 
 //go:embed static/*
@@ -25,6 +31,7 @@ type Options struct {
 	Upstream    config.Upstream
 	Dash        *dashboard.Service
 	Triage      *triage.Analyzer
+	Prune       *pruneagent.Service
 	PollSeconds int
 }
 
@@ -130,6 +137,86 @@ func NewMux(opts Options) http.Handler {
 			return
 		}
 		writeJSON(w, resp)
+	})
+
+	mux.HandleFunc("/api/agents/prune/investigate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Prune == nil {
+			http.Error(w, "prune agent unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var body pruneagent.Request
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if _, ok := dashboard.FindProject(opts.Projects, body.ProjectID); body.ProjectID != "" && !ok {
+			http.Error(w, "unknown project", http.StatusBadRequest)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		tr := otel.Tracer("gitboard")
+		ctx, span := tr.Start(ctx, "agents.prune.investigate")
+		defer func() {
+			span.End()
+		}()
+		resp, err := opts.Prune.Investigate(ctx, body)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		span.SetStatus(codes.Ok, "")
+		writeJSON(w, resp)
+	})
+
+	mux.HandleFunc("/api/agents/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		if opts.Prune == nil || opts.Prune.Store == nil {
+			http.Error(w, "prune agent unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		rest := strings.TrimPrefix(r.URL.Path, "/api/agents/sessions/")
+		rest = strings.Trim(rest, "/")
+		parts := strings.Split(rest, "/")
+		if len(parts) == 0 || parts[0] == "" {
+			http.Error(w, "missing session id", http.StatusBadRequest)
+			return
+		}
+		id := parts[0]
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		if len(parts) == 2 && parts[1] == "failure" && r.Method == http.MethodGet {
+			dir, err := opts.Prune.Store.Dir(id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			path := filepath.Join(dir, agentsession.FileFailure)
+			http.ServeFile(w, r, path)
+			return
+		}
+		if r.Method != http.MethodGet || len(parts) != 1 {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		meta, err := opts.Prune.Store.Load(ctx, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		var card pruneagent.Card
+		_ = opts.Prune.Store.LoadJSON(ctx, id, agentsession.FileCard, &card)
+		turns, _ := opts.Prune.Store.ReadTurns(ctx, id)
+		writeJSON(w, map[string]any{
+			"meta":  meta,
+			"card":  card,
+			"turns": turns,
+		})
 	})
 
 	mux.Handle("/", fileServer)

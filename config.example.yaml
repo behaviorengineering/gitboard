@@ -10,6 +10,18 @@ llm:
   model: cf_local/@cf/zai-org/glm-4.7-flash
   api_key: ""
 
+# OpenInference tracing + error-only dumps (content-pipelines pattern).
+# Dumps land under ~/.config/gitboard/logs/inference-failures/ when enabled.
+openinference:
+  enabled: true
+  endpoint: ""
+  service_name: gitboard
+  failure_dump:
+    enabled: true
+    dir: ""
+    max_age_hours: 48
+    max_files: 20
+
 ui:
   poll_seconds: 30
 
