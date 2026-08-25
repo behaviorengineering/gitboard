@@ -3,7 +3,7 @@ module github.com/behaviorengineering/gitboard
 go 1.25.1
 
 require (
-	github.com/behaviorengineering/strop v0.1.3-0.20260825103054-53a0d74f17e1
+	github.com/behaviorengineering/strop v0.2.0
 	github.com/charmbracelet/huh v1.0.0
 	go.opentelemetry.io/otel v1.42.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.38.0
