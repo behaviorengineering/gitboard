@@ -46,8 +46,8 @@ func TestExpandPathHome(t *testing.T) {
 }
 
 func TestResolvePathPrefersLocalPath(t *testing.T) {
-	disc := localgit.Discovery{ByKey: map[string]string{
-		"github:acme/repo": "/scanned/repo",
+	disc := localgit.Discovery{ByKey: map[string][]localgit.Checkout{
+		"github:acme/repo": {{Path: "/scanned/repo", Role: localgit.RoleStandalone}},
 	}}
 	p, ok := localgit.ResolvePath("~/explicit", "github", "acme/repo", disc)
 	if !ok || p != "~/explicit" {

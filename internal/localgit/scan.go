@@ -7,18 +7,18 @@ import (
 	"strings"
 )
 
-// Discovery maps forge track keys to a representative checkout path.
+// Discovery maps forge track keys to all distinct on-disk checkouts.
 type Discovery struct {
-	// ByKey maps "github:owner/repo" → absolute checkout path (prefer main worktree).
-	ByKey map[string]string
+	// ByKey maps "github:owner/repo" → checkouts (deduped by common git dir).
+	ByKey map[string][]Checkout
 }
 
 const maxScanDepth = 5
 
 // ScanRoots walks roots for git checkouts and indexes them by origin remote.
 func (in *Inspector) ScanRoots(ctx context.Context, roots []string) Discovery {
-	d := Discovery{ByKey: map[string]string{}}
-	seenCommon := map[string]string{} // common git dir → preferred path
+	d := Discovery{ByKey: map[string][]Checkout{}}
+	seenCommon := map[string]struct{}{} // common git dir already indexed
 	for _, root := range roots {
 		abs, err := ExpandPath(root)
 		if err != nil {
@@ -67,7 +67,7 @@ func (in *Inspector) ScanRoots(ctx context.Context, roots []string) Discovery {
 	return d
 }
 
-func (in *Inspector) indexCheckout(ctx context.Context, path string, d Discovery, seenCommon map[string]string) {
+func (in *Inspector) indexCheckout(ctx context.Context, path string, d Discovery, seenCommon map[string]struct{}) {
 	if !in.isGitDir(ctx, path) {
 		return
 	}
@@ -84,36 +84,54 @@ func (in *Inspector) indexCheckout(ctx context.Context, path string, d Discovery
 	if err != nil {
 		common = path
 	}
-	// Prefer the main worktree when multiple checkouts share a common dir.
+	common = filepath.Clean(common)
+	if _, exists := seenCommon[common]; exists {
+		return
+	}
+
+	// Prefer the main worktree when multiple checkouts share a common dir,
+	// but never replace a working tree with the bare/common git directory.
 	trees, listErr := in.listWorktrees(ctx, path)
 	preferred := path
 	if listErr == nil {
 		for _, wt := range trees {
-			if wt.Main && !wt.Bare {
-				preferred = wt.Path
-				break
+			if !wt.Main || wt.Bare || wt.Path == "" {
+				continue
 			}
+			cand := filepath.Clean(wt.Path)
+			if cand == common || !isWorkingTreeRoot(cand) {
+				continue
+			}
+			preferred = cand
+			break
 		}
 	}
-	if existing, ok := seenCommon[common]; ok {
-		// Keep first preferred; still ensure ByKey is set.
-		_ = existing
-	} else {
-		seenCommon[common] = preferred
+
+	c := Checkout{
+		Path:         preferred,
+		CommonGitDir: common,
+		Superproject: in.Superproject(ctx, preferred),
 	}
-	if _, exists := d.ByKey[key]; !exists {
-		d.ByKey[key] = preferred
-	}
+	FillCheckoutMeta(&c)
+	seenCommon[common] = struct{}{}
+	d.ByKey[key] = append(d.ByKey[key], c)
 }
 
-// ResolvePath picks an explicit local_path or a scanned match.
-func ResolvePath(localPath string, host, repoPath string, disc Discovery) (string, bool) {
-	if strings.TrimSpace(localPath) != "" {
-		return strings.TrimSpace(localPath), true
+// isWorkingTreeRoot reports whether path has a .git file or directory (a work tree).
+func isWorkingTreeRoot(path string) bool {
+	_, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil
+}
+
+// Superproject returns the superproject working tree for a submodule checkout.
+func (in *Inspector) Superproject(ctx context.Context, dir string) string {
+	out, err := in.git(ctx, dir, "rev-parse", "--show-superproject-working-tree")
+	if err != nil {
+		return ""
 	}
-	if disc.ByKey == nil {
-		return "", false
+	s := strings.TrimSpace(string(out))
+	if s == "" || s == "." {
+		return ""
 	}
-	p, ok := disc.ByKey[TrackKey(host, repoPath)]
-	return p, ok
+	return filepath.Clean(s)
 }

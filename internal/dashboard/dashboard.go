@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,7 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forg
 	if s.Local != nil && len(doc.Local.Roots) > 0 {
 		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
 	}
+	labelByKey := projectLabelsByKey(doc.Projects)
 
 	opts := forge.SummaryOpts{
 		Fresh:     fresh,
@@ -63,7 +65,7 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forg
 		go func(i int, p config.Project) {
 			defer wg.Done()
 			row := s.summarize(ctx, p, opts)
-			row.Local = s.attachLocal(ctx, p, disc)
+			row.Local = s.attachLocal(ctx, p, disc, labelByKey)
 			forge.EnrichPruneHints(&row)
 			rows[i] = row
 		}(i, p)
@@ -73,20 +75,182 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forg
 	return out
 }
 
-func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery) *forge.LocalStatus {
+func projectLabelsByKey(projects []config.Project) map[string]string {
+	out := make(map[string]string, len(projects))
+	for _, p := range projects {
+		key := localgit.TrackKey(string(p.Host), p.Path)
+		label := strings.TrimSpace(p.Label)
+		if label == "" {
+			label = strings.TrimSpace(p.ID)
+		}
+		if label == "" {
+			continue
+		}
+		out[key] = label
+	}
+	return out
+}
+
+func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string) *forge.LocalStatus {
 	if s.Local == nil {
 		return nil
 	}
-	path, ok := localgit.ResolvePath(p.LocalPath, string(p.Host), p.Path, disc)
-	if !ok {
-		if len(disc.ByKey) == 0 && strings.TrimSpace(p.LocalPath) == "" {
+	checkouts := disc.Appearances(string(p.Host), p.Path)
+	explicit := strings.TrimSpace(p.LocalPath)
+	if len(checkouts) == 0 && explicit == "" {
+		if len(disc.ByKey) == 0 {
 			return nil
 		}
 		return &forge.LocalStatus{Mapped: false}
 	}
-	st := s.Local.InspectPath(ctx, path)
-	s.Local.EnrichDefault(ctx, &st)
-	return toForgeLocal(st)
+
+	primary, ok := localgit.PickPrimary(explicit, checkouts)
+	if !ok {
+		return &forge.LocalStatus{Mapped: false}
+	}
+
+	// Ensure primary path is in the inspect list even when local_path is outside scan.
+	inspectList := checkouts
+	if explicit != "" {
+		absPrimary := primary.Path
+		if expanded, err := localgit.ExpandPath(primary.Path); err == nil {
+			absPrimary = expanded
+			primary.Path = absPrimary
+		}
+		found := false
+		for _, c := range inspectList {
+			if filepath.Clean(c.Path) == filepath.Clean(absPrimary) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			localgit.FillCheckoutMeta(&primary)
+			inspectList = append([]localgit.Checkout{primary}, inspectList...)
+		}
+	}
+
+	type inspected struct {
+		checkout localgit.Checkout
+		status   localgit.Status
+	}
+	results := make([]inspected, len(inspectList))
+	var wg sync.WaitGroup
+	for i, c := range inspectList {
+		wg.Add(1)
+		go func(i int, c localgit.Checkout) {
+			defer wg.Done()
+			st := s.Local.InspectPath(ctx, c.Path)
+			s.Local.EnrichDefault(ctx, &st)
+			results[i] = inspected{checkout: c, status: st}
+		}(i, c)
+	}
+	wg.Wait()
+
+	parentLabelCache := map[string]string{}
+	appearances := make([]forge.LocalAppearance, 0, len(results))
+	var union []forge.LocalWorktree
+	var primaryLocal *forge.LocalStatus
+
+	primaryPath := filepath.Clean(primary.Path)
+	for _, r := range results {
+		c := r.checkout
+		parentLabel := ""
+		if c.Role == localgit.RoleSubmodule && c.Superproject != "" {
+			parentLabel = s.parentLabel(ctx, c.Superproject, labelByKey, parentLabelCache)
+		}
+		displayID := localgit.DisplayID(c, parentLabel)
+		app := statusToAppearance(c, r.status, displayID, parentLabel)
+		isPrimary := filepath.Clean(c.Path) == primaryPath
+		app.Primary = isPrimary
+		appearances = append(appearances, app)
+
+		for _, wt := range app.Worktrees {
+			if wt.Bare {
+				continue
+			}
+			wt.AppearancePath = c.Path
+			wt.AppearanceLabel = displayID
+			union = append(union, wt)
+		}
+
+		if isPrimary {
+			primaryLocal = toForgeLocal(r.status)
+		}
+	}
+
+	if primaryLocal == nil {
+		// Explicit path inspect may have failed matching; inspect primary alone.
+		st := s.Local.InspectPath(ctx, primary.Path)
+		s.Local.EnrichDefault(ctx, &st)
+		primaryLocal = toForgeLocal(st)
+	}
+	primaryLocal.Appearances = appearances
+	primaryLocal.Worktrees = union
+	return primaryLocal
+}
+
+func (s *Service) parentLabel(ctx context.Context, parentPath string, labelByKey map[string]string, cache map[string]string) string {
+	parentPath = filepath.Clean(parentPath)
+	if v, ok := cache[parentPath]; ok {
+		return v
+	}
+	label := filepath.Base(parentPath)
+	if s.Local != nil {
+		url, err := s.Local.OriginRemote(ctx, parentPath)
+		if err == nil {
+			if ref, ok := localgit.ParseRemoteURL(url); ok {
+				if lb, ok := labelByKey[localgit.TrackKey(ref.Host, ref.Path)]; ok {
+					label = lb
+				}
+			}
+		}
+	}
+	cache[parentPath] = label
+	return label
+}
+
+func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, parentLabel string) forge.LocalAppearance {
+	app := forge.LocalAppearance{
+		Role:          c.Role,
+		Path:          c.Path,
+		DisplayID:     displayID,
+		ParentPath:    c.Superproject,
+		ParentLabel:   parentLabel,
+		RelPath:       c.RelPath,
+		Error:         st.Error,
+		Branch:        st.Branch,
+		Detached:      st.Detached,
+		Dirty:         st.Dirty,
+		Ahead:         st.Ahead,
+		Behind:        st.Behind,
+		Upstream:      st.Upstream,
+		DefaultBranch: st.DefaultBranch,
+		DefaultBehind: st.DefaultBehind,
+		DefaultAhead:  st.DefaultAhead,
+	}
+	if app.Role == "" {
+		app.Role = forge.AppearanceStandalone
+	}
+	for _, wt := range st.Worktrees {
+		if wt.Bare {
+			continue
+		}
+		app.Worktrees = append(app.Worktrees, forge.LocalWorktree{
+			Path:            wt.Path,
+			Branch:          wt.Branch,
+			Detached:        wt.Detached,
+			Bare:            wt.Bare,
+			Main:            wt.Main,
+			Dirty:           wt.Dirty,
+			Ahead:           wt.Ahead,
+			Behind:          wt.Behind,
+			Upstream:        wt.Upstream,
+			AppearancePath:  c.Path,
+			AppearanceLabel: displayID,
+		})
+	}
+	return app
 }
 
 func toForgeLocal(st localgit.Status) *forge.LocalStatus {

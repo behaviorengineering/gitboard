@@ -74,10 +74,21 @@ type ProjectSummary struct {
 	MergedOK bool `json:"-"`
 }
 
-// LocalStatus is checkout / worktree health on disk.
-type LocalStatus struct {
-	Mapped        bool            `json:"mapped"`
+// LocalAppearance roles match localgit checkout roles.
+const (
+	AppearanceStandalone = "standalone"
+	AppearanceSubmodule  = "submodule"
+)
+
+// LocalAppearance is one on-disk checkout of a forge project (standalone or submodule).
+type LocalAppearance struct {
+	Role          string          `json:"role,omitempty"` // standalone | submodule
 	Path          string          `json:"path,omitempty"`
+	DisplayID     string          `json:"display_id,omitempty"`
+	ParentPath    string          `json:"parent_path,omitempty"`
+	ParentLabel   string          `json:"parent_label,omitempty"`
+	RelPath       string          `json:"rel_path,omitempty"`
+	Primary       bool            `json:"primary,omitempty"`
 	Error         string          `json:"error,omitempty"`
 	Branch        string          `json:"branch,omitempty"`
 	Detached      bool            `json:"detached,omitempty"`
@@ -91,21 +102,42 @@ type LocalStatus struct {
 	Worktrees     []LocalWorktree `json:"worktrees,omitempty"`
 }
 
+// LocalStatus is checkout / worktree health on disk.
+// Top-level fields mirror the primary appearance for backward compatibility.
+type LocalStatus struct {
+	Mapped        bool              `json:"mapped"`
+	Path          string            `json:"path,omitempty"`
+	Error         string            `json:"error,omitempty"`
+	Branch        string            `json:"branch,omitempty"`
+	Detached      bool              `json:"detached,omitempty"`
+	Dirty         bool              `json:"dirty,omitempty"`
+	Ahead         int               `json:"ahead,omitempty"`
+	Behind        int               `json:"behind,omitempty"`
+	Upstream      string            `json:"upstream,omitempty"`
+	DefaultBranch string            `json:"default_branch,omitempty"`
+	DefaultBehind int               `json:"default_behind,omitempty"`
+	DefaultAhead  int               `json:"default_ahead,omitempty"`
+	Worktrees     []LocalWorktree   `json:"worktrees,omitempty"`
+	Appearances   []LocalAppearance `json:"appearances,omitempty"`
+}
+
 // LocalWorktree is one git worktree for a mapped project.
 type LocalWorktree struct {
-	Path      string `json:"path"`
-	Branch    string `json:"branch,omitempty"`
-	Detached  bool   `json:"detached,omitempty"`
-	Bare      bool   `json:"bare,omitempty"`
-	Main      bool   `json:"main,omitempty"`
-	Dirty     bool   `json:"dirty,omitempty"`
-	Ahead     int    `json:"ahead,omitempty"`
-	Behind    int    `json:"behind,omitempty"`
-	Upstream  string `json:"upstream,omitempty"`
-	PruneHint string `json:"prune_hint,omitempty"` // safe | likely
-	MergedID  int    `json:"merged_id,omitempty"`
-	MergedURL string `json:"merged_url,omitempty"`
-	MergedAt  string `json:"merged_at,omitempty"`
+	Path            string `json:"path"`
+	Branch          string `json:"branch,omitempty"`
+	Detached        bool   `json:"detached,omitempty"`
+	Bare            bool   `json:"bare,omitempty"`
+	Main            bool   `json:"main,omitempty"`
+	Dirty           bool   `json:"dirty,omitempty"`
+	Ahead           int    `json:"ahead,omitempty"`
+	Behind          int    `json:"behind,omitempty"`
+	Upstream        string `json:"upstream,omitempty"`
+	PruneHint       string `json:"prune_hint,omitempty"` // safe | likely
+	MergedID        int    `json:"merged_id,omitempty"`
+	MergedURL       string `json:"merged_url,omitempty"`
+	MergedAt        string `json:"merged_at,omitempty"`
+	AppearancePath  string `json:"appearance_path,omitempty"`
+	AppearanceLabel string `json:"appearance_label,omitempty"`
 }
 
 // FailedJob is a failed CI job suitable for triage.

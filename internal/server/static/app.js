@@ -40,16 +40,19 @@ function ciMark(status) {
   return iconMark(ICONS.dot, 'mark--muted', s);
 }
 
-function hostCell(host) {
-  const cell = el('td', 'host-cell');
-  const wrap = el('span', 'host-badge');
+function hostPrefix(host, path) {
   const key = String(host || '').toLowerCase();
+  const wrap = el('span', 'project-host');
+  const label = key || 'unknown host';
+  const tip = path ? `${label} · ${path}` : label;
+  wrap.title = tip;
+  wrap.setAttribute('aria-label', tip);
   if (ICONS[key]) {
     wrap.insertAdjacentHTML('beforeend', ICONS[key]);
+  } else {
+    wrap.appendChild(el('span', 'project-host-fallback', host || '?'));
   }
-  wrap.appendChild(el('span', 'host-label', host || '—'));
-  cell.appendChild(wrap);
-  return cell;
+  return wrap;
 }
 
 function relativeTime(iso) {
@@ -69,35 +72,42 @@ function relativeTime(iso) {
 }
 
 function localByBranch(local) {
+  /** @type {Map<string, object[]>} */
   const map = new Map();
-  if (!local || !local.mapped || local.error) return map;
+  if (!local || !local.mapped) return map;
   const trees = (Array.isArray(local.worktrees) ? local.worktrees : []).filter((w) => !w.bare);
   if (trees.length) {
     for (const wt of trees) {
       if (!wt.branch || wt.detached) continue;
-      const prev = map.get(wt.branch);
-      if (!prev || (wt.main && !prev.main)) map.set(wt.branch, wt);
+      const list = map.get(wt.branch) || [];
+      list.push(wt);
+      map.set(wt.branch, list);
     }
     return map;
   }
-  if (local.branch && !local.detached) {
-    map.set(local.branch, {
+  if (local.branch && !local.detached && !local.error) {
+    map.set(local.branch, [{
       path: local.path,
       branch: local.branch,
       dirty: local.dirty,
       ahead: local.ahead,
       behind: local.behind,
       main: true,
-    });
+      appearance_path: local.path,
+    }]);
   }
   return map;
 }
 
-function shortPath(p) {
-  if (!p) return '';
-  const parts = String(p).split('/');
-  if (parts.length <= 3) return p;
-  return `…/${parts.slice(-3).join('/')}`;
+/** Prefer primary appearance worktree, else main, else first. */
+function pickLocalWorktree(wts, local) {
+  const list = Array.isArray(wts) ? wts : (wts ? [wts] : []);
+  if (!list.length) return null;
+  const primaryPath = String(local?.path || '');
+  const primary = list.find((w) => primaryPath && w.appearance_path === primaryPath);
+  if (primary) return primary;
+  const main = list.find((w) => w.main);
+  return main || list[0];
 }
 
 async function copyText(text, node) {
@@ -145,7 +155,7 @@ function copyPathButton(fullPath) {
   return btn;
 }
 
-function localColumn(wt, local, branchName) {
+function localColumn(wts, local, branchName) {
   const cell = el('div', 'branch-local');
   if (!local) {
     cell.appendChild(el('span', 'branch-local-empty', '—'));
@@ -156,29 +166,42 @@ function localColumn(wt, local, branchName) {
     cell.title = 'Local checkout not mapped';
     return cell;
   }
-  if (local.error) {
-    cell.appendChild(el('span', 'branch-local-empty', '!'));
-    cell.title = local.error;
-    return cell;
-  }
-  if (!wt) {
+  const list = Array.isArray(wts) ? wts : (wts ? [wts] : []);
+  if (!list.length) {
+    if (local.error) {
+      cell.appendChild(el('span', 'branch-local-empty', '!'));
+      cell.title = local.error;
+      return cell;
+    }
     cell.appendChild(el('span', 'branch-local-empty', '—'));
     cell.title = 'No local checkout on this branch';
     return cell;
   }
 
   const marks = el('span', 'branch-local-marks');
-  marks.appendChild(iconMark(ICONS.laptop, wt.main ? 'mark--default' : 'mark--muted', wt.path || 'local checkout'));
-  if (wt.path) {
-    const copyBtn = copyPathButton(wt.path);
+  const primaryPath = String(local.path || '');
+  for (const wt of list) {
+    const label = wt.appearance_label || wt.appearance_path || wt.path || 'local checkout';
+    const isPrimary = primaryPath && wt.appearance_path === primaryPath;
+    marks.appendChild(iconMark(
+      ICONS.laptop,
+      isPrimary || wt.main ? 'mark--default' : 'mark--muted',
+      label,
+    ));
+    if (wt.dirty) {
+      marks.appendChild(iconMark(ICONS.alert, 'mark--bad', `dirty: ${label}`));
+    }
+  }
+  const preferred = pickLocalWorktree(list, local);
+  if (preferred?.path) {
+    const copyBtn = copyPathButton(preferred.path);
     if (copyBtn) marks.appendChild(copyBtn);
   }
-  if (wt.dirty) marks.appendChild(iconMark(ICONS.alert, 'mark--bad', 'dirty working tree'));
   cell.appendChild(marks);
 
   const bits = [];
-  if (wt.ahead) bits.push(`↑${wt.ahead}`);
-  if (wt.behind) bits.push(`↓${wt.behind}`);
+  if (preferred?.ahead) bits.push(`↑${preferred.ahead}`);
+  if (preferred?.behind) bits.push(`↓${preferred.behind}`);
   if (branchName && local.default_branch === branchName) {
     if (local.default_behind) bits.push(`def↓${local.default_behind}`);
     if (local.default_ahead) bits.push(`def↑${local.default_ahead}`);
@@ -213,7 +236,7 @@ function branchesCell(branches, host, project) {
   for (const b of rows) {
     list.appendChild(branchRow({
       remote: b,
-      localWt: byLocal.get(b.name),
+      localWts: byLocal.get(b.name) || [],
       local,
       host,
       project,
@@ -223,11 +246,11 @@ function branchesCell(branches, host, project) {
     byLocal.delete(b.name);
   }
 
-  for (const [name, wt] of byLocal) {
+  for (const [name, wts] of byLocal) {
     if (remoteNames.has(name)) continue;
     list.appendChild(branchRow({
       remote: { name, ci_status: '', web_url: '' },
-      localWt: wt,
+      localWts: wts,
       local,
       host,
       project,
@@ -240,7 +263,8 @@ function branchesCell(branches, host, project) {
   return cell;
 }
 
-function branchRow({ remote: b, localWt, local, host, project, reviewKind, localOnly }) {
+function branchRow({ remote: b, localWts, local, host, project, reviewKind, localOnly }) {
+  const localWt = pickLocalWorktree(localWts, local);
   const failed = ['failed', 'failure', 'error'].includes(String(b.ci_status || '').toLowerCase());
   const pruneHint = String(localWt?.prune_hint || '');
   const itemClass = [
@@ -307,7 +331,7 @@ function branchRow({ remote: b, localWt, local, host, project, reviewKind, local
   if (meta.childNodes.length) body.appendChild(meta);
   item.appendChild(body);
 
-  item.appendChild(localColumn(localWt, local, b.name));
+  item.appendChild(localColumn(localWts, local, b.name));
 
   const actions = el('div', 'branch-actions');
   const ci = ciMark(b.ci_status);
@@ -370,6 +394,99 @@ function pruneCommand(branchName, localWt, local) {
   return `git branch -d ${branch}`;
 }
 
+function appearanceStatusMarks(app) {
+  const marks = el('span', 'appearance-marks');
+  if (app.error) {
+    marks.appendChild(iconMark(ICONS.alert, 'mark--bad', app.error));
+    return marks;
+  }
+  if (app.branch) {
+    const br = el('span', 'appearance-branch', app.detached ? `detached ${app.branch}` : app.branch);
+    marks.appendChild(br);
+  }
+  if (app.dirty) marks.appendChild(iconMark(ICONS.alert, 'mark--bad', 'dirty working tree'));
+  const sync = [];
+  if (app.ahead) sync.push(`↑${app.ahead}`);
+  if (app.behind) sync.push(`↓${app.behind}`);
+  if (sync.length) marks.appendChild(el('span', 'appearance-sync', sync.join(' ')));
+  return marks;
+}
+
+function renderAppearanceDetail(app) {
+  const detail = el('div', 'appearance-detail');
+  detail.appendChild(el('div', 'appearance-detail-path', app.path || ''));
+  const trees = (Array.isArray(app.worktrees) ? app.worktrees : []).filter((w) => !w.bare);
+  if (!trees.length) {
+    if (app.error) detail.appendChild(el('div', 'error', app.error));
+    return detail;
+  }
+  const list = el('ul', 'appearance-worktrees');
+  for (const wt of trees) {
+    const li = el('li', 'appearance-worktree');
+    const label = wt.main ? 'main' : (wt.branch || 'worktree');
+    const bits = [label];
+    if (wt.branch && !wt.main) bits[0] = wt.branch;
+    if (wt.dirty) bits.push('dirty');
+    if (wt.ahead) bits.push(`↑${wt.ahead}`);
+    if (wt.behind) bits.push(`↓${wt.behind}`);
+    li.appendChild(el('span', '', bits.join(' · ')));
+    if (wt.path && wt.path !== app.path) {
+      li.appendChild(el('span', 'appearance-wt-path', wt.path));
+    }
+    list.appendChild(li);
+  }
+  detail.appendChild(list);
+  return detail;
+}
+
+function renderAppearances(local) {
+  if (!local?.mapped) return null;
+  const apps = Array.isArray(local.appearances) && local.appearances.length
+    ? local.appearances
+    : (local.path ? [{
+      path: local.path,
+      display_id: local.path,
+      primary: true,
+      branch: local.branch,
+      dirty: local.dirty,
+      ahead: local.ahead,
+      behind: local.behind,
+      detached: local.detached,
+      error: local.error,
+      worktrees: local.worktrees,
+    }] : []);
+  if (!apps.length) return null;
+
+  const wrap = el('div', 'project-appearances');
+  for (const app of apps) {
+    const row = el('div', 'appearance-row' + (app.primary ? ' appearance-row--primary' : ''));
+    const line = el('div', 'appearance-line');
+    const copyBtn = copyPathButton(app.path);
+    if (copyBtn) line.appendChild(copyBtn);
+    const head = el('button', 'appearance-head');
+    head.type = 'button';
+    head.setAttribute('aria-expanded', 'false');
+    const id = el('span', 'project-local-path appearance-id', app.display_id || app.path || '');
+    id.title = app.path || '';
+    head.appendChild(id);
+    head.appendChild(appearanceStatusMarks(app));
+    const detail = renderAppearanceDetail(app);
+    detail.hidden = true;
+    head.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const open = head.getAttribute('aria-expanded') === 'true';
+      head.setAttribute('aria-expanded', open ? 'false' : 'true');
+      detail.hidden = open;
+      row.classList.toggle('is-open', !open);
+    });
+    line.appendChild(head);
+    row.appendChild(line);
+    row.appendChild(detail);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
 function renderTooling(tool) {
   const root = document.getElementById('tooling');
   root.innerHTML = '';
@@ -385,6 +502,184 @@ function renderTooling(tool) {
   root.appendChild(glRow);
 }
 
+const CI_FAILED = new Set(['failed', 'failure', 'error', 'cancelled', 'canceled']);
+
+let allProjects = [];
+const filters = {
+  q: '',
+  host: '',
+  chips: {
+    ci_failed: false,
+    open_review: false,
+    dirty: false,
+    prune: false,
+    conflicts: false,
+  },
+};
+
+function normalizeQ(s) {
+  return String(s || '').toLowerCase().trim();
+}
+
+function haystack(row) {
+  const parts = [
+    row.label,
+    row.id,
+    row.path,
+    row.org,
+    row.host,
+  ];
+  for (const b of row.branches || []) {
+    if (b.name) parts.push(b.name);
+  }
+  const local = row.local;
+  if (local?.path) parts.push(local.path);
+  if (local?.branch) parts.push(local.branch);
+  for (const app of local?.appearances || []) {
+    if (app.display_id) parts.push(app.display_id);
+    if (app.path) parts.push(app.path);
+    if (app.branch) parts.push(app.branch);
+    if (app.parent_label) parts.push(app.parent_label);
+  }
+  for (const wt of local?.worktrees || []) {
+    if (wt.branch) parts.push(wt.branch);
+    if (wt.path) parts.push(wt.path);
+  }
+  return normalizeQ(parts.filter(Boolean).join(' '));
+}
+
+function projectDirty(row) {
+  const local = row.local;
+  if (!local?.mapped) return false;
+  if (local.dirty) return true;
+  for (const app of local.appearances || []) {
+    if (app.dirty) return true;
+    for (const wt of app.worktrees || []) {
+      if (wt.dirty) return true;
+    }
+  }
+  for (const wt of local.worktrees || []) {
+    if (wt.dirty) return true;
+  }
+  return false;
+}
+
+function projectPrune(row) {
+  const local = row.local;
+  if (!local?.mapped) return false;
+  const trees = [];
+  for (const wt of local.worktrees || []) trees.push(wt);
+  for (const app of local.appearances || []) {
+    for (const wt of app.worktrees || []) trees.push(wt);
+  }
+  return trees.some((wt) => wt.prune_hint === 'safe' || wt.prune_hint === 'likely');
+}
+
+function projectMatches(row, state) {
+  if (state.host && String(row.host || '').toLowerCase() !== state.host) return false;
+  if (state.chips.ci_failed) {
+    const hit = (row.branches || []).some((b) => CI_FAILED.has(String(b.ci_status || '').toLowerCase()));
+    if (!hit) return false;
+  }
+  if (state.chips.open_review) {
+    const openCount = (row.open_items?.pull_requests || 0) + (row.open_items?.merge_requests || 0);
+    const hit = openCount > 0 || (row.branches || []).some((b) => b.open_review);
+    if (!hit) return false;
+  }
+  if (state.chips.dirty && !projectDirty(row)) return false;
+  if (state.chips.prune && !projectPrune(row)) return false;
+  if (state.chips.conflicts) {
+    const hit = (row.branches || []).some((b) => b.conflict);
+    if (!hit) return false;
+  }
+  if (state.q) {
+    const hay = haystack(row);
+    const tokens = state.q.split(/\s+/).filter(Boolean);
+    if (!tokens.every((tok) => hay.includes(tok))) return false;
+  }
+  return true;
+}
+
+function filtersActive(state) {
+  if (state.q || state.host) return true;
+  return Object.values(state.chips).some(Boolean);
+}
+
+function filteredProjects() {
+  return (allProjects || []).filter((row) => projectMatches(row, filters));
+}
+
+function updateFilterChrome(visibleCount) {
+  const total = allProjects.length;
+  const countEl = document.getElementById('filter-count');
+  const clearBtn = document.getElementById('filter-clear');
+  const active = filtersActive(filters);
+  if (clearBtn) clearBtn.hidden = !active;
+  if (!countEl) return;
+  if (!total) {
+    countEl.textContent = '';
+    return;
+  }
+  if (!active) {
+    countEl.textContent = `${total} project${total === 1 ? '' : 's'}`;
+    return;
+  }
+  countEl.textContent = `Showing ${visibleCount} of ${total}`;
+}
+
+function applyBoard() {
+  const rows = filteredProjects();
+  renderRows(rows);
+  updateFilterChrome(rows.length);
+}
+
+function readFiltersFromDom() {
+  const qInput = document.getElementById('filter-q');
+  const hostSel = document.getElementById('filter-host');
+  filters.q = normalizeQ(qInput?.value);
+  filters.host = String(hostSel?.value || '').toLowerCase();
+  for (const btn of document.querySelectorAll('.filter-chip[data-filter]')) {
+    const key = btn.getAttribute('data-filter');
+    if (key && key in filters.chips) {
+      filters.chips[key] = btn.getAttribute('aria-pressed') === 'true';
+    }
+  }
+}
+
+function clearFilters() {
+  const qInput = document.getElementById('filter-q');
+  const hostSel = document.getElementById('filter-host');
+  if (qInput) qInput.value = '';
+  if (hostSel) hostSel.value = '';
+  for (const btn of document.querySelectorAll('.filter-chip[data-filter]')) {
+    btn.setAttribute('aria-pressed', 'false');
+  }
+  filters.q = '';
+  filters.host = '';
+  for (const key of Object.keys(filters.chips)) filters.chips[key] = false;
+  applyBoard();
+}
+
+function bindFilters() {
+  const qInput = document.getElementById('filter-q');
+  const hostSel = document.getElementById('filter-host');
+  const clearBtn = document.getElementById('filter-clear');
+  const onChange = () => {
+    readFiltersFromDom();
+    applyBoard();
+  };
+  qInput?.addEventListener('input', onChange);
+  hostSel?.addEventListener('change', onChange);
+  clearBtn?.addEventListener('click', () => clearFilters());
+  for (const btn of document.querySelectorAll('.filter-chip[data-filter]')) {
+    btn.addEventListener('click', () => {
+      const pressed = btn.getAttribute('aria-pressed') === 'true';
+      btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
+      onChange();
+    });
+  }
+}
+
 function renderRows(projects) {
   const tbody = document.getElementById('rows');
   tbody.innerHTML = '';
@@ -395,6 +690,7 @@ function renderRows(projects) {
       titleCell.appendChild(el('div', 'project-org', row.org));
     }
     const titleRow = el('div', 'project-title');
+    titleRow.appendChild(hostPrefix(row.host, row.path));
     titleRow.appendChild(el('strong', '', row.label || row.id));
     if (row.open_url) {
       const link = el('a', 'project-open');
@@ -408,14 +704,9 @@ function renderRows(projects) {
     }
     titleCell.appendChild(titleRow);
     const local = row.local;
-    if (local?.mapped && local.path) {
-      const pathRow = el('div', 'project-local-path-row');
-      const pathHint = el('span', 'project-local-path', shortPath(local.path));
-      pathHint.title = local.path;
-      pathRow.appendChild(pathHint);
-      const copyBtn = copyPathButton(local.path);
-      if (copyBtn) pathRow.appendChild(copyBtn);
-      titleCell.appendChild(pathRow);
+    const appearanceBlock = renderAppearances(local);
+    if (appearanceBlock) {
+      titleCell.appendChild(appearanceBlock);
     } else if (local && local.mapped === false) {
       titleCell.appendChild(el('div', 'project-local-path', 'local not mapped'));
     } else if (local?.error) {
@@ -425,7 +716,6 @@ function renderRows(projects) {
       titleCell.appendChild(el('div', 'error', row.error));
     }
     tr.appendChild(titleCell);
-    tr.appendChild(hostCell(row.host));
     tr.appendChild(branchesCell(row.branches, row.host, row));
 
     const actions = el('td', 'actions-cell');
@@ -487,7 +777,8 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
       }
     }
     renderTooling(data.tooling);
-    renderRows(data.projects);
+    allProjects = Array.isArray(data.projects) ? data.projects : [];
+    applyBoard();
     status.textContent = `Updated ${data.generated_at || ''}`;
   } catch (err) {
     status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
@@ -573,6 +864,7 @@ document.getElementById('force-refresh').addEventListener('click', () => { void 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void loadDashboard({ quiet: true });
 });
+bindFilters();
 updatePollLabel();
 schedulePoll();
 void loadDashboard();

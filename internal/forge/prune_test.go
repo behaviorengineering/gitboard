@@ -123,6 +123,46 @@ func TestEnrichPruneHintsPrimaryCheckout(t *testing.T) {
 	}
 }
 
+func TestEnrichPruneHintsMultiAppearanceWorktrees(t *testing.T) {
+	summary := &ProjectSummary{
+		RemoteNames: []string{"main"},
+		Branches: []BranchRef{
+			{Name: "main", Default: true},
+		},
+		Merged: []MergedReview{
+			{Branch: "feat/a", ID: 1, URL: "https://example/pr/1", MergedAt: "2026-08-20T10:00:00Z"},
+		},
+		MergedOK: true,
+		Local: &LocalStatus{
+			Mapped:        true,
+			Path:          "/standalone",
+			DefaultBranch: "main",
+			Worktrees: []LocalWorktree{
+				{Path: "/standalone", Branch: "feat/a", Main: true, AppearancePath: "/standalone", AppearanceLabel: "~/standalone"},
+				{Path: "/parent/providers/repo", Branch: "feat/a", Main: true, AppearancePath: "/parent/providers/repo", AppearanceLabel: "parent → providers/repo"},
+				{Path: "/parent/providers/repo", Branch: "feat/gone", Main: true, AppearancePath: "/parent/providers/repo", AppearanceLabel: "parent → providers/repo"},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+
+	var safe, likely int
+	for _, wt := range summary.Local.Worktrees {
+		switch {
+		case wt.Branch == "feat/a" && wt.PruneHint == PruneSafe:
+			safe++
+		case wt.Branch == "feat/gone" && wt.PruneHint == PruneLikely:
+			likely++
+		}
+	}
+	if safe != 2 {
+		t.Fatalf("safe prune on both appearances: got %d", safe)
+	}
+	if likely != 1 {
+		t.Fatalf("likely prune: got %d", likely)
+	}
+}
+
 func TestEnrichPruneHintsNilSafe(t *testing.T) {
 	EnrichPruneHints(nil)
 	EnrichPruneHints(&ProjectSummary{})
