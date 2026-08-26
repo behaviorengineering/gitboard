@@ -1,0 +1,4 @@
+[submodule "providers/strop"]
+	path = providers/strop
+	url = https://github.com/behaviorengineering/strop.git
+	branch = main
