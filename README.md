@@ -4,7 +4,32 @@
 
 Local code-change board for GitLab and GitHub: CI status, open MRs/PRs, failed job triage, and local checkout / worktree state. Uses `gh`, `glab`, and `git` on your machine (not deployments or runtime ops).
 
-## Quick start
+## Install (binary)
+
+1. Install and log in to the forge CLIs:
+
+```bash
+brew install glab
+glab auth login
+gh auth login
+```
+
+2. Download the `gitboard` archive for your OS from the [latest release](https://github.com/behaviorengineering/gitboard/releases/latest), unpack it, and put `gitboard` on your `PATH`.
+
+3. Run:
+
+```bash
+gitboard init
+# edit ~/.config/gitboard/config.yaml llm section if needed
+gitboard sync
+gitboard serve
+```
+
+Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/). Each GitHub Release includes notes for what changed since the previous tag.
+
+`process-compose` is only needed for the from-source `make serve` TUI below.
+
+## From source
 
 ```bash
 brew install glab process-compose
@@ -41,10 +66,11 @@ Override path with `GITBOARD_CONFIG`. LLM fields also accept env overrides: `GIT
 | Command | Purpose |
 |---------|---------|
 | `gitboard init` / `make init` | Create config if missing (never overwrite) |
-| `gitboard sync` / `make sync` | Discover repos, select which to track, write `projects` |
+| `gitboard sync` / `make sync` | Discover repos and select tracked projects |
 | `make serve` | process-compose TUI on `:1325`; rebuilds/restarts when `.go` or static UI files change |
 | `make serve-down` | Stop this Gitboard process-compose project |
 | `gitboard serve` | Direct dashboard (no process-compose) |
+| `gitboard version` | Print the build version |
 
 Sync helpers: `--add owner/repo --host github|gitlab`, `--remove id`, `--dry-run`, `--host github|gitlab`.
 

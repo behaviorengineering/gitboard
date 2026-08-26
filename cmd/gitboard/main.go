@@ -28,6 +28,9 @@ import (
 	"github.com/behaviorengineering/gitboard/internal/triage"
 )
 
+// version is set by GoReleaser / make build via -ldflags -X main.version=...
+var version = "dev"
+
 func main() {
 	log.SetFlags(0)
 	if len(os.Args) < 2 {
@@ -46,6 +49,9 @@ func main() {
 		err = runSync(args)
 	case "serve":
 		err = runServe(args)
+	case "version", "-version", "--version":
+		fmt.Printf("gitboard %s\n", version)
+		return
 	case "-h", "--help", "help":
 		printUsage(os.Stdout)
 	default:
@@ -73,11 +79,13 @@ Usage:
   gitboard init [-config path]
   gitboard sync [flags]
   gitboard serve [flags]
+  gitboard version
 
 Commands:
-  init   Create config if missing (never overwrite)
-  sync   Discover repos and select tracked projects
-  serve  Run the local dashboard (default :1325)
+  init     Create config if missing (never overwrite)
+  sync     Discover repos and select tracked projects
+  serve    Run the local dashboard (default :1325)
+  version  Print the build version
 
 Sync flags:
   -config path          Config file (default: %s)

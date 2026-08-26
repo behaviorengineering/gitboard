@@ -2,6 +2,8 @@
 
 BINARY := bin/gitboard
 CONFIG ?= $(HOME)/.config/gitboard/config.yaml
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 
 help:
 	@echo "gitboard - GitLab + GitHub project dashboard (gh + glab)"
@@ -17,7 +19,7 @@ help:
 
 build:
 	@mkdir -p $(dir $(BINARY))
-	go build -o $(BINARY) ./cmd/gitboard
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/gitboard
 
 test:
 	go test ./...
