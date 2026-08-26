@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/behaviorengineering/gitboard/internal/llm"
 )
 
 func TestParseAnswer(t *testing.T) {
@@ -37,15 +39,18 @@ func TestEnabled(t *testing.T) {
 		t.Fatal("nil should be disabled")
 	}
 	if (&Analyzer{}).Enabled() {
+		t.Fatal("empty llm disabled")
+	}
+	if (&Analyzer{LLM: &llm.Client{}}).Enabled() {
 		t.Fatal("empty base url disabled")
 	}
-	if !(&Analyzer{BaseURL: "http://localhost"}).Enabled() {
+	if !(&Analyzer{LLM: &llm.Client{BaseURL: "http://localhost"}}).Enabled() {
 		t.Fatal("configured should be enabled")
 	}
 }
 
 func TestAnalyzeEmptyLog(t *testing.T) {
-	a := &Analyzer{BaseURL: "http://example.invalid"}
+	a := &Analyzer{LLM: &llm.Client{BaseURL: "http://example.invalid"}}
 	_, err := a.Analyze(context.Background(), Request{Log: "  "})
 	if err == nil {
 		t.Fatal("want empty log error")
@@ -80,7 +85,7 @@ func TestAnalyzeHappy(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	a := &Analyzer{BaseURL: srv.URL, Model: "fallback", Client: srv.Client()}
+	a := &Analyzer{LLM: &llm.Client{BaseURL: srv.URL, Model: "fallback", HTTP: srv.Client()}}
 	resp, err := a.Analyze(context.Background(), Request{Log: "FAIL", JobName: "test"})
 	if err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/forge"
+	"github.com/behaviorengineering/gitboard/internal/llm"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
 	"github.com/behaviorengineering/gitboard/internal/observability"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
@@ -134,7 +135,8 @@ func runServe(args []string) error {
 	run := cliexec.New()
 	local := localgit.NewInspector(run)
 	dash := dashboard.New(forge.NewGitHub(run), forge.NewGitLab(run), local)
-	prune, err := pruneagent.New(config.AgentsDir(), run)
+	llmClient := llm.New(doc.EffectiveLLM())
+	prune, err := pruneagent.New(config.AgentsDir(), run, llmClient)
 	if err != nil {
 		return fmt.Errorf("prune agent: %w", err)
 	}
@@ -144,7 +146,7 @@ func runServe(args []string) error {
 		Local:       doc.Local,
 		Upstream:    doc.Upstream,
 		Dash:        dash,
-		Triage:      triage.New(doc.EffectiveLLM()),
+		Triage:      &triage.Analyzer{LLM: llmClient},
 		Prune:       prune,
 		PollSeconds: doc.EffectivePollSeconds(),
 	})

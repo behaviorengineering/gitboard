@@ -1,16 +1,12 @@
 package triage
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/internal/llm"
 )
 
 // Request is the triage input from the dashboard.
@@ -33,22 +29,14 @@ type Response struct {
 	Unavailable string   `json:"unavailable,omitempty"`
 }
 
-// Analyzer calls an OpenAI-compatible chat endpoint.
+// Analyzer calls an OpenAI-compatible chat endpoint via llm.Client.
 type Analyzer struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	Client  *http.Client
+	LLM *llm.Client
 }
 
 // New builds an analyzer from effective LLM settings (file + env overlay).
-func New(llm config.LLM) *Analyzer {
-	return &Analyzer{
-		BaseURL: strings.TrimRight(strings.TrimSpace(llm.BaseURL), "/"),
-		APIKey:  strings.TrimSpace(llm.APIKey),
-		Model:   firstNonEmpty(llm.Model, "cf_local/@cf/zai-org/glm-4.7-flash"),
-		Client:  &http.Client{Timeout: 120 * time.Second},
-	}
+func New(cfg config.LLM) *Analyzer {
+	return &Analyzer{LLM: llm.New(cfg)}
 }
 
 // NewFromEnv builds an analyzer from environment only (no config file).
@@ -57,7 +45,7 @@ func NewFromEnv() *Analyzer {
 }
 
 func (a *Analyzer) Enabled() bool {
-	return a != nil && strings.TrimSpace(a.BaseURL) != ""
+	return a != nil && a.LLM.Enabled()
 }
 
 // Analyze sends logs to the configured model.
@@ -72,7 +60,10 @@ func (a *Analyzer) Analyze(ctx context.Context, req Request) (Response, error) {
 		return Response{}, fmt.Errorf("empty log excerpt")
 	}
 	prompt := buildPrompt(req, logText)
-	raw, model, err := a.chat(ctx, prompt)
+	raw, model, err := a.LLM.Chat(ctx,
+		"You triage CI failures for a Go monorepo. Do not invent file paths or line numbers absent from the log.",
+		prompt,
+	)
 	if err != nil {
 		return Response{}, err
 	}
@@ -95,54 +86,6 @@ func buildPrompt(req Request, logText string) string {
 	b.WriteString("LOG:\n")
 	b.WriteString(logText)
 	return b.String()
-}
-
-func (a *Analyzer) chat(ctx context.Context, prompt string) (string, string, error) {
-	body := map[string]any{
-		"model": a.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": "You triage CI failures for a Go monorepo. Do not invent file paths or line numbers absent from the log."},
-			{"role": "user", "content": prompt},
-		},
-		"temperature": 0.2,
-	}
-	rawBody, _ := json.Marshal(body)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.BaseURL+"/chat/completions", bytes.NewReader(rawBody))
-	if err != nil {
-		return "", "", err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if a.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+a.APIKey)
-	}
-	resp, err := a.Client.Do(httpReq)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return "", "", err
-	}
-	if resp.StatusCode >= 400 {
-		return "", "", fmt.Errorf("llm %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
-	}
-	var parsed struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", "", err
-	}
-	if len(parsed.Choices) == 0 {
-		return "", "", fmt.Errorf("llm: empty choices")
-	}
-	model := firstNonEmpty(parsed.Model, a.Model)
-	return parsed.Choices[0].Message.Content, model, nil
 }
 
 func parseAnswer(raw, model string) Response {
@@ -180,13 +123,4 @@ func parseAnswer(raw, model string) Response {
 	}
 	out.FixSteps = steps
 	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }

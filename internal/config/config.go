@@ -41,6 +41,9 @@ type LLM struct {
 	APIKey  string `yaml:"api_key"`
 }
 
+// DefaultLLMModel is the Polypus/cf_local model used when config omits llm.model.
+const DefaultLLMModel = "cf_local/@cf/qwen/qwen3-30b-a3b-fp8"
+
 // FailureDump holds error-only inference dump settings.
 type FailureDump struct {
 	Enabled     *bool  `yaml:"enabled"`
@@ -103,7 +106,7 @@ type File struct {
 // DefaultExample is the template written by init.
 const DefaultExample = `llm:
   base_url: http://127.0.0.1:1320/v1
-  model: cf_local/@cf/zai-org/glm-4.7-flash
+  model: cf_local/@cf/qwen/qwen3-30b-a3b-fp8
   api_key: ""
 
 # OpenInference tracing + error-only dumps for agent/LLM work.
@@ -349,7 +352,7 @@ func (f File) EffectiveLLM() LLM {
 		Model: firstNonEmpty(
 			os.Getenv("GITBOARD_LLM_MODEL"),
 			f.LLM.Model,
-			"cf_local/@cf/zai-org/glm-4.7-flash",
+			DefaultLLMModel,
 		),
 	}
 }

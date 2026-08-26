@@ -39,7 +39,11 @@ let modalResolve = null;
 
 function closeModal(ok) {
   const root = document.getElementById('modal-root');
+  const modal = root?.querySelector('.modal');
+  const cancelBtn = document.getElementById('modal-cancel');
   if (root) root.hidden = true;
+  if (modal) modal.classList.remove('modal--wide');
+  if (cancelBtn) cancelBtn.hidden = false;
   document.removeEventListener('keydown', onModalKeydown);
   const resolve = modalResolve;
   modalResolve = null;
@@ -59,10 +63,11 @@ function onModalKeydown(ev) {
 
 /**
  * Theme confirm dialog. Resolves true when confirmed.
- * @param {{ title: string, body: string, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean }} opts
+ * @param {{ title: string, body: string, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, info?: boolean }} opts
  */
 function confirmDialog(opts) {
   const root = document.getElementById('modal-root');
+  const modal = root?.querySelector('.modal');
   const title = document.getElementById('modal-title');
   const body = document.getElementById('modal-body');
   const detail = document.getElementById('modal-detail');
@@ -73,7 +78,8 @@ function confirmDialog(opts) {
   }
   if (modalResolve) closeModal(false);
 
-  title.textContent = opts.title || 'Confirm';
+  const info = Boolean(opts.info);
+  title.textContent = opts.title || (info ? 'Details' : 'Confirm');
   body.textContent = opts.body || '';
   const detailText = String(opts.detail || '').trim();
   if (detailText) {
@@ -84,10 +90,15 @@ function confirmDialog(opts) {
     detail.textContent = '';
   }
 
-  const danger = opts.danger !== false;
+  cancelBtn.hidden = info;
+  if (modal) modal.classList.toggle('modal--wide', info || Boolean(opts.wide));
+
+  const danger = info ? false : opts.danger !== false;
   confirmBtn.className = `modal-btn ${danger ? 'modal-btn--danger' : 'modal-btn--ok'}`;
-  setButtonLabel(cancelBtn, ICONS.x, opts.cancelLabel || 'Cancel');
-  setButtonLabel(confirmBtn, danger ? ICONS.trash : ICONS.check, opts.confirmLabel || 'Confirm');
+  if (!info) {
+    setButtonLabel(cancelBtn, ICONS.x, opts.cancelLabel || 'Cancel');
+  }
+  setButtonLabel(confirmBtn, danger ? ICONS.trash : ICONS.check, opts.confirmLabel || (info ? 'Close' : 'Confirm'));
 
   root.hidden = false;
   document.addEventListener('keydown', onModalKeydown);
@@ -96,6 +107,11 @@ function confirmDialog(opts) {
   return new Promise((resolve) => {
     modalResolve = resolve;
   });
+}
+
+/** Info-only modal (single Close). */
+function infoDialog(opts) {
+  return confirmDialog({ ...opts, info: true, danger: false, confirmLabel: opts.confirmLabel || 'Close' });
 }
 
 function bindModal() {
@@ -1235,15 +1251,9 @@ async function pullFFCheckout({ project_id, branch, repo_path, button }) {
 }
 
 async function investigatePrune(body, btn) {
-  const detail = document.getElementById('detail');
-  const jobsRoot = document.getElementById('jobs');
-  const triage = document.getElementById('triage');
-  detail.hidden = false;
-  triage.hidden = false;
-  document.getElementById('detail-title').textContent = `${body.project_id} / ${body.branch}: investigate`;
-  jobsRoot.innerHTML = '';
-  triage.textContent = 'Investigating…';
+  const status = document.getElementById('status');
   if (btn) btn.disabled = true;
+  if (status) status.textContent = `Investigating ${body.project_id} / ${body.branch}…`;
   try {
     const res = await fetch('/api/agents/prune/investigate', {
       method: 'POST',
@@ -1252,24 +1262,37 @@ async function investigatePrune(body, btn) {
     });
     const text = await res.text();
     if (!res.ok) {
-      triage.textContent = text;
+      if (status) status.textContent = '';
+      await infoDialog({
+        title: `${body.project_id} / ${body.branch}: investigate failed`,
+        body: text.trim() || `HTTP ${res.status}`,
+      });
       return;
     }
     const data = JSON.parse(text);
     const card = data.card || {};
     const ev = data.evidence || {};
-    const lines = [
-      `Verdict: ${card.verdict || '?'}`,
-      card.summary && `Summary: ${card.summary}`,
+    const detailLines = [
       card.bullets?.length && `Evidence:\n${card.bullets.map((b) => `• ${b}`).join('\n')}`,
       card.command && `Proposed: ${card.command}`,
+      data.source && `Source: ${data.source}${data.model ? ` (${data.model})` : ''}`,
       data.session_id && `Session: ${data.session_id}`,
       ev.unique_commit_count != null && `Unique commits: ${ev.unique_commit_count}`,
       ev.unique_file_count != null && `Unique files: ${ev.unique_file_count}`,
     ].filter(Boolean);
-    triage.textContent = lines.join('\n\n');
+    if (status) status.textContent = '';
+    await infoDialog({
+      title: `${body.project_id} / ${body.branch}: investigate`,
+      body: `Verdict: ${card.verdict || '?'}${card.summary ? `\n\n${card.summary}` : ''}`,
+      detail: detailLines.join('\n\n'),
+    });
   } catch (err) {
-    triage.textContent = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? err.message : String(err);
+    if (status) status.textContent = '';
+    await infoDialog({
+      title: `${body.project_id} / ${body.branch}: investigate failed`,
+      body: msg,
+    });
   } finally {
     if (btn) btn.disabled = false;
   }

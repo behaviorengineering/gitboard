@@ -13,7 +13,9 @@ import (
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/forge"
+	"github.com/behaviorengineering/gitboard/internal/llm"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
+	"github.com/behaviorengineering/gitboard/internal/pruneagent"
 	"github.com/behaviorengineering/gitboard/internal/server"
 	"github.com/behaviorengineering/gitboard/internal/triage"
 )
@@ -203,7 +205,7 @@ func TestPruneSafeValidation(t *testing.T) {
 }
 
 func TestTriageWithLogBody(t *testing.T) {
-	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
 			return
@@ -217,12 +219,14 @@ func TestTriageWithLogBody(t *testing.T) {
 			},
 		})
 	}))
-	t.Cleanup(llm.Close)
+	t.Cleanup(srv.Close)
 
 	analyzer := &triage.Analyzer{
-		BaseURL: llm.URL,
-		Model:   "test-model",
-		Client:  llm.Client(),
+		LLM: &llm.Client{
+			BaseURL: srv.URL,
+			Model:   "test-model",
+			HTTP:    srv.Client(),
+		},
 	}
 	mux := testMux(t, nil, analyzer)
 	payload := `{"project_id":"gh-app","run_id":"99","job_id":"github:1001","log":"panic: nil"}`
@@ -248,5 +252,124 @@ func TestPruneInvestigateUnavailable(t *testing.T) {
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("want 503, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func investigateFakeGit(t *testing.T) (*fakeExec, string) {
+	t.Helper()
+	dir := t.TempDir()
+	fx := &fakeExec{
+		responses: map[string][]byte{
+			"status --porcelain":           []byte(""),
+			"merge-base":                   []byte("abc"),
+			"rev-list --left-right --count": []byte("0\t0"),
+			"log --oneline":                []byte(""),
+			"diff --name-only":             []byte(""),
+		},
+	}
+	return fx, dir
+}
+
+func TestPruneInvestigateLLM(t *testing.T) {
+	fx, dir := investigateFakeGit(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "prune-model",
+			"choices": []map[string]any{
+				{"message": map[string]string{
+					"content": "VERDICT: drop\nSUMMARY: LLM says drop it.\nBULLETS:\n- clean\n- empty ahead\nCOMMAND:\n",
+				}},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	agentsRoot := t.TempDir()
+	prune, err := pruneagent.New(agentsRoot, fx, &llm.Client{
+		BaseURL: srv.URL,
+		Model:   "prune-model",
+		HTTP:    srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := []config.Project{
+		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	}
+	dash := dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), nil)
+	mux := server.NewMux(server.Options{
+		Projects: projects,
+		Dash:     dash,
+		Prune:    prune,
+	})
+	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"feat/x","worktree_path":%q,"default_branch":"main"}`, dir)
+	res := httptest.NewRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	}
+	var got pruneagent.Result
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != "llm" || got.Model != "prune-model" {
+		t.Fatalf("source/model: %+v", got)
+	}
+	if got.Card.Verdict != "drop" || !strings.Contains(got.Card.Summary, "LLM says drop") {
+		t.Fatalf("card: %+v", got.Card)
+	}
+	if got.Card.Command == "" {
+		t.Fatal("expected filled drop command")
+	}
+	if got.SessionID == "" {
+		t.Fatal("missing session id")
+	}
+}
+
+func TestPruneInvestigateLLMFallback(t *testing.T) {
+	fx, dir := investigateFakeGit(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	agentsRoot := t.TempDir()
+	prune, err := pruneagent.New(agentsRoot, fx, &llm.Client{
+		BaseURL: srv.URL,
+		Model:   "prune-model",
+		HTTP:    srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := []config.Project{
+		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	}
+	mux := server.NewMux(server.Options{
+		Projects: projects,
+		Dash:     dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), nil),
+		Prune:    prune,
+	})
+	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"feat/x","worktree_path":%q,"default_branch":"main"}`, dir)
+	res := httptest.NewRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	}
+	var got pruneagent.Result
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != "rules" {
+		t.Fatalf("want rules fallback, got %+v", got)
+	}
+	if got.Card.Verdict != "drop" {
+		t.Fatalf("rules drop card: %+v", got.Card)
 	}
 }

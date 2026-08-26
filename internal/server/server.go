@@ -222,7 +222,7 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "unknown project", http.StatusBadRequest)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()
 		tr := otel.Tracer("gitboard")
 		ctx, span := tr.Start(ctx, "agents.prune.investigate")

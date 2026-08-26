@@ -1102,11 +1102,17 @@ a { color: var(--link); }
   position: relative;
   z-index: 1;
   width: min(28rem, 100%);
+  max-height: min(85vh, 40rem);
+  overflow: auto;
   padding: 1.15rem 1.2rem 1rem;
   border: 1px solid #2d3a49;
   border-radius: 6px;
   background: var(--panel);
   box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.45);
+}
+
+.modal--wide {
+  width: min(36rem, 100%);
 }
 
 .modal-title {
@@ -1121,6 +1127,7 @@ a { color: var(--link); }
   color: var(--text);
   font-size: 0.92rem;
   line-height: 1.4;
+  white-space: pre-wrap;
 }
 
 .modal-detail {
@@ -1132,7 +1139,8 @@ a { color: var(--link); }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem;
   line-height: 1.35;
-  word-break: break-all;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .modal-actions {
