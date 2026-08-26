@@ -33,7 +33,9 @@ checksum:
 changelog:
   use: github
   sort: asc
-  abbrev: -1
+  abbrev: 8
+  # Prefer GitHub @login only; never fall back to Name <email>.
+  format: "{{.SHA}}: {{.Message}}{{ if .Logins }} ({{ .Logins | englishJoin }}){{ end }}"
   groups:
     - title: Features
       regexp: '(?i)^.*?feat(\(.+\))?!?:.+$'
