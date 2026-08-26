@@ -65,6 +65,17 @@ func (c *TTLCache) SetNow(now func() time.Time) {
 	c.now = now
 }
 
+// Clear drops all cached heads and merged slices.
+// Used when tracked projects change (for example after gitboard sync).
+func (c *TTLCache) Clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.byKey = map[string]*cacheEntry{}
+}
+
 func (c *TTLCache) clock() time.Time {
 	if c == nil || c.now == nil {
 		return time.Now()

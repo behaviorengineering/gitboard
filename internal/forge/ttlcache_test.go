@@ -83,3 +83,25 @@ func TestTTLCacheMergedZeroTTLAlwaysLoads(t *testing.T) {
 		t.Fatalf("zero ttl should always load, got %d", loads)
 	}
 }
+
+func TestTTLCacheClear(t *testing.T) {
+	cache := NewTTLCache()
+	loads := 0
+	load := func() (HeadsSnapshot, error) {
+		loads++
+		return HeadsSnapshot{DefaultBranch: "main"}, nil
+	}
+	ttl := time.Minute
+	if _, err := cache.GetOrLoadHeads("github/o/r", ttl, false, load); err != nil {
+		t.Fatal(err)
+	}
+	cache.Clear()
+	if _, err := cache.GetOrLoadHeads("github/o/r", ttl, false, load); err != nil {
+		t.Fatal(err)
+	}
+	if loads != 2 {
+		t.Fatalf("clear should force reload, got %d loads", loads)
+	}
+	cache.Clear() // nil-safe and empty-safe
+	(*TTLCache)(nil).Clear()
+}

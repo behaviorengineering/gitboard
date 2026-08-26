@@ -175,6 +175,7 @@ func runServe(args []string) error {
 	}
 	handler := server.NewMux(server.Options{
 		Addr:        *addr,
+		ConfigPath:  path,
 		Projects:    doc.Projects,
 		Local:       doc.Local,
 		Upstream:    doc.Upstream,

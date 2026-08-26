@@ -15,6 +15,7 @@ import (
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
+	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
 	"github.com/behaviorengineering/gitboard/internal/triage"
 	"github.com/behaviorengineering/strop/agentsession"
@@ -30,7 +31,10 @@ const maxJSONBody = 4 << 20 // 4 MiB
 
 // Options configures the HTTP server.
 type Options struct {
-	Addr        string
+	Addr string
+	// ConfigPath, when set, reloads projects/local/upstream/poll from disk
+	// when the file mtime advances (so gitboard sync updates a running board).
+	ConfigPath  string
 	Projects    []config.Project
 	Local       config.Local
 	Upstream    config.Upstream
@@ -49,6 +53,16 @@ func NewMux(opts Options) http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 
+	var cache *forge.TTLCache
+	if opts.Dash != nil {
+		cache = opts.Dash.Cache
+	}
+	live := newConfigLive(opts.ConfigPath, config.File{
+		Projects: opts.Projects,
+		Local:    opts.Local,
+		Upstream: opts.Upstream,
+	}, opts.PollSeconds, cache)
+
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -65,8 +79,9 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		_, poll := live.snapshot()
 		writeJSON(w, map[string]any{
-			"poll_interval_seconds": opts.PollSeconds,
+			"poll_interval_seconds": poll,
 		})
 	})
 
@@ -82,13 +97,9 @@ func NewMux(opts Options) http.Handler {
 		fresh := r.URL.Query().Get("fresh") == "1" || strings.EqualFold(r.URL.Query().Get("fresh"), "true")
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		doc := config.File{
-			Projects: opts.Projects,
-			Local:    opts.Local,
-			Upstream: opts.Upstream,
-		}
+		doc, poll := live.snapshot()
 		payload := opts.Dash.Collect(ctx, doc, fresh)
-		payload.PollIntervalSeconds = opts.PollSeconds
+		payload.PollIntervalSeconds = poll
 		if err := ctx.Err(); err != nil {
 			http.Error(w, "dashboard timed out or canceled", http.StatusGatewayTimeout)
 			return
@@ -105,9 +116,10 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		doc, _ := live.snapshot()
 		projectID := strings.TrimSpace(r.URL.Query().Get("project"))
 		runID := strings.TrimSpace(r.URL.Query().Get("run_id"))
-		p, ok := dashboard.FindProject(opts.Projects, projectID)
+		p, ok := dashboard.FindProject(doc.Projects, projectID)
 		if !ok {
 			http.Error(w, "unknown project", http.StatusBadRequest)
 			return
@@ -140,7 +152,8 @@ func NewMux(opts Options) http.Handler {
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			return
 		}
-		p, ok := dashboard.FindProject(opts.Projects, body.ProjectID)
+		doc, _ := live.snapshot()
+		p, ok := dashboard.FindProject(doc.Projects, body.ProjectID)
 		if !ok {
 			http.Error(w, "unknown project", http.StatusBadRequest)
 			return
@@ -183,11 +196,7 @@ func NewMux(opts Options) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		doc := config.File{
-			Projects: opts.Projects,
-			Local:    opts.Local,
-			Upstream: opts.Upstream,
-		}
+		doc, _ := live.snapshot()
 		if err := opts.Dash.PruneSafe(ctx, doc, body); err != nil {
 			code := http.StatusInternalServerError
 			if dashboard.IsBadRequest(err) {
@@ -214,11 +223,7 @@ func NewMux(opts Options) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
-		doc := config.File{
-			Projects: opts.Projects,
-			Local:    opts.Local,
-			Upstream: opts.Upstream,
-		}
+		doc, _ := live.snapshot()
 		result, err := opts.Dash.PullFF(ctx, doc, body)
 		if err != nil {
 			code := http.StatusInternalServerError
@@ -252,17 +257,13 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "project_id is required", http.StatusBadRequest)
 			return
 		}
-		if _, ok := dashboard.FindProject(opts.Projects, body.ProjectID); !ok {
+		doc, _ := live.snapshot()
+		if _, ok := dashboard.FindProject(doc.Projects, body.ProjectID); !ok {
 			http.Error(w, "unknown project", http.StatusBadRequest)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()
-		doc := config.File{
-			Projects: opts.Projects,
-			Local:    opts.Local,
-			Upstream: opts.Upstream,
-		}
 		abs, err := opts.Dash.RequireMappedPath(ctx, doc, body.ProjectID, body.WorktreePath)
 		if err != nil {
 			code := http.StatusBadRequest
