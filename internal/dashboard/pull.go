@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/forge"
@@ -60,7 +61,7 @@ func (s *Service) PullFF(ctx context.Context, doc config.File, req PullFFRequest
 	if len(doc.Local.Roots) > 0 {
 		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
 	}
-	local := s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects))
+	local := s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects), false, time.Duration(doc.EffectiveFetchSeconds())*time.Second)
 	if local == nil || !local.Mapped {
 		return zero, badRequest("project has no mapped local checkout")
 	}
@@ -144,7 +145,7 @@ func (s *Service) RequireMappedPath(ctx context.Context, doc config.File, projec
 	if len(doc.Local.Roots) > 0 {
 		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
 	}
-	local := s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects))
+	local := s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects), false, time.Duration(doc.EffectiveFetchSeconds())*time.Second)
 	if local == nil || !local.Mapped {
 		return "", badRequest("project has no mapped local checkout")
 	}

@@ -6,27 +6,26 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 )
 
 // configLive reloads config from disk when the file mtime advances.
-// When the tracked project set changes, it clears the forge TTL cache
+// When the tracked project set changes, it clears forge and origin-fetch TTL caches
 // so the board reflects gitboard sync without a serve restart.
 type configLive struct {
-	mu    sync.Mutex
-	path  string
-	mod   time.Time
-	doc   config.File
-	poll  int
-	cache *forge.TTLCache
+	mu          sync.Mutex
+	path        string
+	mod         time.Time
+	doc         config.File
+	poll        int
+	clearCaches func()
 }
 
-func newConfigLive(path string, doc config.File, poll int, cache *forge.TTLCache) *configLive {
+func newConfigLive(path string, doc config.File, poll int, clearCaches func()) *configLive {
 	cl := &configLive{
-		path:  path,
-		doc:   doc,
-		poll:  poll,
-		cache: cache,
+		path:        path,
+		doc:         doc,
+		poll:        poll,
+		clearCaches: clearCaches,
 	}
 	if path != "" {
 		if st, err := os.Stat(path); err == nil {
@@ -61,7 +60,9 @@ func (c *configLive) snapshot() (config.File, int) {
 		return c.doc, c.poll
 	}
 	if projectsChanged(c.doc.Projects, doc.Projects) {
-		c.cache.Clear()
+		if c.clearCaches != nil {
+			c.clearCaches()
+		}
 	}
 	c.doc = doc
 	c.mod = mod

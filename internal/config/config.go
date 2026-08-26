@@ -32,6 +32,9 @@ type Local struct {
 	// Roots are directories to scan for git checkouts (and worktrees).
 	// Matching uses origin remote URL against project host+path.
 	Roots []string `yaml:"roots"`
+	// FetchSeconds TTL-gates git fetch origin before local↔origin sync.
+	// nil → default 120; explicit 0 always fetches; negative → default.
+	FetchSeconds *int `yaml:"fetch_seconds"`
 }
 
 // LLM holds optional AI triage settings.
@@ -130,8 +133,10 @@ upstream:
 
 # Optional: scan these trees for local checkouts (incl. git worktrees).
 # Match is via origin remote → project host/path. Override per project with local_path.
+# fetch_seconds TTL-gates git fetch origin before ↑/↓ sync (0 = always fetch).
 local:
   roots: []
+  fetch_seconds: 120
 
 sync:
   github:
@@ -152,6 +157,9 @@ const DefaultHeadsSeconds = 120
 
 // DefaultMergedSeconds caches merged reviews when upstream.merged_seconds is omitted.
 const DefaultMergedSeconds = 600
+
+// DefaultFetchSeconds caches git fetch origin when local.fetch_seconds is omitted.
+const DefaultFetchSeconds = 120
 
 // Dir returns ~/.config/gitboard (or $XDG_CONFIG_HOME/gitboard).
 func Dir() string {
@@ -404,6 +412,18 @@ func (f File) EffectiveMergedSeconds() int {
 		return DefaultMergedSeconds
 	}
 	return *f.Upstream.MergedSeconds
+}
+
+// EffectiveFetchSeconds returns the git fetch origin TTL in seconds.
+// Explicit 0 disables caching (always fetch). Negative values fall back to the default.
+func (f File) EffectiveFetchSeconds() int {
+	if f.Local.FetchSeconds == nil {
+		return DefaultFetchSeconds
+	}
+	if *f.Local.FetchSeconds < 0 {
+		return DefaultFetchSeconds
+	}
+	return *f.Local.FetchSeconds
 }
 
 // AgentsDir is where agentsession stores sessions (<config Dir>/agents).

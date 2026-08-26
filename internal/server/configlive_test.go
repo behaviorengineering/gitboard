@@ -43,7 +43,7 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := newConfigLive(path, doc, doc.EffectivePollSeconds(), cache)
+	live := newConfigLive(path, doc, doc.EffectivePollSeconds(), cache.Clear)
 	got, _ := live.snapshot()
 	if len(got.Projects) != 1 || got.Projects[0].ID != "a" {
 		t.Fatalf("initial: %+v", got.Projects)

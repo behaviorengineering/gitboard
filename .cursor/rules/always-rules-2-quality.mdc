@@ -39,5 +39,6 @@ These rules apply to all code in this repo.
 
 ## Related
 
-- Go coding: `rules-for-golang-coding.mdc`
+- Shared Go workflow: `golang.mdc` → `golang-quality`
+- Gitboard Go invariants: `rules-for-golang-coding.mdc`
 - Layout and API: `architecture.mdc`

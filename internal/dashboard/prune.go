@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/forge"
@@ -83,7 +84,7 @@ func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeR
 	if len(doc.Local.Roots) > 0 {
 		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
 	}
-	row.Local = s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects))
+	row.Local = s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects), true, time.Duration(doc.EffectiveFetchSeconds())*time.Second)
 	if row.Local == nil || !row.Local.Mapped {
 		return badRequest("project has no mapped local checkout")
 	}
