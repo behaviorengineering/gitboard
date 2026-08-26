@@ -7,8 +7,14 @@ import "strings"
 // Likely: remote head gone, clean tree, merged lookup succeeded, no merged match.
 // Main is the primary worktree (first git worktree list entry), not "never prune";
 // only the default branch name is excluded.
+//
+// Fail closed: when RemoteNamesOK is false (heads unknown or incomplete), no hints
+// are set. Remote membership never falls back to the UI-capped Branches list.
 func EnrichPruneHints(summary *ProjectSummary) {
 	if summary == nil || summary.Local == nil {
+		return
+	}
+	if !summary.RemoteNamesOK {
 		return
 	}
 
@@ -26,9 +32,6 @@ func EnrichPruneHints(summary *ProjectSummary) {
 		name := trimBranch(b.Name)
 		if name == "" {
 			continue
-		}
-		if len(summary.RemoteNames) == 0 {
-			remote[name] = struct{}{}
 		}
 		if b.OpenReview {
 			open[name] = struct{}{}

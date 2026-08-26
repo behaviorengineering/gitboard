@@ -56,11 +56,11 @@ func (c *Client) Chat(ctx context.Context, system, user string) (content, model 
 	}
 	rawBody, err := json.Marshal(body)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("llm marshal: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(rawBody))
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("llm request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if c.APIKey != "" {
@@ -68,12 +68,12 @@ func (c *Client) Chat(ctx context.Context, system, user string) (content, model 
 	}
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("llm chat: %w", err)
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("llm read: %w", err)
 	}
 	if resp.StatusCode >= 400 {
 		return "", "", fmt.Errorf("llm %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
@@ -87,7 +87,7 @@ func (c *Client) Chat(ctx context.Context, system, user string) (content, model 
 		Model string `json:"model"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("llm parse: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
 		return "", "", fmt.Errorf("llm: empty choices")

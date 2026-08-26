@@ -134,6 +134,12 @@ func TestPruneSafeValidation(t *testing.T) {
 	if !IsBadRequest(err) {
 		t.Fatalf("unknown project want bad request, got %v", err)
 	}
+	err = s.PruneSafe(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PruneSafeRequest{
+		ProjectID: "p", Branch: "evil:ref", WorktreePath: "/tmp/x",
+	})
+	if !IsBadRequest(err) {
+		t.Fatalf("invalid branch want bad request, got %v", err)
+	}
 }
 
 func TestPullFFValidation(t *testing.T) {

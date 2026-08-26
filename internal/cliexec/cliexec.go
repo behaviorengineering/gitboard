@@ -31,11 +31,6 @@ func (r *Runner) LookPath(name string) (string, error) {
 	return exec.LookPath(name)
 }
 
-// LookPath reports whether name is on PATH (package helper for callers without a Runner).
-func LookPath(name string) (string, error) {
-	return exec.LookPath(name)
-}
-
 // RunJSON runs argv and expects JSON on stdout.
 func (r *Runner) RunJSON(ctx context.Context, name string, args ...string) ([]byte, error) {
 	out, err := r.Run(ctx, name, args...)
@@ -54,7 +49,11 @@ func (r *Runner) Run(ctx context.Context, name string, args ...string) ([]byte, 
 	if r == nil {
 		r = New()
 	}
-	runCtx, cancel := context.WithTimeout(ctx, r.Timeout)
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = 45 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, name, args...)

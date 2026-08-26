@@ -260,11 +260,11 @@ func investigateFakeGit(t *testing.T) (*fakeExec, string) {
 	dir := t.TempDir()
 	fx := &fakeExec{
 		responses: map[string][]byte{
-			"status --porcelain":           []byte(""),
-			"merge-base":                   []byte("abc"),
+			"status --porcelain":            []byte(""),
+			"merge-base":                    []byte("abc"),
 			"rev-list --left-right --count": []byte("0\t0"),
-			"log --oneline":                []byte(""),
-			"diff --name-only":             []byte(""),
+			"log --oneline":                 []byte(""),
+			"diff --name-only":              []byte(""),
 		},
 	}
 	return fx, dir
@@ -298,9 +298,9 @@ func TestPruneInvestigateLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	projects := []config.Project{
-		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
-	dash := dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), nil)
+	dash := dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
 		Projects: projects,
 		Dash:     dash,
@@ -348,11 +348,11 @@ func TestPruneInvestigateLLMFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	projects := []config.Project{
-		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
 	mux := server.NewMux(server.Options{
 		Projects: projects,
-		Dash:     dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), nil),
+		Dash:     dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), localgit.NewInspector(fx)),
 		Prune:    prune,
 	})
 	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"feat/x","worktree_path":%q,"default_branch":"main"}`, dir)

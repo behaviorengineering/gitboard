@@ -130,6 +130,9 @@ func TestGitHubProjectSummaryHappy(t *testing.T) {
 	if !sum.MergedOK || len(sum.Merged) != 1 || sum.Merged[0].Branch != "feat/old" {
 		t.Fatalf("merged: ok=%v %+v", sum.MergedOK, sum.Merged)
 	}
+	if !sum.RemoteNamesOK {
+		t.Fatal("expected RemoteNamesOK")
+	}
 	var feat *BranchRef
 	for i := range sum.Branches {
 		if sum.Branches[i].Name == "feat/x" {
@@ -164,8 +167,8 @@ func TestGitLabProjectSummaryHappy(t *testing.T) {
 	if sum.Error != "" {
 		t.Fatalf("error: %s", sum.Error)
 	}
-	if len(sum.RemoteNames) != 2 {
-		t.Fatalf("remote names: %v", sum.RemoteNames)
+	if !sum.RemoteNamesOK || len(sum.RemoteNames) != 2 {
+		t.Fatalf("remote names: ok=%v %v", sum.RemoteNamesOK, sum.RemoteNames)
 	}
 	if sum.CI == nil || sum.CI.RunID != "55" || sum.CI.Status != "success" {
 		t.Fatalf("ci: %+v", sum.CI)

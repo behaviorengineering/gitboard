@@ -52,6 +52,9 @@ func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeR
 	if projectID == "" || branch == "" || worktreePath == "" {
 		return badRequest("project_id, branch, and worktree_path are required")
 	}
+	if err := localgit.ValidateBranchName(branch); err != nil {
+		return badRequest(err.Error())
+	}
 	p, ok := FindProject(doc.Projects, projectID)
 	if !ok {
 		return badRequest("unknown project")
@@ -73,11 +76,20 @@ func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeR
 		MergedTTL: 0,
 	}
 	row := s.summarize(ctx, p, opts)
+	if !row.RemoteNamesOK {
+		return badRequest("cannot re-validate remote heads; refuse prune")
+	}
 	var disc localgit.Discovery
 	if len(doc.Local.Roots) > 0 {
 		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
 	}
 	row.Local = s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects))
+	if row.Local == nil || !row.Local.Mapped {
+		return badRequest("project has no mapped local checkout")
+	}
+	if !repoPathAllowed(row.Local, abs) {
+		return badRequest("worktree_path is not a mapped checkout for this project")
+	}
 	forge.EnrichPruneHints(&row)
 
 	wt, ok := findSafeWorktree(row.Local, branch, abs)
@@ -89,6 +101,9 @@ func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeR
 		defaultBranch = "main"
 	}
 	if err := s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch); err != nil {
+		if errors.Is(err, localgit.ErrInvalidBranch) || errors.Is(err, localgit.ErrDirtyTree) {
+			return badRequest(err.Error())
+		}
 		return fmt.Errorf("remove checkout: %w", err)
 	}
 	return nil

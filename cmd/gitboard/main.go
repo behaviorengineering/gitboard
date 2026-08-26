@@ -3,13 +3,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/cliexec"
@@ -56,24 +59,45 @@ func main() {
 		}
 	}
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
 		log.Fatal(err)
 	}
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, `gitboard — GitLab + GitHub code-change board (gh + glab)
+	fmt.Fprintf(w, `gitboard - GitLab + GitHub code-change board (gh + glab)
 
 Usage:
-  gitboard init
+  gitboard init [-config path]
   gitboard sync [flags]
   gitboard serve [flags]
 
-Config: %s
+Commands:
+  init   Create config if missing (never overwrite)
+  sync   Discover repos and select tracked projects
+  serve  Run the local dashboard (default :1325)
+
+Sync flags:
+  -config path          Config file (default: %s)
+  -host github|gitlab   Limit discovery to one forge
+  -add owner/repo       Non-interactive: add a project (requires -host)
+  -remove id            Non-interactive: remove a project by id
+  -dry-run              Discover / print without writing
+
+Serve flags:
+  -config path          Config file
+  -projects path        Legacy alias for -config
+  -addr host:port       Listen address (default 127.0.0.1:1325)
+  -allow-non-localhost  Allow bind outside loopback
+
 `, config.DefaultPath())
 }
 
 func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	path := fs.String("config", config.DefaultPath(), "config file path")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -93,6 +117,7 @@ func runInit(args []string) error {
 
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	configPath := fs.String("config", config.DefaultPath(), "config file path")
 	projectsPath := fs.String("projects", "", "legacy alias for -config")
 	addr := fs.String("addr", "127.0.0.1:1325", "listen address (localhost only)")
@@ -112,13 +137,18 @@ func runServe(args []string) error {
 		return fmt.Errorf("%w\nrun: gitboard init && gitboard sync", err)
 	}
 	oi := doc.EffectiveOpenInference()
+	oiEnabled := oi.Enabled != nil && *oi.Enabled
 	var dumpDir string
-	if oi.Enabled != nil && *oi.Enabled && oi.FailureDump.Enabled != nil && *oi.FailureDump.Enabled {
+	if oiEnabled && oi.FailureDump.Enabled != nil && *oi.FailureDump.Enabled {
 		dumpDir = oi.FailureDump.Dir
+	}
+	var otlpEndpoint string
+	if oiEnabled {
+		otlpEndpoint = oi.Endpoint
 	}
 	tp, err := observability.Init(observability.InitConfig{
 		ServiceName:            oi.ServiceName,
-		OTLPEndpoint:           oi.Endpoint,
+		OTLPEndpoint:           otlpEndpoint,
 		FailureDumpDir:         dumpDir,
 		FailureDumpMaxAgeHours: oi.FailureDump.MaxAgeHours,
 		FailureDumpMaxFiles:    oi.FailureDump.MaxFiles,
@@ -129,10 +159,13 @@ func runServe(args []string) error {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = observability.Shutdown(ctx, tp)
+		if err := observability.Shutdown(ctx, tp); err != nil {
+			log.Printf("gitboard: observability shutdown: %v", err)
+		}
 	}()
 
 	run := cliexec.New()
+	run.Timeout = 120 * time.Second
 	local := localgit.NewInspector(run)
 	dash := dashboard.New(forge.NewGitHub(run), forge.NewGitLab(run), local)
 	llmClient := llm.New(doc.EffectiveLLM())
@@ -155,11 +188,35 @@ func runServe(args []string) error {
 		doc.EffectiveHeadsSeconds(), doc.EffectiveMergedSeconds())
 	log.Printf("gitboard: uses gh and glab; local roots=%d; AI triage via llm in config; agents %s",
 		len(doc.Local.Roots), config.AgentsDir())
-	return http.ListenAndServe(*addr, handler)
+
+	srv := &http.Server{Addr: *addr, Handler: handler}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case sig := <-sigCh:
+		log.Printf("gitboard: shutting down (%s)", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			return fmt.Errorf("shutdown: %w", err)
+		}
+		return nil
+	}
 }
 
 func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	configPath := fs.String("config", config.DefaultPath(), "config file path")
 	hostFilter := fs.String("host", "", "limit discovery to github or gitlab")
 	addPath := fs.String("add", "", "non-interactive: add owner/repo (requires -host)")

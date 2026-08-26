@@ -1,7 +1,6 @@
 package syncproj
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -253,38 +252,6 @@ func FormatCandidates(w io.Writer, cands []Candidate) {
 		}
 		fmt.Fprintf(w, "[%d] [%s] %s %s\n", c.Index, mark, c.Host, c.Path)
 	}
-}
-
-// PromptLine reads one line from in after writing prompt to out.
-func PromptLine(out io.Writer, in io.Reader, prompt string) (string, error) {
-	fmt.Fprint(out, prompt)
-	sc := bufio.NewScanner(in)
-	if !sc.Scan() {
-		if err := sc.Err(); err != nil {
-			return "", err
-		}
-		return "", nil
-	}
-	return sc.Text(), nil
-}
-
-// PromptCSVList asks for comma-separated values (orgs or groups).
-func PromptCSVList(out io.Writer, in io.Reader, prompt string) ([]string, error) {
-	line, err := PromptLine(out, in, prompt)
-	if err != nil {
-		return nil, err
-	}
-	parts := strings.FieldsFunc(line, func(r rune) bool {
-		return r == ',' || r == ' ' || r == ';'
-	})
-	var outList []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			outList = append(outList, p)
-		}
-	}
-	return outList, nil
 }
 
 func trackKey(host config.Host, path string) string {

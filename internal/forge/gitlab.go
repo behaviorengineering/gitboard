@@ -55,7 +55,9 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project, opts Summ
 		if summary.Error == "" {
 			summary.Error = err.Error()
 		}
+		summary.RemoteNamesOK = false
 	} else {
+		summary.RemoteNamesOK = true
 		if heads.DefaultBranch != "" {
 			branches.setDefault(heads.DefaultBranch)
 		}
@@ -88,35 +90,53 @@ func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project, opts Summ
 func (g *GitLab) loadHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
 	var snap HeadsSnapshot
 	encoded := strings.ReplaceAll(repo, "/", "%2F")
-	if raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"?simple=true"); err == nil {
-		var meta struct {
-			DefaultBranch string `json:"default_branch"`
-		}
-		if json.Unmarshal(raw, &meta) == nil {
-			snap.DefaultBranch = meta.DefaultBranch
-		}
-	}
-	raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"/repository/branches?per_page=100")
+	raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"?simple=true")
 	if err != nil {
-		return snap, err
+		return snap, fmt.Errorf("gitlab default branch: %w", err)
 	}
-	var heads []struct {
-		Name   string `json:"name"`
-		WebURL string `json:"web_url"`
-		Commit struct {
-			CommittedDate string `json:"committed_date"`
-			AuthoredDate  string `json:"authored_date"`
-		} `json:"commit"`
+	var meta struct {
+		DefaultBranch string `json:"default_branch"`
 	}
-	if err := json.Unmarshal(raw, &heads); err != nil {
-		return snap, err
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return snap, fmt.Errorf("parse gitlab default branch: %w", err)
 	}
-	for _, h := range heads {
-		snap.Heads = append(snap.Heads, RemoteHead{
-			Name:      h.Name,
-			UpdatedAt: firstNonEmpty(h.Commit.CommittedDate, h.Commit.AuthoredDate),
-			WebURL:    h.WebURL,
-		})
+	snap.DefaultBranch = meta.DefaultBranch
+
+	const perPage = 100
+	const maxPages = 50
+	for page := 1; page <= maxPages; page++ {
+		path := fmt.Sprintf("projects/%s/repository/branches?per_page=%d&page=%d", encoded, perPage, page)
+		raw, err := g.Run.RunJSON(ctx, "glab", "api", path)
+		if err != nil {
+			return snap, err
+		}
+		var heads []struct {
+			Name   string `json:"name"`
+			WebURL string `json:"web_url"`
+			Commit struct {
+				CommittedDate string `json:"committed_date"`
+				AuthoredDate  string `json:"authored_date"`
+			} `json:"commit"`
+		}
+		if err := json.Unmarshal(raw, &heads); err != nil {
+			return snap, err
+		}
+		if len(heads) == 0 {
+			break
+		}
+		for _, h := range heads {
+			snap.Heads = append(snap.Heads, RemoteHead{
+				Name:      h.Name,
+				UpdatedAt: firstNonEmpty(h.Commit.CommittedDate, h.Commit.AuthoredDate),
+				WebURL:    h.WebURL,
+			})
+		}
+		if len(heads) < perPage {
+			break
+		}
+		if page == maxPages {
+			return snap, fmt.Errorf("gitlab branches: truncated after %d pages", maxPages)
+		}
 	}
 	return snap, nil
 }

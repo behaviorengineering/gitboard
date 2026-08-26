@@ -55,7 +55,9 @@ func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project, opts Summ
 		if summary.Error == "" {
 			summary.Error = err.Error()
 		}
+		summary.RemoteNamesOK = false
 	} else {
+		summary.RemoteNamesOK = true
 		if heads.DefaultBranch != "" {
 			branches.setDefault(heads.DefaultBranch)
 		}
@@ -87,39 +89,56 @@ func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project, opts Summ
 
 func (g *GitHub) loadHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
 	var snap HeadsSnapshot
-	if raw, err := g.Run.RunJSON(ctx, "gh", "api", "repos/"+repo, "--jq", "{default: .default_branch}"); err == nil {
+	if raw, err := g.Run.RunJSON(ctx, "gh", "api", "repos/"+repo, "--jq", "{default: .default_branch}"); err != nil {
+		return snap, fmt.Errorf("github default branch: %w", err)
+	} else {
 		var meta struct {
 			Default string `json:"default"`
 		}
-		if json.Unmarshal(raw, &meta) == nil {
-			snap.DefaultBranch = meta.Default
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			return snap, fmt.Errorf("parse github default branch: %w", err)
 		}
+		snap.DefaultBranch = meta.Default
 	}
-	raw, err := g.Run.RunJSON(ctx, "gh", "api", "repos/"+repo+"/branches?per_page=100")
-	if err != nil {
-		return snap, err
-	}
-	var heads []struct {
-		Name   string `json:"name"`
-		Commit struct {
+	const perPage = 100
+	const maxPages = 50
+	for page := 1; page <= maxPages; page++ {
+		path := fmt.Sprintf("repos/%s/branches?per_page=%d&page=%d", repo, perPage, page)
+		raw, err := g.Run.RunJSON(ctx, "gh", "api", path)
+		if err != nil {
+			return snap, err
+		}
+		var heads []struct {
+			Name   string `json:"name"`
 			Commit struct {
-				Committer struct {
-					Date string `json:"date"`
-				} `json:"committer"`
-				Author struct {
-					Date string `json:"date"`
-				} `json:"author"`
+				Commit struct {
+					Committer struct {
+						Date string `json:"date"`
+					} `json:"committer"`
+					Author struct {
+						Date string `json:"date"`
+					} `json:"author"`
+				} `json:"commit"`
 			} `json:"commit"`
-		} `json:"commit"`
-	}
-	if err := json.Unmarshal(raw, &heads); err != nil {
-		return snap, err
-	}
-	for _, h := range heads {
-		snap.Heads = append(snap.Heads, RemoteHead{
-			Name:      h.Name,
-			UpdatedAt: firstNonEmpty(h.Commit.Commit.Committer.Date, h.Commit.Commit.Author.Date),
-		})
+		}
+		if err := json.Unmarshal(raw, &heads); err != nil {
+			return snap, err
+		}
+		if len(heads) == 0 {
+			break
+		}
+		for _, h := range heads {
+			snap.Heads = append(snap.Heads, RemoteHead{
+				Name:      h.Name,
+				UpdatedAt: firstNonEmpty(h.Commit.Commit.Committer.Date, h.Commit.Commit.Author.Date),
+			})
+		}
+		if len(heads) < perPage {
+			break
+		}
+		if page == maxPages {
+			return snap, fmt.Errorf("github branches: truncated after %d pages", maxPages)
+		}
 	}
 	return snap, nil
 }

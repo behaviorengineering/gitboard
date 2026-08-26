@@ -11,6 +11,9 @@ import (
 //
 // Linked worktree: remove the worktree path, then delete the branch from the main tree.
 // Main worktree on the branch: switch to defaultBranch, then delete the branch.
+//
+// Uses `git branch -D` because squash-merged branches are often not ancestors of default.
+// Callers must re-check forge prune safety first. Branch names are validated; dirty trees refuse.
 func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branch, defaultBranch string) error {
 	if in == nil {
 		return fmt.Errorf("inspector missing")
@@ -20,8 +23,14 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 	if branch == "" {
 		return fmt.Errorf("branch is required")
 	}
+	if err := ValidateBranchName(branch); err != nil {
+		return err
+	}
 	if defaultBranch == "" {
 		defaultBranch = "main"
+	}
+	if err := ValidateBranchName(defaultBranch); err != nil {
+		return fmt.Errorf("default branch: %w", err)
 	}
 	if branch == defaultBranch {
 		return fmt.Errorf("refusing to remove default branch %q", branch)
@@ -66,11 +75,22 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 	if target.Detached {
 		return fmt.Errorf("refusing to remove detached HEAD checkout")
 	}
+	if target.Locked {
+		return fmt.Errorf("refusing to remove locked worktree")
+	}
 	if target.Branch != branch {
 		if target.Branch == "" {
 			return fmt.Errorf("worktree branch unknown; expected %q", branch)
 		}
 		return fmt.Errorf("worktree is on %q, not %q", target.Branch, branch)
+	}
+
+	detail, err := in.inspectWorktree(ctx, abs, target.Main)
+	if err != nil {
+		return fmt.Errorf("re-check worktree: %w", err)
+	}
+	if detail.Dirty {
+		return fmt.Errorf("%w at %s; commit or stash before remove", ErrDirtyTree, abs)
 	}
 
 	if target.Main {

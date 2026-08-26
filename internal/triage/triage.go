@@ -39,11 +39,6 @@ func New(cfg config.LLM) *Analyzer {
 	return &Analyzer{LLM: llm.New(cfg)}
 }
 
-// NewFromEnv builds an analyzer from environment only (no config file).
-func NewFromEnv() *Analyzer {
-	return New(config.File{}.EffectiveLLM())
-}
-
 func (a *Analyzer) Enabled() bool {
 	return a != nil && a.LLM.Enabled()
 }

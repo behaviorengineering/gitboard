@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/behaviorengineering/gitboard/internal/cliexec"
 )
@@ -101,6 +102,11 @@ func (in *Inspector) InspectPath(ctx context.Context, path string) Status {
 		}
 		detail, detailErr := in.inspectWorktree(ctx, trees[i].Path, trees[i].Main)
 		if detailErr != nil {
+			// Fail closed for prune: never leave Dirty as a false zero-value.
+			trees[i].Dirty = true
+			if trees[i].Branch == "" {
+				trees[i].Branch = "unknown"
+			}
 			continue
 		}
 		detail.Main = trees[i].Main
@@ -266,10 +272,16 @@ func (in *Inspector) EnrichOriginSync(ctx context.Context, st *Status) {
 	}
 	localNames, err := in.listRefShortNames(ctx, st.Path, "refs/heads/")
 	if err != nil {
+		if st.Error == "" {
+			st.Error = "list local branches: " + err.Error()
+		}
 		return
 	}
 	remoteNames, err := in.listRefShortNames(ctx, st.Path, "refs/remotes/origin/")
 	if err != nil {
+		if st.Error == "" {
+			st.Error = "list origin branches: " + err.Error()
+		}
 		return
 	}
 	remoteSet := make(map[string]struct{}, len(remoteNames))
@@ -293,12 +305,14 @@ func (in *Inspector) EnrichOriginSync(ctx context.Context, st *Status) {
 
 	syncs := make([]BranchSync, len(names))
 	var wg sync.WaitGroup
+	var failed atomic.Bool
 	for i, name := range names {
 		wg.Add(1)
 		go func(i int, name string) {
 			defer wg.Done()
 			ahead, behind, ok := in.leftRight(ctx, st.Path, "refs/remotes/origin/"+name, "refs/heads/"+name)
 			if !ok {
+				failed.Store(true)
 				return
 			}
 			syncs[i] = BranchSync{Name: name, Ahead: ahead, Behind: behind}
@@ -306,6 +320,13 @@ func (in *Inspector) EnrichOriginSync(ctx context.Context, st *Status) {
 	}
 	wg.Wait()
 
+	if failed.Load() {
+		if st.Error == "" {
+			st.Error = "could not compare local branches to origin"
+		}
+		st.OriginSync = nil
+		return
+	}
 	out := make([]BranchSync, 0, len(syncs))
 	for _, s := range syncs {
 		if s.Name == "" {

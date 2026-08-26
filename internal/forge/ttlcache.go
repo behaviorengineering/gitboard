@@ -137,14 +137,7 @@ func (c *TTLCache) GetOrLoadMerged(key string, ttl time.Duration, fresh bool, lo
 
 	list, err := load()
 	if err != nil {
-		c.mu.Lock()
-		e = c.entry(key)
-		if e.hasMerged && e.mergedOK {
-			out := cloneMerged(e.merged)
-			c.mu.Unlock()
-			return out, true
-		}
-		c.mu.Unlock()
+		// Fail closed for prune: expired cache must not keep MergedOK after a failed refresh.
 		return nil, false
 	}
 

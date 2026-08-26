@@ -170,10 +170,10 @@ func Dir() string {
 // cwd config.yaml, cwd projects.yaml, else user config.yaml path (may not exist yet).
 func DefaultPath() string {
 	if v := strings.TrimSpace(os.Getenv("GITBOARD_CONFIG")); v != "" {
-		return v
+		return expandHome(v)
 	}
 	if v := strings.TrimSpace(os.Getenv("GITBOARD_PROJECTS")); v != "" {
-		return v
+		return expandHome(v)
 	}
 	userPath := filepath.Join(Dir(), "config.yaml")
 	if fileExists(userPath) {
@@ -189,6 +189,21 @@ func DefaultPath() string {
 		}
 	}
 	return userPath
+}
+
+func expandHome(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return p
+		}
+		if p == "~" {
+			return home
+		}
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }
 
 func fileExists(path string) bool {
@@ -323,15 +338,6 @@ func (p Project) OpenURL() string {
 	}
 }
 
-// OwnerRepo splits path into owner and repo (last two path segments).
-func (p Project) OwnerRepo() (string, string) {
-	parts := strings.Split(strings.Trim(p.Path, "/"), "/")
-	if len(parts) < 2 {
-		return "", ""
-	}
-	return parts[len(parts)-2], parts[len(parts)-1]
-}
-
 // EffectiveLLM merges file LLM settings with environment overrides.
 func (f File) EffectiveLLM() LLM {
 	base := firstNonEmpty(
@@ -452,9 +458,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// DefaultProjectsPath is retained for callers; prefer DefaultPath.
-func DefaultProjectsPath() string {
-	return DefaultPath()
 }

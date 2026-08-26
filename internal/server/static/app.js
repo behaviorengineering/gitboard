@@ -56,9 +56,25 @@ function onModalKeydown(ev) {
     closeModal(false);
   }
   if (ev.key === 'Enter') {
+    const confirmBtn = document.getElementById('modal-confirm');
+    const danger = confirmBtn?.classList.contains('modal-btn--danger');
+    // Enter confirms only non-destructive dialogs.
+    if (danger) return;
     ev.preventDefault();
     closeModal(true);
   }
+}
+
+function safeHref(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  try {
+    const u = new URL(raw, window.location.origin);
+    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+  } catch (_) {
+    /* ignore */
+  }
+  return '';
 }
 
 /**
@@ -457,7 +473,7 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
   const body = el('div', 'branch-body');
   const title = el('div', 'branch-title');
   if (b.default) title.appendChild(iconMark(ICONS.lock, 'mark--default', 'default branch'));
-  const nameHref = b.web_url || localWt?.merged_url || '';
+  const nameHref = safeHref(b.web_url || localWt?.merged_url || '');
   const name = el(nameHref ? 'a' : 'span', 'branch-name', b.name || '');
   if (nameHref) {
     name.href = nameHref;
@@ -527,12 +543,28 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
 
   const actions = el('div', 'branch-actions');
   const ci = ciMark(b.ci_status);
-  if (ci) actions.appendChild(ci);
-  else actions.appendChild(el('span', 'branch-ci-slot'));
+  if (ci) {
+    if (failed && (b.run_id || project.ci?.run_id)) {
+      const triageBtn = el('button', 'branch-ci-slot branch-triage');
+      triageBtn.type = 'button';
+      triageBtn.title = 'Show failed jobs and AI triage';
+      triageBtn.setAttribute('aria-label', triageBtn.title);
+      triageBtn.appendChild(ci);
+      triageBtn.addEventListener('click', () => {
+        void showFailures(project, b);
+      });
+      actions.appendChild(triageBtn);
+    } else {
+      actions.appendChild(ci);
+    }
+  } else {
+    actions.appendChild(el('span', 'branch-ci-slot'));
+  }
 
-  if (b.ci_url) {
+  const ciURL = safeHref(b.ci_url);
+  if (ciURL) {
     const go = el('a', 'branch-goto');
-    go.href = b.ci_url;
+    go.href = ciURL;
     go.target = '_blank';
     go.rel = 'noopener';
     go.title = b.ci_status ? `Open CI run (${b.ci_status})` : 'Open CI run';
@@ -1080,14 +1112,17 @@ function renderRows(projects) {
     }
     titleRow.appendChild(el('strong', '', row.label || row.id));
     if (row.open_url) {
-      const link = el('a', 'project-open');
-      link.href = row.open_url;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.title = 'Open repository';
-      link.setAttribute('aria-label', `Open ${row.label || row.id}`);
-      link.insertAdjacentHTML('beforeend', ICONS.external);
-      titleRow.appendChild(link);
+      const href = safeHref(row.open_url);
+      if (href) {
+        const link = el('a', 'project-open');
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.title = 'Open repository';
+        link.setAttribute('aria-label', `Open ${row.label || row.id}`);
+        link.insertAdjacentHTML('beforeend', ICONS.external);
+        titleRow.appendChild(link);
+      }
     }
     titleCell.appendChild(titleRow);
     const local = row.local;
@@ -1320,11 +1355,14 @@ async function showFailures(project, branch) {
     const row = el('div', 'job-row');
     row.appendChild(el('span', '', job.name || job.id));
     if (job.web_url) {
-      const a = el('a', '', 'log');
-      a.href = job.web_url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      row.appendChild(a);
+      const href = safeHref(job.web_url);
+      if (href) {
+        const a = el('a', '', 'log');
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        row.appendChild(a);
+      }
     }
     const ai = el('button', '', 'AI triage');
     ai.addEventListener('click', () => runTriage(project, job, runID));

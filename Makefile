@@ -4,7 +4,7 @@ BINARY := bin/gitboard
 CONFIG ?= $(HOME)/.config/gitboard/config.yaml
 
 help:
-	@echo "gitboard — GitLab + GitHub project dashboard (gh + glab)"
+	@echo "gitboard - GitLab + GitHub project dashboard (gh + glab)"
 	@echo ""
 	@echo "  make build       Build $(BINARY)"
 	@echo "  make test        go test ./..."

@@ -119,6 +119,7 @@ func TestValidateBranchName(t *testing.T) {
 		name string
 		ok   bool
 	}{
+		{"HEAD", false},
 		{"main", true},
 		{"feat/x", true},
 		{"feat/config-sync-dashboard", true},

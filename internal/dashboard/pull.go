@@ -116,3 +116,40 @@ func repoPathAllowed(local *forge.LocalStatus, abs string) bool {
 	}
 	return false
 }
+
+// RequireMappedPath expands path and ensures it belongs to the project's mapped checkouts.
+func (s *Service) RequireMappedPath(ctx context.Context, doc config.File, projectID, repoPath string) (string, error) {
+	if s == nil || s.Local == nil {
+		return "", fmt.Errorf("local git inspector missing")
+	}
+	projectID = strings.TrimSpace(projectID)
+	repoPath = strings.TrimSpace(repoPath)
+	if projectID == "" || repoPath == "" {
+		return "", badRequest("project_id and path are required")
+	}
+	p, ok := FindProject(doc.Projects, projectID)
+	if !ok {
+		return "", badRequest("unknown project")
+	}
+	abs, err := localgit.ExpandPath(repoPath)
+	if err != nil {
+		return "", badRequest(fmt.Sprintf("path: %v", err))
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	abs = filepath.Clean(abs)
+
+	var disc localgit.Discovery
+	if len(doc.Local.Roots) > 0 {
+		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
+	}
+	local := s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects))
+	if local == nil || !local.Mapped {
+		return "", badRequest("project has no mapped local checkout")
+	}
+	if !repoPathAllowed(local, abs) {
+		return "", badRequest("path is not a mapped checkout for this project")
+	}
+	return abs, nil
+}

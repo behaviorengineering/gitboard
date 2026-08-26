@@ -47,7 +47,7 @@ func TestTTLCacheHeadsHitMissFresh(t *testing.T) {
 	}
 }
 
-func TestTTLCacheMergedFailureKeepsPrior(t *testing.T) {
+func TestTTLCacheMergedFailureClearsOK(t *testing.T) {
 	cache := NewTTLCache()
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 	cache.SetNow(func() time.Time { return now })
@@ -65,8 +65,8 @@ func TestTTLCacheMergedFailureKeepsPrior(t *testing.T) {
 	}
 	now = now.Add(11 * time.Minute)
 	list, ok = cache.GetOrLoadMerged("github/o/r", 10*time.Minute, false, failLoad)
-	if !ok || len(list) != 1 || list[0].ID != 1 {
-		t.Fatalf("stale-ok after fail: ok=%v list=%v", ok, list)
+	if ok || list != nil {
+		t.Fatalf("expired fail must clear MergedOK: ok=%v list=%v", ok, list)
 	}
 }
 

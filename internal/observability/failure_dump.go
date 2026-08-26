@@ -84,6 +84,15 @@ func (p *failureDumpProcessor) OnEnd(s sdktrace.ReadOnlySpan) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if len(p.traces) > 256 {
+		// Bound memory when root spans never end.
+		for tid := range p.traces {
+			delete(p.traces, tid)
+			if len(p.traces) <= 128 {
+				break
+			}
+		}
+	}
 	buf := p.traces[traceID]
 	if buf == nil {
 		buf = &traceDumpBuffer{}

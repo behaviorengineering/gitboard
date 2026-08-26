@@ -27,6 +27,9 @@ func ValidateBranchName(branch string) error {
 	if branch == "" {
 		return fmt.Errorf("%w: empty", ErrInvalidBranch)
 	}
+	if strings.EqualFold(branch, "HEAD") {
+		return fmt.Errorf("%w: %q", ErrInvalidBranch, branch)
+	}
 	if strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, ".") {
 		return fmt.Errorf("%w: %q", ErrInvalidBranch, branch)
 	}

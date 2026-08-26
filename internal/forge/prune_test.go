@@ -4,7 +4,8 @@ import "testing"
 
 func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
 	summary := &ProjectSummary{
-		RemoteNames: []string{"main", "feat/open", "feat/still-remote"},
+		RemoteNames:   []string{"main", "feat/open", "feat/still-remote"},
+		RemoteNamesOK: true,
 		Branches: []BranchRef{
 			{Name: "main", Default: true},
 			{Name: "feat/open", OpenReview: true},
@@ -51,7 +52,8 @@ func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
 func TestEnrichPruneHintsUsesFullRemoteNames(t *testing.T) {
 	// Truncated Branches list omits feat/hidden-remote, but RemoteNames has it.
 	summary := &ProjectSummary{
-		RemoteNames: []string{"main", "feat/hidden-remote"},
+		RemoteNames:   []string{"main", "feat/hidden-remote"},
+		RemoteNamesOK: true,
 		Branches: []BranchRef{
 			{Name: "main", Default: true},
 		},
@@ -70,10 +72,55 @@ func TestEnrichPruneHintsUsesFullRemoteNames(t *testing.T) {
 	}
 }
 
+func TestEnrichPruneHintsRemoteNamesNotOKSuppressesAll(t *testing.T) {
+	summary := &ProjectSummary{
+		RemoteNamesOK: false,
+		Merged: []MergedReview{
+			{Branch: "feat/merged", ID: 1, MergedAt: "2026-08-20T10:00:00Z"},
+		},
+		MergedOK: true,
+		Local: &LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []LocalWorktree{
+				{Path: "/wt", Branch: "feat/merged"},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != "" {
+		t.Fatalf("heads unknown must suppress prune, got %q", got)
+	}
+}
+
+func TestEnrichPruneHintsEmptyRemoteNamesOKStillAllowsGone(t *testing.T) {
+	// Empty but successful heads list means every local-only branch is gone from remote.
+	summary := &ProjectSummary{
+		RemoteNames:   nil,
+		RemoteNamesOK: true,
+		Merged: []MergedReview{
+			{Branch: "feat/merged", ID: 1, MergedAt: "2026-08-20T10:00:00Z"},
+		},
+		MergedOK: true,
+		Local: &LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []LocalWorktree{
+				{Path: "/wt", Branch: "feat/merged"},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != PruneSafe {
+		t.Fatalf("want safe when heads OK and empty, got %q", got)
+	}
+}
+
 func TestEnrichPruneHintsMergedNotOKSuppressesLikely(t *testing.T) {
 	summary := &ProjectSummary{
-		RemoteNames: []string{"main"},
-		MergedOK:    false,
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		MergedOK:      false,
 		Local: &LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
@@ -90,7 +137,8 @@ func TestEnrichPruneHintsMergedNotOKSuppressesLikely(t *testing.T) {
 
 func TestEnrichPruneHintsPrimaryCheckout(t *testing.T) {
 	summary := &ProjectSummary{
-		RemoteNames: []string{"main"},
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
 		Branches: []BranchRef{
 			{Name: "main", Default: true},
 		},
@@ -125,7 +173,8 @@ func TestEnrichPruneHintsPrimaryCheckout(t *testing.T) {
 
 func TestEnrichPruneHintsMultiAppearanceWorktrees(t *testing.T) {
 	summary := &ProjectSummary{
-		RemoteNames: []string{"main"},
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
 		Branches: []BranchRef{
 			{Name: "main", Default: true},
 		},

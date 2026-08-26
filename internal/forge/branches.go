@@ -7,7 +7,7 @@ import (
 )
 
 // StaleAfter is how long without updates before a branch is marked stale.
-const StaleAfter = 14 * 24 * time.Hour
+const staleAfter = 14 * 24 * time.Hour
 
 type branchAccum struct {
 	byName map[string]*BranchRef
@@ -128,7 +128,7 @@ func (a *branchAccum) list() []BranchRef {
 	out := make([]BranchRef, 0, len(a.order))
 	for _, name := range a.order {
 		b := *a.byName[name]
-		if t, ok := parseTime(b.UpdatedAt); ok && now.Sub(t) > StaleAfter {
+		if t, ok := parseTime(b.UpdatedAt); ok && now.Sub(t) > staleAfter {
 			b.Stale = true
 		}
 		out = append(out, b)

@@ -68,9 +68,13 @@ type ProjectSummary struct {
 	Local     *LocalStatus   `json:"local,omitempty"`
 	Error     string         `json:"error,omitempty"`
 
-	// RemoteNames is the uncapped remote head set for prune matching (not sent to UI).
+	// RemoteNames is the full remote head set for prune matching (not sent to UI).
+	// Loaded via paginated forge API calls; may be incomplete only when RemoteNamesOK is false.
 	RemoteNames []string `json:"-"`
-	// MergedOK is true when the merged slice was loaded successfully (live or cache).
+	// RemoteNamesOK is true when heads were loaded successfully (live or cache).
+	// When false, EnrichPruneHints suppresses all prune hints (fail closed).
+	RemoteNamesOK bool `json:"-"`
+	// MergedOK is true when the merged slice was loaded successfully (live or fresh cache).
 	MergedOK bool `json:"-"`
 }
 

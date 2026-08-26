@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/cliexec"
 	"github.com/behaviorengineering/gitboard/internal/llm"
+	"github.com/behaviorengineering/gitboard/internal/localgit"
 	"github.com/behaviorengineering/strop/agentsession"
 )
 
@@ -105,10 +105,16 @@ func (s *Service) Investigate(ctx context.Context, req Request) (*Result, error)
 	if branch == "" || wt == "" {
 		return nil, fmt.Errorf("branch and worktree_path are required")
 	}
+	if err := localgit.ValidateBranchName(branch); err != nil {
+		return nil, err
+	}
 	if def == "" {
 		def = "main"
 	}
-	abs, err := filepath.Abs(wt)
+	if err := localgit.ValidateBranchName(def); err != nil {
+		return nil, fmt.Errorf("default branch: %w", err)
+	}
+	abs, err := localgit.ExpandPath(wt)
 	if err != nil {
 		return nil, fmt.Errorf("worktree path: %w", err)
 	}
@@ -264,6 +270,13 @@ func clampCard(ev Evidence, card Card) Card {
 			card.Summary = "Working tree is dirty; do not delete until changes are committed or discarded."
 		}
 	}
+	if !ev.RelatedHistories {
+		card.Verdict = "ask_user"
+		card.Command = ""
+		if card.Summary == "" {
+			card.Summary = "Branch history is unrelated to the default branch; inspect before deleting."
+		}
+	}
 	if ev.UniqueCommitN > 0 && card.Verdict == "drop" {
 		card.Verdict = "keep"
 		card.Command = ""
@@ -271,10 +284,9 @@ func clampCard(ev Evidence, card Card) Card {
 			card.Summary = "Unique commits remain on this branch; keep until you merge, cherry-pick, or explicitly drop that work."
 		}
 	}
-	if card.Verdict == "drop" && strings.TrimSpace(card.Command) == "" {
+	if card.Verdict == "drop" {
 		card.Command = dropCommand(ev)
-	}
-	if card.Verdict != "drop" {
+	} else {
 		card.Command = ""
 	}
 	return card
@@ -295,6 +307,8 @@ func (s *Service) gather(ctx context.Context, dir, branch, def string) (Evidence
 	if out, err := s.git(ctx, dir, "status", "--porcelain"); err == nil {
 		ev.Dirty = strings.TrimSpace(string(out)) != ""
 	} else {
+		// Fail closed: unknown dirty state must not recommend drop.
+		ev.Dirty = true
 		ev.Notes = append(ev.Notes, "status: "+err.Error())
 	}
 
