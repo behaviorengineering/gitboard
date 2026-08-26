@@ -216,3 +216,34 @@ func TestEnrichPruneHintsNilSafe(t *testing.T) {
 	EnrichPruneHints(nil)
 	EnrichPruneHints(&ProjectSummary{})
 }
+
+func TestEnrichPruneHintsPrefersForgeDefaultOverStaleOriginHEAD(t *testing.T) {
+	// Local origin/HEAD still points at the feature branch after a non-default clone.
+	summary := &ProjectSummary{
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		Branches: []BranchRef{
+			{Name: "main", Default: true},
+		},
+		Merged: []MergedReview{
+			{Branch: "feat/config-sync-dashboard", ID: 4, URL: "https://example/pr/4", MergedAt: "2026-08-26T05:12:17Z"},
+		},
+		MergedOK: true,
+		Local: &LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "feat/config-sync-dashboard",
+			Worktrees: []LocalWorktree{
+				{Path: "/repo", Branch: "feat/config-sync-dashboard", Main: true},
+			},
+		},
+	}
+
+	EnrichPruneHints(summary)
+
+	if got := summary.Local.DefaultBranch; got != "main" {
+		t.Fatalf("aligned default_branch: got %q want main", got)
+	}
+	if got := summary.Local.Worktrees[0].PruneHint; got != PruneSafe {
+		t.Fatalf("stale origin/HEAD must not block safe prune, got %q", got)
+	}
+}

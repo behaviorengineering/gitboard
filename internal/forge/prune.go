@@ -8,6 +8,10 @@ import "strings"
 // Main is the primary worktree (first git worktree list entry), not "never prune";
 // only the default branch name is excluded.
 //
+// The excluded default name prefers the forge-marked default over local origin/HEAD,
+// which can still point at a feature branch after a non-default clone. When the forge
+// default is known, Local.DefaultBranch is aligned to it for switch/prune callers.
+//
 // Fail closed: when RemoteNamesOK is false (heads unknown or incomplete), no hints
 // are set. Remote membership never falls back to the UI-capped Branches list.
 func EnrichPruneHints(summary *ProjectSummary) {
@@ -20,8 +24,6 @@ func EnrichPruneHints(summary *ProjectSummary) {
 
 	remote := make(map[string]struct{})
 	open := make(map[string]struct{})
-	defaultName := strings.TrimSpace(summary.Local.DefaultBranch)
-
 	for _, name := range summary.RemoteNames {
 		name = trimBranch(name)
 		if name != "" {
@@ -36,15 +38,36 @@ func EnrichPruneHints(summary *ProjectSummary) {
 		if b.OpenReview {
 			open[name] = struct{}{}
 		}
-		if b.Default && defaultName == "" {
-			defaultName = name
-		}
+	}
+
+	defaultName := resolveDefaultBranch(summary)
+	if defaultName != "" {
+		summary.Local.DefaultBranch = defaultName
 	}
 
 	mergedByBranch := newestMergedByBranch(summary.Merged)
 	for i := range summary.Local.Worktrees {
 		applyPruneHint(&summary.Local.Worktrees[i], defaultName, remote, open, mergedByBranch, summary.MergedOK)
 	}
+}
+
+// resolveDefaultBranch prefers the forge default branch over local origin/HEAD.
+func resolveDefaultBranch(summary *ProjectSummary) string {
+	if summary == nil {
+		return ""
+	}
+	for _, b := range summary.Branches {
+		if !b.Default {
+			continue
+		}
+		if name := trimBranch(b.Name); name != "" {
+			return name
+		}
+	}
+	if summary.Local == nil {
+		return ""
+	}
+	return strings.TrimSpace(summary.Local.DefaultBranch)
 }
 
 func newestMergedByBranch(merged []MergedReview) map[string]MergedReview {
