@@ -60,10 +60,29 @@ projects:
     label: gitboard
     host: github
     path: behaviorengineering/gitboard
-    local_path: ~/Xynova/ai/cr-case-intake/providers/gitboard
+    local_path: ~/Xynova/ai/gitboard
 ```
 
 The Local status sits beside each remote branch (laptop icon when checked out locally, dirty, and ↑/↓ versus origin for every local branch that has `origin/<name>`). When a branch is behind origin and the tree is clean, **pull** fast-forwards it (`git pull --ff-only`, or `git fetch origin branch:branch` when that branch is not checked out). Worktrees on branches with no remote head appear as “local only” rows.
+
+## strop (submodule + workspace)
+
+[strop](https://github.com/behaviorengineering/strop) lives at `providers/strop` as a git submodule. Root `go.work` wires it so `go build` / `go test` use that tree instead of the module cache.
+
+```bash
+git clone --recurse-submodules https://github.com/behaviorengineering/gitboard.git
+# or after clone:
+git submodule update --init --recursive
+```
+
+To move to a new strop release:
+
+```bash
+cd providers/strop && git fetch && git checkout vX.Y.Z && cd ../..
+go get github.com/behaviorengineering/strop@vX.Y.Z
+go work sync
+git add providers/strop go.mod go.sum go.work go.work.sum
+```
 
 ## Design
 
