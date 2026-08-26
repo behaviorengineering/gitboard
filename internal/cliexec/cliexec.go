@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+// Exec is the injectable CLI surface used by forge and local git callers.
+type Exec interface {
+	LookPath(name string) (string, error)
+	Run(ctx context.Context, name string, args ...string) ([]byte, error)
+	RunJSON(ctx context.Context, name string, args ...string) ([]byte, error)
+}
+
 // Runner executes external CLIs with a timeout.
 type Runner struct {
 	Timeout time.Duration
@@ -20,6 +27,11 @@ func New() *Runner {
 }
 
 // LookPath reports whether name is on PATH.
+func (r *Runner) LookPath(name string) (string, error) {
+	return exec.LookPath(name)
+}
+
+// LookPath reports whether name is on PATH (package helper for callers without a Runner).
 func LookPath(name string) (string, error) {
 	return exec.LookPath(name)
 }

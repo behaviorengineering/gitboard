@@ -228,4 +228,3 @@ func TestEffectiveUpstreamSeconds(t *testing.T) {
 		t.Fatalf("heads negative=%d", got)
 	}
 }
-

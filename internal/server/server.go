@@ -139,6 +139,71 @@ func NewMux(opts Options) http.Handler {
 		writeJSON(w, resp)
 	})
 
+	mux.HandleFunc("/api/prune/safe", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Dash == nil {
+			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var body dashboard.PruneSafeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		doc := config.File{
+			Projects: opts.Projects,
+			Local:    opts.Local,
+			Upstream: opts.Upstream,
+		}
+		if err := opts.Dash.PruneSafe(ctx, doc, body); err != nil {
+			code := http.StatusInternalServerError
+			if dashboard.IsBadRequest(err) {
+				code = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), code)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	})
+
+	mux.HandleFunc("/api/pull/ff", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Dash == nil {
+			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var body dashboard.PullFFRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		doc := config.File{
+			Projects: opts.Projects,
+			Local:    opts.Local,
+			Upstream: opts.Upstream,
+		}
+		result, err := opts.Dash.PullFF(ctx, doc, body)
+		if err != nil {
+			code := http.StatusInternalServerError
+			if dashboard.IsBadRequest(err) {
+				code = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), code)
+			return
+		}
+		writeJSON(w, result)
+	})
+
 	mux.HandleFunc("/api/agents/prune/investigate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

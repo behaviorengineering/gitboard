@@ -141,7 +141,7 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 		go func(i int, c localgit.Checkout) {
 			defer wg.Done()
 			st := s.Local.InspectPath(ctx, c.Path)
-			s.Local.EnrichDefault(ctx, &st)
+			s.Local.EnrichOriginSync(ctx, &st)
 			results[i] = inspected{checkout: c, status: st}
 		}(i, c)
 	}
@@ -182,7 +182,7 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 	if primaryLocal == nil {
 		// Explicit path inspect may have failed matching; inspect primary alone.
 		st := s.Local.InspectPath(ctx, primary.Path)
-		s.Local.EnrichDefault(ctx, &st)
+		s.Local.EnrichOriginSync(ctx, &st)
 		primaryLocal = toForgeLocal(st)
 	}
 	primaryLocal.Appearances = appearances
@@ -228,6 +228,7 @@ func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, pare
 		DefaultBranch: st.DefaultBranch,
 		DefaultBehind: st.DefaultBehind,
 		DefaultAhead:  st.DefaultAhead,
+		OriginSync:    originSyncToForge(st.OriginSync),
 	}
 	if app.Role == "" {
 		app.Role = forge.AppearanceStandalone
@@ -267,6 +268,7 @@ func toForgeLocal(st localgit.Status) *forge.LocalStatus {
 		DefaultBranch: st.DefaultBranch,
 		DefaultBehind: st.DefaultBehind,
 		DefaultAhead:  st.DefaultAhead,
+		OriginSync:    originSyncToForge(st.OriginSync),
 	}
 	for _, wt := range st.Worktrees {
 		if wt.Bare {
@@ -283,6 +285,17 @@ func toForgeLocal(st localgit.Status) *forge.LocalStatus {
 			Behind:   wt.Behind,
 			Upstream: wt.Upstream,
 		})
+	}
+	return out
+}
+
+func originSyncToForge(in []localgit.BranchSync) []forge.BranchOriginSync {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]forge.BranchOriginSync, len(in))
+	for i, s := range in {
+		out[i] = forge.BranchOriginSync{Name: s.Name, Ahead: s.Ahead, Behind: s.Behind}
 	}
 	return out
 }
@@ -330,11 +343,23 @@ func FindProject(projects []config.Project, id string) (config.Project, bool) {
 }
 
 // ClientFor returns the forge client for a project host.
+// A missing client is a true nil interface (not a typed nil pointer).
 func ClientFor(s *Service, p config.Project) forge.Client {
+	if s == nil {
+		return nil
+	}
 	switch p.Host {
 	case config.HostGitHub:
+		if s.GitHub == nil {
+			return nil
+		}
 		return s.GitHub
-	default:
+	case config.HostGitLab:
+		if s.GitLab == nil {
+			return nil
+		}
 		return s.GitLab
+	default:
+		return nil
 	}
 }

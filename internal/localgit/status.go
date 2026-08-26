@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/behaviorengineering/gitboard/internal/cliexec"
 )
@@ -30,28 +32,36 @@ type Worktree struct {
 
 // Status is local checkout health for one forge project.
 type Status struct {
-	Mapped        bool       `json:"mapped"`
-	Path          string     `json:"path,omitempty"`
-	Error         string     `json:"error,omitempty"`
-	Branch        string     `json:"branch,omitempty"`
-	Detached      bool       `json:"detached,omitempty"`
-	Dirty         bool       `json:"dirty,omitempty"`
-	Ahead         int        `json:"ahead,omitempty"`
-	Behind        int        `json:"behind,omitempty"`
-	Upstream      string     `json:"upstream,omitempty"`
-	DefaultBranch string     `json:"default_branch,omitempty"`
-	DefaultBehind int        `json:"default_behind,omitempty"`
-	DefaultAhead  int        `json:"default_ahead,omitempty"`
-	Worktrees     []Worktree `json:"worktrees,omitempty"`
+	Mapped        bool         `json:"mapped"`
+	Path          string       `json:"path,omitempty"`
+	Error         string       `json:"error,omitempty"`
+	Branch        string       `json:"branch,omitempty"`
+	Detached      bool         `json:"detached,omitempty"`
+	Dirty         bool         `json:"dirty,omitempty"`
+	Ahead         int          `json:"ahead,omitempty"`
+	Behind        int          `json:"behind,omitempty"`
+	Upstream      string       `json:"upstream,omitempty"`
+	DefaultBranch string       `json:"default_branch,omitempty"`
+	DefaultBehind int          `json:"default_behind,omitempty"`
+	DefaultAhead  int          `json:"default_ahead,omitempty"`
+	OriginSync    []BranchSync `json:"origin_sync,omitempty"`
+	Worktrees     []Worktree   `json:"worktrees,omitempty"`
+}
+
+// BranchSync is local refs/heads/<name> versus refs/remotes/origin/<name>.
+type BranchSync struct {
+	Name   string `json:"name"`
+	Ahead  int    `json:"ahead,omitempty"`  // local has commits origin lacks
+	Behind int    `json:"behind,omitempty"` // origin has commits local lacks
 }
 
 // Inspector reads local git state via the git CLI.
 type Inspector struct {
-	Run *cliexec.Runner
+	Run cliexec.Exec
 }
 
 // NewInspector returns an Inspector with a short timeout (status is cheap).
-func NewInspector(run *cliexec.Runner) *Inspector {
+func NewInspector(run cliexec.Exec) *Inspector {
 	if run == nil {
 		run = cliexec.New()
 	}
@@ -244,31 +254,91 @@ func (in *Inspector) leftRight(ctx context.Context, dir, left, right string) (ah
 	return ahead, behind, true
 }
 
-// EnrichDefault compares the local default branch tip to origin/<default>.
-func (in *Inspector) EnrichDefault(ctx context.Context, st *Status) {
+// EnrichOriginSync compares each local branch to origin/<same name>.
+// DefaultAhead/DefaultBehind copy the default-branch row when both refs exist.
+// Comparisons run in parallel to limit wall time when many branches share an origin twin.
+func (in *Inspector) EnrichOriginSync(ctx context.Context, st *Status) {
 	if st == nil || !st.Mapped || st.Path == "" || st.Error != "" {
 		return
 	}
-	def, ok := in.defaultBranch(ctx, st.Path)
-	if !ok {
+	if def, ok := in.defaultBranch(ctx, st.Path); ok {
+		st.DefaultBranch = def
+	}
+	localNames, err := in.listRefShortNames(ctx, st.Path, "refs/heads/")
+	if err != nil {
 		return
 	}
-	st.DefaultBranch = def
-	remoteRef := "refs/remotes/origin/" + def
-	localRef := "refs/heads/" + def
-	if _, err := in.git(ctx, st.Path, "rev-parse", "--verify", remoteRef); err != nil {
+	remoteNames, err := in.listRefShortNames(ctx, st.Path, "refs/remotes/origin/")
+	if err != nil {
 		return
 	}
-	if _, err := in.git(ctx, st.Path, "rev-parse", "--verify", localRef); err != nil {
+	remoteSet := make(map[string]struct{}, len(remoteNames))
+	for _, n := range remoteNames {
+		n = strings.TrimPrefix(n, "origin/")
+		if n == "" || n == "HEAD" {
+			continue
+		}
+		remoteSet[n] = struct{}{}
+	}
+	var names []string
+	for _, name := range localNames {
+		if _, ok := remoteSet[name]; ok {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		st.OriginSync = nil
 		return
 	}
-	ahead, behind, ok := in.leftRight(ctx, st.Path, remoteRef, localRef)
-	if !ok {
-		return
+
+	syncs := make([]BranchSync, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			ahead, behind, ok := in.leftRight(ctx, st.Path, "refs/remotes/origin/"+name, "refs/heads/"+name)
+			if !ok {
+				return
+			}
+			syncs[i] = BranchSync{Name: name, Ahead: ahead, Behind: behind}
+		}(i, name)
 	}
-	// leftRight(remote, local): behind = remote has commits local lacks; ahead = local has commits remote lacks.
-	st.DefaultBehind = behind
-	st.DefaultAhead = ahead
+	wg.Wait()
+
+	out := make([]BranchSync, 0, len(syncs))
+	for _, s := range syncs {
+		if s.Name == "" {
+			continue
+		}
+		out = append(out, s)
+		if s.Name == st.DefaultBranch {
+			st.DefaultAhead = s.Ahead
+			st.DefaultBehind = s.Behind
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	st.OriginSync = out
+}
+
+func (in *Inspector) listRefShortNames(ctx context.Context, dir, prefix string) ([]string, error) {
+	out, err := in.git(ctx, dir, "for-each-ref", "--format=%(refname:short)", prefix)
+	if err != nil {
+		return nil, err
+	}
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	var names []string
+	for sc.Scan() {
+		n := strings.TrimSpace(sc.Text())
+		if n == "" {
+			continue
+		}
+		names = append(names, n)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 func (in *Inspector) defaultBranch(ctx context.Context, dir string) (string, bool) {

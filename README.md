@@ -63,7 +63,7 @@ projects:
     local_path: ~/Xynova/ai/cr-case-intake/providers/gitboard
 ```
 
-The Local status sits beside each remote branch (laptop icon when checked out locally, dirty / ahead-behind). Worktrees on branches with no remote head appear as “local only” rows.
+The Local status sits beside each remote branch (laptop icon when checked out locally, dirty, and ↑/↓ versus origin for every local branch that has `origin/<name>`). When a branch is behind origin and the tree is clean, **pull** fast-forwards it (`git pull --ff-only`, or `git fetch origin branch:branch` when that branch is not checked out). Worktrees on branches with no remote head appear as “local only” rows.
 
 ## Design
 
@@ -83,6 +83,8 @@ The Local status sits beside each remote branch (laptop icon when checked out lo
 | `GET` | `/api/dashboard` | Aggregated rows |
 | `GET` | `/api/failures?project=&run_id=` | Failed jobs |
 | `POST` | `/api/triage` | AI log analysis |
+| `POST` | `/api/prune/safe` | Re-check hints and remove a safe local checkout |
+| `POST` | `/api/pull/ff` | Fast-forward a local branch from origin (ff-only) |
 | `POST` | `/api/agents/prune/investigate` | Likely-removable branch evidence + session card |
 | `GET` | `/api/agents/sessions/:id` | Session meta, card, turns |
 | `GET` | `/api/agents/sessions/:id/failure` | Failure dump attachment when present |

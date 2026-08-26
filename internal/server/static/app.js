@@ -21,7 +21,93 @@ const ICONS = {
   check: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0"/></svg>`,
   x: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06"/></svg>`,
   dot: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8"/></svg>`,
+  trash: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h-3ZM2.25 3.75a.75.75 0 0 1 0-1.5h11.5a.75.75 0 0 1 0 1.5H13v9.5A1.75 1.75 0 0 1 11.25 15h-6.5A1.75 1.75 0 0 1 3 13.25v-9.5Zm1.5 0v9.5c0 .138.112.25.25.25h6.5a.25.25 0 0 0 .25-.25v-9.5Zm2 1.75a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75Zm3 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75Z"/></svg>`,
+  search: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"/></svg>`,
+  pull: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8.75 1.75a.75.75 0 0 0-1.5 0v7.19L4.72 6.41a.75.75 0 0 0-1.06 1.06l3.75 3.75a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.94ZM2.75 13.5a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5Z"/></svg>`,
 };
+
+function setButtonLabel(btn, svg, label) {
+  if (!btn) return;
+  btn.replaceChildren();
+  if (svg) btn.insertAdjacentHTML('beforeend', svg);
+  const text = el('span', 'btn-label', label);
+  btn.appendChild(text);
+}
+
+/** @type {null | ((ok: boolean) => void)} */
+let modalResolve = null;
+
+function closeModal(ok) {
+  const root = document.getElementById('modal-root');
+  if (root) root.hidden = true;
+  document.removeEventListener('keydown', onModalKeydown);
+  const resolve = modalResolve;
+  modalResolve = null;
+  if (resolve) resolve(Boolean(ok));
+}
+
+function onModalKeydown(ev) {
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    closeModal(false);
+  }
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    closeModal(true);
+  }
+}
+
+/**
+ * Theme confirm dialog. Resolves true when confirmed.
+ * @param {{ title: string, body: string, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean }} opts
+ */
+function confirmDialog(opts) {
+  const root = document.getElementById('modal-root');
+  const title = document.getElementById('modal-title');
+  const body = document.getElementById('modal-body');
+  const detail = document.getElementById('modal-detail');
+  const cancelBtn = document.getElementById('modal-cancel');
+  const confirmBtn = document.getElementById('modal-confirm');
+  if (!root || !title || !body || !detail || !cancelBtn || !confirmBtn) {
+    return Promise.resolve(window.confirm([opts.title, opts.body, opts.detail].filter(Boolean).join('\n\n')));
+  }
+  if (modalResolve) closeModal(false);
+
+  title.textContent = opts.title || 'Confirm';
+  body.textContent = opts.body || '';
+  const detailText = String(opts.detail || '').trim();
+  if (detailText) {
+    detail.hidden = false;
+    detail.textContent = detailText;
+  } else {
+    detail.hidden = true;
+    detail.textContent = '';
+  }
+
+  const danger = opts.danger !== false;
+  confirmBtn.className = `modal-btn ${danger ? 'modal-btn--danger' : 'modal-btn--ok'}`;
+  setButtonLabel(cancelBtn, ICONS.x, opts.cancelLabel || 'Cancel');
+  setButtonLabel(confirmBtn, danger ? ICONS.trash : ICONS.check, opts.confirmLabel || 'Confirm');
+
+  root.hidden = false;
+  document.addEventListener('keydown', onModalKeydown);
+  confirmBtn.focus();
+
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+  });
+}
+
+function bindModal() {
+  const root = document.getElementById('modal-root');
+  const cancelBtn = document.getElementById('modal-cancel');
+  const confirmBtn = document.getElementById('modal-confirm');
+  cancelBtn?.addEventListener('click', () => closeModal(false));
+  confirmBtn?.addEventListener('click', () => closeModal(true));
+  root?.querySelectorAll('[data-modal-dismiss]').forEach((node) => {
+    node.addEventListener('click', () => closeModal(false));
+  });
+}
 
 function iconMark(svg, className, title) {
   const wrap = el('span', `mark ${className}`);
@@ -42,7 +128,7 @@ function ciMark(status) {
 
 function hostPrefix(host, path) {
   const key = String(host || '').toLowerCase();
-  const wrap = el('span', 'project-host');
+  const wrap = el('span', `project-host${key ? ` project-host--${key}` : ''}`);
   const label = key || 'unknown host';
   const tip = path ? `${label} · ${path}` : label;
   wrap.title = tip;
@@ -110,6 +196,30 @@ function pickLocalWorktree(wts, local) {
   return main || list[0];
 }
 
+function originSyncFor(local, branchName) {
+  const name = String(branchName || '');
+  if (!name) return null;
+  const list = Array.isArray(local?.origin_sync) ? local.origin_sync : [];
+  return list.find((s) => s && s.name === name) || null;
+}
+
+function originSyncBits(sync) {
+  const bits = [];
+  if (!sync) return bits;
+  if (sync.ahead) bits.push(`↑${sync.ahead}`);
+  if (sync.behind) bits.push(`↓${sync.behind}`);
+  return bits;
+}
+
+function originSyncTitle(sync) {
+  if (!sync) return '';
+  const parts = [];
+  if (sync.ahead) parts.push(`${sync.ahead} ahead of origin`);
+  if (sync.behind) parts.push(`${sync.behind} behind origin`);
+  if (parts.length) return parts.join(', ');
+  return 'matches origin';
+}
+
 async function copyText(text, node) {
   const value = String(text || '').trim();
   if (!value) return;
@@ -155,7 +265,7 @@ function copyPathButton(fullPath) {
   return btn;
 }
 
-function localColumn(wts, local, branchName) {
+function localColumn(wts, local, branchName, project) {
   const cell = el('div', 'branch-local');
   if (!local) {
     cell.appendChild(el('span', 'branch-local-empty', '—'));
@@ -167,14 +277,34 @@ function localColumn(wts, local, branchName) {
     return cell;
   }
   const list = Array.isArray(wts) ? wts : (wts ? [wts] : []);
+  const sync = originSyncFor(local, branchName);
+  const syncBits = originSyncBits(sync);
+  const preferred = pickLocalWorktree(list, local);
+  const repoPath = preferred?.path || local.path || '';
+
   if (!list.length) {
     if (local.error) {
       cell.appendChild(el('span', 'branch-local-empty', '!'));
       cell.title = local.error;
       return cell;
     }
+    if (syncBits.length) {
+      const span = el('span', 'branch-local-sync is-divergent', syncBits.join(' '));
+      span.title = `${originSyncTitle(sync)} (local branch not checked out)`;
+      cell.appendChild(span);
+      appendPullButton(cell, {
+        sync,
+        project,
+        branchName,
+        repoPath,
+        dirty: false,
+      });
+      return cell;
+    }
     cell.appendChild(el('span', 'branch-local-empty', '—'));
-    cell.title = 'No local checkout on this branch';
+    cell.title = sync
+      ? 'Local branch not checked out (matches origin)'
+      : 'No local checkout on this branch';
     return cell;
   }
 
@@ -193,24 +323,46 @@ function localColumn(wts, local, branchName) {
     }
     marks.appendChild(iconMark(ICONS.laptop, cls, title));
   }
-  const preferred = pickLocalWorktree(list, local);
   if (preferred?.path) {
     const copyBtn = copyPathButton(preferred.path);
     if (copyBtn) marks.appendChild(copyBtn);
   }
   cell.appendChild(marks);
 
-  const bits = [];
-  if (preferred?.ahead) bits.push(`↑${preferred.ahead}`);
-  if (preferred?.behind) bits.push(`↓${preferred.behind}`);
-  if (branchName && local.default_branch === branchName) {
-    if (local.default_behind) bits.push(`def↓${local.default_behind}`);
-    if (local.default_ahead) bits.push(`def↑${local.default_ahead}`);
+  if (syncBits.length) {
+    const span = el('span', 'branch-local-sync is-divergent', syncBits.join(' '));
+    span.title = originSyncTitle(sync);
+    cell.appendChild(span);
   }
-  if (bits.length) {
-    cell.appendChild(el('span', 'branch-local-sync', bits.join(' ')));
-  }
+  appendPullButton(cell, {
+    sync,
+    project,
+    branchName,
+    repoPath,
+    dirty: list.some((w) => w.dirty),
+  });
   return cell;
+}
+
+function appendPullButton(cell, { sync, project, branchName, repoPath, dirty }) {
+  if (!sync?.behind || sync.ahead) return;
+  if (!project?.id || !branchName || !repoPath) return;
+  if (dirty) return;
+  const btn = el('button', 'branch-pull-ff');
+  btn.type = 'button';
+  setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
+  btn.title = `Fast-forward local ${branchName} from origin (${sync.behind} behind)`;
+  btn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    void pullFFCheckout({
+      project_id: project.id,
+      branch: branchName,
+      repo_path: repoPath,
+      button: btn,
+    });
+  });
+  cell.appendChild(btn);
 }
 
 function branchesCell(branches, host, project) {
@@ -230,7 +382,7 @@ function branchesCell(branches, host, project) {
   const head = el('li', 'branch-item branch-item--head');
   head.appendChild(el('span', 'branch-marks'));
   head.appendChild(el('span', 'branch-head-label', 'branch'));
-  head.appendChild(el('span', 'branch-head-label', 'local'));
+  head.appendChild(el('span', 'branch-head-label branch-head-label--local', 'local'));
   head.appendChild(el('span', 'branch-head-label branch-head-label--end', 'ci'));
   list.appendChild(head);
 
@@ -306,22 +458,33 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
   if (localOnly) meta.appendChild(el('span', 'branch-chip branch-chip--local', 'local only'));
   const pruneCmd = pruneCommand(b.name, localWt, local);
   if (pruneHint === 'safe') {
-    const chip = el('span', 'branch-chip branch-chip--ok', 'safe to remove');
+    const btn = el('button', 'branch-chip branch-chip--ok branch-prune-safe');
+    btn.type = 'button';
+    setButtonLabel(btn, ICONS.trash, 'safe to remove');
     const bits = [];
     if (localWt.merged_id) bits.push(`merged ${reviewKind} #${localWt.merged_id}`);
     const mergedWhen = relativeTime(localWt.merged_at);
     if (mergedWhen) bits.push(mergedWhen);
-    if (pruneCmd) bits.push(pruneCmd);
-    chip.title = bits.join(' · ');
-    meta.appendChild(chip);
+    bits.push('Click to remove local branch');
+    btn.title = bits.join(' · ');
+    btn.addEventListener('click', () => {
+      void pruneSafeCheckout({
+        project_id: project.id,
+        branch: b.name,
+        worktree_path: localWt?.path || local?.path || '',
+        button: btn,
+      });
+    });
+    meta.appendChild(btn);
   } else if (pruneHint === 'likely') {
     const chip = el('span', 'branch-chip branch-chip--warn', 'likely removable');
     chip.title = pruneCmd
       ? `Remote head gone · check then: ${pruneCmd}`
       : 'Remote head gone';
     meta.appendChild(chip);
-    const inv = el('button', 'branch-investigate', 'Investigate');
+    const inv = el('button', 'branch-investigate');
     inv.type = 'button';
+    setButtonLabel(inv, ICONS.search, 'Investigate');
     inv.title = 'Gather evidence into an agent session';
     inv.addEventListener('click', () => {
       void investigatePrune({
@@ -344,7 +507,7 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
   if (meta.childNodes.length) body.appendChild(meta);
   item.appendChild(body);
 
-  item.appendChild(localColumn(localWts, local, b.name));
+  item.appendChild(localColumn(localWts, local, b.name, project));
 
   const actions = el('div', 'branch-actions');
   const ci = ciMark(b.ci_status);
@@ -412,10 +575,17 @@ function appearanceStatusMarks(app) {
   if (app.dirty) {
     marks.appendChild(iconMark(ICONS.laptop, 'mark--warn', 'dirty working tree'));
   }
-  const sync = [];
-  if (app.ahead) sync.push(`↑${app.ahead}`);
-  if (app.behind) sync.push(`↓${app.behind}`);
-  if (sync.length) marks.appendChild(el('span', 'appearance-sync', sync.join(' ')));
+  const sync = originSyncFor(app, app.branch);
+  const bits = originSyncBits(sync);
+  if (!bits.length) {
+    if (app.ahead) bits.push(`↑${app.ahead}`);
+    if (app.behind) bits.push(`↓${app.behind}`);
+  }
+  if (bits.length) {
+    const span = el('span', 'appearance-sync is-divergent', bits.join(' '));
+    span.title = originSyncTitle(sync) || 'versus upstream';
+    marks.appendChild(span);
+  }
   return marks;
 }
 
@@ -434,8 +604,13 @@ function renderAppearanceDetail(app) {
     const bits = [label];
     if (wt.branch && !wt.main) bits[0] = wt.branch;
     if (wt.dirty) bits.push('dirty');
-    if (wt.ahead) bits.push(`↑${wt.ahead}`);
-    if (wt.behind) bits.push(`↓${wt.behind}`);
+    const sync = originSyncFor(app, wt.branch);
+    const syncBits = originSyncBits(sync);
+    if (syncBits.length) bits.push(...syncBits);
+    else {
+      if (wt.ahead) bits.push(`↑${wt.ahead}`);
+      if (wt.behind) bits.push(`↓${wt.behind}`);
+    }
     li.appendChild(el('span', '', bits.join(' · ')));
     if (wt.path && wt.path !== app.path) {
       li.appendChild(el('span', 'appearance-wt-path', wt.path));
@@ -460,6 +635,7 @@ function renderAppearances(local) {
       behind: local.behind,
       detached: local.detached,
       error: local.error,
+      origin_sync: local.origin_sync,
       worktrees: local.worktrees,
     }] : []);
   if (!apps.length) return null;
@@ -494,19 +670,35 @@ function renderAppearances(local) {
   return wrap;
 }
 
+function toolStatusMark(cli) {
+  if (!cli?.installed) {
+    return iconMark(ICONS.x, 'mark--bad', 'missing');
+  }
+  if (!cli.authed) {
+    return iconMark(ICONS.alert, 'mark--warn', 'login required');
+  }
+  return iconMark(ICONS.check, 'mark--ok', 'ready');
+}
+
+function toolRow(hostKey, label, cli) {
+  const row = el('span', `tool-row tool-row--${hostKey}`);
+  const state = !cli?.installed
+    ? 'missing'
+    : (!cli.authed ? 'login required' : 'ready');
+  const detail = cli?.detail ? ` (${cli.detail})` : '';
+  const tip = `${label}: ${state}${detail}`;
+  row.title = tip;
+  row.setAttribute('aria-label', tip);
+  row.insertAdjacentHTML('beforeend', ICONS[hostKey] || '');
+  row.appendChild(toolStatusMark(cli));
+  return row;
+}
+
 function renderTooling(tool) {
   const root = document.getElementById('tooling');
   root.innerHTML = '';
-  const gh = tool?.github || {};
-  const gl = tool?.gitlab || {};
-  const ghRow = el('span', 'tool-row');
-  ghRow.insertAdjacentHTML('beforeend', ICONS.github);
-  ghRow.appendChild(document.createTextNode(` gh: ${gh.installed ? (gh.authed ? 'ready' : 'login required') : 'missing'}${gh.detail ? ` (${gh.detail})` : ''}`));
-  const glRow = el('span', 'tool-row');
-  glRow.insertAdjacentHTML('beforeend', ICONS.gitlab);
-  glRow.appendChild(document.createTextNode(` glab: ${gl.installed ? (gl.authed ? 'ready' : 'login required') : 'missing'}${gl.detail ? ` (${gl.detail})` : ''}`));
-  root.appendChild(ghRow);
-  root.appendChild(glRow);
+  root.appendChild(toolRow('github', 'gh', tool?.github || {}));
+  root.appendChild(toolRow('gitlab', 'glab', tool?.gitlab || {}));
 }
 
 const CI_FAILED = new Set(['failed', 'failure', 'error', 'cancelled', 'canceled']);
@@ -514,7 +706,8 @@ const CI_FAILED = new Set(['failed', 'failure', 'error', 'cancelled', 'canceled'
 let allProjects = [];
 const filters = {
   q: '',
-  host: '',
+  /** @type {Set<string>} empty = all host/org scopes */
+  scopes: new Set(),
   chips: {
     ci_failed: false,
     open_review: false,
@@ -528,31 +721,108 @@ function normalizeQ(s) {
   return String(s || '').toLowerCase().trim();
 }
 
-function haystack(row) {
-  const parts = [
-    row.label,
-    row.id,
-    row.path,
-    row.org,
-    row.host,
-  ];
+function scopeKey(host, org) {
+  return `${String(host || '').toLowerCase()}\0${String(org || '').trim()}`;
+}
+
+function parseScopeKey(key) {
+  const i = String(key).indexOf('\0');
+  if (i < 0) return { host: String(key || ''), org: '' };
+  return { host: key.slice(0, i), org: key.slice(i + 1) };
+}
+
+function hostLabel(host) {
+  const key = String(host || '').toLowerCase();
+  if (key === 'github') return 'GitHub';
+  if (key === 'gitlab') return 'GitLab';
+  return key || 'unknown';
+}
+
+function collectScopeOptions(projects) {
+  /** @type {Map<string, { host: string, org: string }>} */
+  const map = new Map();
+  for (const row of projects || []) {
+    const host = String(row.host || '').toLowerCase();
+    if (!host) continue;
+    const org = String(row.org || '').trim();
+    const key = scopeKey(host, org);
+    if (!map.has(key)) map.set(key, { host, org });
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.host !== b.host) return a.host.localeCompare(b.host);
+    return a.org.localeCompare(b.org);
+  });
+}
+
+/** Ranked search fields: higher weight wins when sorting matches. */
+function searchFields(row) {
+  const branches = [];
   for (const b of row.branches || []) {
-    if (b.name) parts.push(b.name);
+    if (b.name) branches.push(b.name);
   }
   const local = row.local;
-  if (local?.path) parts.push(local.path);
-  if (local?.branch) parts.push(local.branch);
+  const localBits = [];
+  if (local?.path) localBits.push(local.path);
+  if (local?.branch) localBits.push(local.branch);
   for (const app of local?.appearances || []) {
-    if (app.display_id) parts.push(app.display_id);
-    if (app.path) parts.push(app.path);
-    if (app.branch) parts.push(app.branch);
-    if (app.parent_label) parts.push(app.parent_label);
+    if (app.display_id) localBits.push(app.display_id);
+    if (app.path) localBits.push(app.path);
+    if (app.branch) localBits.push(app.branch);
+    if (app.parent_label) localBits.push(app.parent_label);
   }
   for (const wt of local?.worktrees || []) {
-    if (wt.branch) parts.push(wt.branch);
-    if (wt.path) parts.push(wt.path);
+    if (wt.branch) localBits.push(wt.branch);
+    if (wt.path) localBits.push(wt.path);
   }
-  return normalizeQ(parts.filter(Boolean).join(' '));
+  return {
+    label: normalizeQ(row.label),
+    id: normalizeQ(row.id),
+    path: normalizeQ(row.path),
+    org: normalizeQ(row.org),
+    host: normalizeQ(row.host),
+    branch: normalizeQ(branches.join(' ')),
+    local: normalizeQ(localBits.join(' ')),
+  };
+}
+
+const SEARCH_FIELD_WEIGHTS = {
+  label: 1000,
+  id: 700,
+  path: 400,
+  org: 250,
+  branch: 120,
+  local: 80,
+  host: 20,
+};
+
+function tokenFieldScore(token, value) {
+  if (!token || !value) return 0;
+  if (value === token) return 100;
+  // Word / path segment prefix (consil → consilium).
+  if (value.split(/[\s/_-]+/).some((part) => part.startsWith(token))) return 75;
+  if (value.startsWith(token)) return 70;
+  if (value.includes(token)) return 35;
+  return 0;
+}
+
+/** Higher is better. Returns -1 when any token misses. */
+function searchScore(row, q) {
+  const tokens = normalizeQ(q).split(/\s+/).filter(Boolean);
+  if (!tokens.length) return 0;
+  const fields = searchFields(row);
+  let total = 0;
+  for (const tok of tokens) {
+    let best = 0;
+    for (const [name, weight] of Object.entries(SEARCH_FIELD_WEIGHTS)) {
+      const hit = tokenFieldScore(tok, fields[name]);
+      if (!hit) continue;
+      const score = hit * weight;
+      if (score > best) best = score;
+    }
+    if (!best) return -1;
+    total += best;
+  }
+  return total;
 }
 
 function projectDirty(row) {
@@ -583,7 +853,10 @@ function projectPrune(row) {
 }
 
 function projectMatches(row, state) {
-  if (state.host && String(row.host || '').toLowerCase() !== state.host) return false;
+  if (state.scopes.size) {
+    const key = scopeKey(row.host, row.org);
+    if (!state.scopes.has(key)) return false;
+  }
   if (state.chips.ci_failed) {
     const hit = (row.branches || []).some((b) => CI_FAILED.has(String(b.ci_status || '').toLowerCase()));
     if (!hit) return false;
@@ -600,20 +873,23 @@ function projectMatches(row, state) {
     if (!hit) return false;
   }
   if (state.q) {
-    const hay = haystack(row);
-    const tokens = state.q.split(/\s+/).filter(Boolean);
-    if (!tokens.every((tok) => hay.includes(tok))) return false;
+    if (searchScore(row, state.q) < 0) return false;
   }
   return true;
 }
 
 function filtersActive(state) {
-  if (state.q || state.host) return true;
+  if (state.q || state.scopes.size) return true;
   return Object.values(state.chips).some(Boolean);
 }
 
 function filteredProjects() {
-  return (allProjects || []).filter((row) => projectMatches(row, filters));
+  const matched = (allProjects || []).filter((row) => projectMatches(row, filters));
+  if (!filters.q) return matched;
+  return matched
+    .map((row, index) => ({ row, index, score: searchScore(row, filters.q) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.row);
 }
 
 function updateFilterChrome(visibleCount) {
@@ -634,17 +910,84 @@ function updateFilterChrome(visibleCount) {
   countEl.textContent = `Showing ${visibleCount} of ${total}`;
 }
 
+function updateScopeLabel() {
+  const label = document.getElementById('filter-scope-label');
+  if (!label) return;
+  const n = filters.scopes.size;
+  if (!n) {
+    label.textContent = 'All hosts / orgs';
+    return;
+  }
+  if (n === 1) {
+    const { host, org } = parseScopeKey([...filters.scopes][0]);
+    label.textContent = org ? `${hostLabel(host)} · ${org}` : hostLabel(host);
+    return;
+  }
+  label.textContent = `${n} hosts / orgs`;
+}
+
+function rebuildScopeMenu() {
+  const menu = document.getElementById('filter-scope-menu');
+  if (!menu) return;
+  const options = collectScopeOptions(allProjects);
+  const keep = new Set();
+  for (const opt of options) keep.add(scopeKey(opt.host, opt.org));
+  for (const key of [...filters.scopes]) {
+    if (!keep.has(key)) filters.scopes.delete(key);
+  }
+  menu.innerHTML = '';
+  if (!options.length) {
+    menu.appendChild(el('div', 'filter-scope-empty', 'No hosts / orgs yet'));
+    updateScopeLabel();
+    return;
+  }
+  for (const opt of options) {
+    const key = scopeKey(opt.host, opt.org);
+    const btn = el('button', 'filter-scope-option');
+    btn.type = 'button';
+    btn.setAttribute('role', 'option');
+    btn.dataset.scope = key;
+    const selected = filters.scopes.has(key);
+    btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+    btn.appendChild(hostPrefix(opt.host, opt.org || opt.host));
+    const name = el('span', 'filter-scope-option-name', opt.org || '(no org)');
+    btn.appendChild(name);
+    const check = el('span', 'filter-scope-check');
+    check.setAttribute('aria-hidden', 'true');
+    check.textContent = '✓';
+    btn.appendChild(check);
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (filters.scopes.has(key)) filters.scopes.delete(key);
+      else filters.scopes.add(key);
+      btn.setAttribute('aria-selected', filters.scopes.has(key) ? 'true' : 'false');
+      updateScopeLabel();
+      applyBoard();
+    });
+    menu.appendChild(btn);
+  }
+  updateScopeLabel();
+}
+
+function setScopeMenuOpen(open) {
+  const btn = document.getElementById('filter-scope-btn');
+  const menu = document.getElementById('filter-scope-menu');
+  if (!btn || !menu) return;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menu.hidden = !open;
+}
+
 function applyBoard() {
   const rows = filteredProjects();
   renderRows(rows);
   updateFilterChrome(rows.length);
+  updateScopeLabel();
 }
 
 function readFiltersFromDom() {
   const qInput = document.getElementById('filter-q');
-  const hostSel = document.getElementById('filter-host');
   filters.q = normalizeQ(qInput?.value);
-  filters.host = String(hostSel?.value || '').toLowerCase();
   for (const btn of document.querySelectorAll('.filter-chip[data-filter]')) {
     const key = btn.getAttribute('data-filter');
     if (key && key in filters.chips) {
@@ -655,33 +998,49 @@ function readFiltersFromDom() {
 
 function clearFilters() {
   const qInput = document.getElementById('filter-q');
-  const hostSel = document.getElementById('filter-host');
   if (qInput) qInput.value = '';
-  if (hostSel) hostSel.value = '';
   for (const btn of document.querySelectorAll('.filter-chip[data-filter]')) {
     btn.setAttribute('aria-pressed', 'false');
   }
   filters.q = '';
-  filters.host = '';
+  filters.scopes.clear();
   for (const key of Object.keys(filters.chips)) filters.chips[key] = false;
+  setScopeMenuOpen(false);
   applyBoard();
 }
 
 function bindFilters() {
   const qInput = document.getElementById('filter-q');
-  const hostSel = document.getElementById('filter-host');
   const clearBtn = document.getElementById('filter-clear');
+  const scopeBtn = document.getElementById('filter-scope-btn');
+  const scopeRoot = document.getElementById('filter-scope');
   const onChange = () => {
     readFiltersFromDom();
     applyBoard();
   };
   qInput?.addEventListener('input', onChange);
-  hostSel?.addEventListener('change', onChange);
   clearBtn?.addEventListener('click', () => clearFilters());
+  scopeBtn?.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const open = scopeBtn.getAttribute('aria-expanded') === 'true';
+    setScopeMenuOpen(!open);
+  });
+  document.addEventListener('click', (ev) => {
+    if (!scopeRoot) return;
+    if (scopeRoot.contains(ev.target)) return;
+    setScopeMenuOpen(false);
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') setScopeMenuOpen(false);
+  });
   for (const btn of document.querySelectorAll('.filter-chip[data-filter]')) {
     btn.addEventListener('click', () => {
-      const pressed = btn.getAttribute('aria-pressed') === 'true';
-      btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
+      const wasOn = btn.getAttribute('aria-pressed') === 'true';
+      for (const other of document.querySelectorAll('.filter-chip[data-filter]')) {
+        other.setAttribute('aria-pressed', 'false');
+      }
+      if (!wasOn) btn.setAttribute('aria-pressed', 'true');
       onChange();
     });
   }
@@ -694,10 +1053,15 @@ function renderRows(projects) {
     const tr = el('tr');
     const titleCell = el('td', 'project-cell');
     if (row.org) {
-      titleCell.appendChild(el('div', 'project-org', row.org));
+      const orgLine = el('div', 'project-org');
+      orgLine.appendChild(hostPrefix(row.host, row.path));
+      orgLine.appendChild(el('span', 'project-org-name', row.org));
+      titleCell.appendChild(orgLine);
     }
     const titleRow = el('div', 'project-title');
-    titleRow.appendChild(hostPrefix(row.host, row.path));
+    if (!row.org) {
+      titleRow.appendChild(hostPrefix(row.host, row.path));
+    }
     titleRow.appendChild(el('strong', '', row.label || row.id));
     if (row.open_url) {
       const link = el('a', 'project-open');
@@ -758,7 +1122,7 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
   if (loading) return;
   loading = true;
   const status = document.getElementById('status');
-  if (!quiet) status.textContent = fresh ? 'Force refreshing…' : 'Loading…';
+  if (!quiet) status.textContent = 'Refreshing…';
   try {
     const url = fresh ? '/api/dashboard?fresh=1' : '/api/dashboard';
     const res = await fetch(url, { cache: 'no-store' });
@@ -774,12 +1138,99 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
     }
     renderTooling(data.tooling);
     allProjects = Array.isArray(data.projects) ? data.projects : [];
+    rebuildScopeMenu();
     applyBoard();
     status.textContent = `Updated ${data.generated_at || ''}`;
   } catch (err) {
     status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
     loading = false;
+  }
+}
+
+async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) {
+  const status = document.getElementById('status');
+  if (!project_id || !branch || !worktree_path) {
+    if (status) status.textContent = 'Missing project, branch, or worktree path';
+    return;
+  }
+  const label = `${project_id} / ${branch}`;
+  const ok = await confirmDialog({
+    title: 'Remove local checkout?',
+    body: `Remove the local branch checkout for ${label}. This only affects your machine.`,
+    detail: worktree_path,
+    confirmLabel: 'Remove',
+    cancelLabel: 'Cancel',
+    danger: true,
+  });
+  if (!ok) return;
+  if (button) {
+    button.disabled = true;
+    setButtonLabel(button, ICONS.trash, 'removing…');
+  }
+  if (status) status.textContent = `Removing ${label}…`;
+  try {
+    const res = await fetch('/api/prune/safe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id, branch, worktree_path }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(text.trim() || `HTTP ${res.status}`);
+    }
+    if (status) status.textContent = `Removed ${label}`;
+    await loadDashboard({ quiet: true, fresh: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (status) status.textContent = `Remove failed: ${msg}`;
+    if (button) {
+      button.disabled = false;
+      setButtonLabel(button, ICONS.trash, 'safe to remove');
+    }
+  }
+}
+
+async function pullFFCheckout({ project_id, branch, repo_path, button }) {
+  const status = document.getElementById('status');
+  if (!project_id || !branch || !repo_path) {
+    if (status) status.textContent = 'Missing project, branch, or repo path';
+    return;
+  }
+  const label = `${project_id} / ${branch}`;
+  const ok = await confirmDialog({
+    title: 'Fast-forward from origin?',
+    body: `Update local ${branch} to match origin (ff-only). Refuses dirty trees and diverged history.`,
+    detail: repo_path,
+    confirmLabel: 'Pull',
+    cancelLabel: 'Cancel',
+    danger: false,
+  });
+  if (!ok) return;
+  if (button) {
+    button.disabled = true;
+    setButtonLabel(button, ICONS.pull, 'pulling…');
+  }
+  if (status) status.textContent = `Pulling ${label}…`;
+  try {
+    const res = await fetch('/api/pull/ff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id, branch, repo_path }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(text.trim() || `HTTP ${res.status}`);
+    }
+    if (status) status.textContent = `Pulled ${label}`;
+    await loadDashboard({ quiet: true, fresh: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (status) status.textContent = `Pull failed: ${msg}`;
+    if (button) {
+      button.disabled = false;
+      setButtonLabel(button, ICONS.pull, 'pull');
+    }
   }
 }
 
@@ -896,12 +1347,12 @@ async function runTriage(project, job, runID) {
   triage.textContent = lines.join('\n\n');
 }
 
-document.getElementById('refresh').addEventListener('click', () => { void loadDashboard(); });
-document.getElementById('force-refresh').addEventListener('click', () => { void loadDashboard({ fresh: true }); });
+document.getElementById('refresh').addEventListener('click', () => { void loadDashboard({ fresh: true }); });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void loadDashboard({ quiet: true });
 });
 bindFilters();
+bindModal();
 updatePollLabel();
 schedulePoll();
 void loadDashboard();

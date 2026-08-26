@@ -82,43 +82,52 @@ const (
 
 // LocalAppearance is one on-disk checkout of a forge project (standalone or submodule).
 type LocalAppearance struct {
-	Role          string          `json:"role,omitempty"` // standalone | submodule
-	Path          string          `json:"path,omitempty"`
-	DisplayID     string          `json:"display_id,omitempty"`
-	ParentPath    string          `json:"parent_path,omitempty"`
-	ParentLabel   string          `json:"parent_label,omitempty"`
-	RelPath       string          `json:"rel_path,omitempty"`
-	Primary       bool            `json:"primary,omitempty"`
-	Error         string          `json:"error,omitempty"`
-	Branch        string          `json:"branch,omitempty"`
-	Detached      bool            `json:"detached,omitempty"`
-	Dirty         bool            `json:"dirty,omitempty"`
-	Ahead         int             `json:"ahead,omitempty"`
-	Behind        int             `json:"behind,omitempty"`
-	Upstream      string          `json:"upstream,omitempty"`
-	DefaultBranch string          `json:"default_branch,omitempty"`
-	DefaultBehind int             `json:"default_behind,omitempty"`
-	DefaultAhead  int             `json:"default_ahead,omitempty"`
-	Worktrees     []LocalWorktree `json:"worktrees,omitempty"`
+	Role          string             `json:"role,omitempty"` // standalone | submodule
+	Path          string             `json:"path,omitempty"`
+	DisplayID     string             `json:"display_id,omitempty"`
+	ParentPath    string             `json:"parent_path,omitempty"`
+	ParentLabel   string             `json:"parent_label,omitempty"`
+	RelPath       string             `json:"rel_path,omitempty"`
+	Primary       bool               `json:"primary,omitempty"`
+	Error         string             `json:"error,omitempty"`
+	Branch        string             `json:"branch,omitempty"`
+	Detached      bool               `json:"detached,omitempty"`
+	Dirty         bool               `json:"dirty,omitempty"`
+	Ahead         int                `json:"ahead,omitempty"`
+	Behind        int                `json:"behind,omitempty"`
+	Upstream      string             `json:"upstream,omitempty"`
+	DefaultBranch string             `json:"default_branch,omitempty"`
+	DefaultBehind int                `json:"default_behind,omitempty"`
+	DefaultAhead  int                `json:"default_ahead,omitempty"`
+	OriginSync    []BranchOriginSync `json:"origin_sync,omitempty"`
+	Worktrees     []LocalWorktree    `json:"worktrees,omitempty"`
 }
 
 // LocalStatus is checkout / worktree health on disk.
 // Top-level fields mirror the primary appearance for backward compatibility.
 type LocalStatus struct {
-	Mapped        bool              `json:"mapped"`
-	Path          string            `json:"path,omitempty"`
-	Error         string            `json:"error,omitempty"`
-	Branch        string            `json:"branch,omitempty"`
-	Detached      bool              `json:"detached,omitempty"`
-	Dirty         bool              `json:"dirty,omitempty"`
-	Ahead         int               `json:"ahead,omitempty"`
-	Behind        int               `json:"behind,omitempty"`
-	Upstream      string            `json:"upstream,omitempty"`
-	DefaultBranch string            `json:"default_branch,omitempty"`
-	DefaultBehind int               `json:"default_behind,omitempty"`
-	DefaultAhead  int               `json:"default_ahead,omitempty"`
-	Worktrees     []LocalWorktree   `json:"worktrees,omitempty"`
-	Appearances   []LocalAppearance `json:"appearances,omitempty"`
+	Mapped        bool               `json:"mapped"`
+	Path          string             `json:"path,omitempty"`
+	Error         string             `json:"error,omitempty"`
+	Branch        string             `json:"branch,omitempty"`
+	Detached      bool               `json:"detached,omitempty"`
+	Dirty         bool               `json:"dirty,omitempty"`
+	Ahead         int                `json:"ahead,omitempty"`
+	Behind        int                `json:"behind,omitempty"`
+	Upstream      string             `json:"upstream,omitempty"`
+	DefaultBranch string             `json:"default_branch,omitempty"`
+	DefaultBehind int                `json:"default_behind,omitempty"`
+	DefaultAhead  int                `json:"default_ahead,omitempty"`
+	OriginSync    []BranchOriginSync `json:"origin_sync,omitempty"`
+	Worktrees     []LocalWorktree    `json:"worktrees,omitempty"`
+	Appearances   []LocalAppearance  `json:"appearances,omitempty"`
+}
+
+// BranchOriginSync is local refs/heads/<name> versus origin/<name>.
+type BranchOriginSync struct {
+	Name   string `json:"name"`
+	Ahead  int    `json:"ahead,omitempty"`
+	Behind int    `json:"behind,omitempty"`
 }
 
 // LocalWorktree is one git worktree for a mapped project.

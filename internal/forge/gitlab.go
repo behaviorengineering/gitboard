@@ -12,10 +12,10 @@ import (
 
 // GitLab uses the glab CLI.
 type GitLab struct {
-	Run *cliexec.Runner
+	Run cliexec.Exec
 }
 
-func NewGitLab(run *cliexec.Runner) *GitLab {
+func NewGitLab(run cliexec.Exec) *GitLab {
 	if run == nil {
 		run = cliexec.New()
 	}
@@ -23,7 +23,7 @@ func NewGitLab(run *cliexec.Runner) *GitLab {
 }
 
 func (g *GitLab) AuthStatus(ctx context.Context) (bool, bool, string) {
-	if _, err := cliexec.LookPath("glab"); err != nil {
+	if _, err := g.Run.LookPath("glab"); err != nil {
 		return false, false, "glab not on PATH (brew install glab)"
 	}
 	_, err := g.Run.Run(ctx, "glab", "auth", "status")

@@ -12,10 +12,10 @@ import (
 
 // GitHub uses the gh CLI.
 type GitHub struct {
-	Run *cliexec.Runner
+	Run cliexec.Exec
 }
 
-func NewGitHub(run *cliexec.Runner) *GitHub {
+func NewGitHub(run cliexec.Exec) *GitHub {
 	if run == nil {
 		run = cliexec.New()
 	}
@@ -23,7 +23,7 @@ func NewGitHub(run *cliexec.Runner) *GitHub {
 }
 
 func (g *GitHub) AuthStatus(ctx context.Context) (bool, bool, string) {
-	if _, err := cliexec.LookPath("gh"); err != nil {
+	if _, err := g.Run.LookPath("gh"); err != nil {
 		return false, false, "gh not on PATH"
 	}
 	_, err := g.Run.Run(ctx, "gh", "auth", "status")

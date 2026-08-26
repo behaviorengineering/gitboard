@@ -59,11 +59,11 @@ type Result struct {
 // Service runs investigations into agentsession directories.
 type Service struct {
 	Store *agentsession.Store
-	Run   *cliexec.Runner
+	Run   cliexec.Exec
 }
 
 // New builds a Service under agentsRoot (e.g. ~/.config/gitboard/agents).
-func New(agentsRoot string, run *cliexec.Runner) (*Service, error) {
+func New(agentsRoot string, run cliexec.Exec) (*Service, error) {
 	store, err := agentsession.New(agentsRoot)
 	if err != nil {
 		return nil, err
