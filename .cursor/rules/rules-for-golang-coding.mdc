@@ -1,153 +1,34 @@
 ---
-description: Go coding rules for gitboard. Formatting, errors, resources, testing, CLI and forge CLI patterns.
+description: >-
+  Gitboard-specific Go invariants (forge CLI, layout, HTTP). Shared Go hygiene
+  and gates come from golang.mdc → golang-quality.
 globs: "**/*.go"
 alwaysApply: false
-keywords: [go, golang, gitboard, coding, errors, testing, cli, gh, glab]
+keywords: [go, golang, gitboard, cli, gh, glab, cliexec]
 ---
 
-# Go coding rules (gitboard)
+# Go coding (gitboard)
+
+**Shared procedure:** `.cursor/rules/golang.mdc` loads `golang-quality` / `code-review-staged`.  
+**Architecture:** `.cursor/rules/architecture.mdc`.  
+**Reviews:** `.cursor/skills/review-go-*/`.
 
 **Module:** `github.com/behaviorengineering/gitboard`
 
-Architecture: `.cursor/rules/architecture.mdc`.  
-Reviews: `.cursor/skills/review-go-*/`.
-
 ---
 
-## Core principles
+## Project invariants
 
 - **Small packages, clear names:** singular nouns (`forge`, `localgit`, not `utils`).
-- **Explicit errors:** return `error`; wrap with `%w` and operation context.
-- **Testable I/O:** pass `io.Reader` / `io.Writer` where output matters; inject `cliexec` for `gh`/`glab`/`git`.
-- **Format and vet:** `gofmt`; run `make test` and `make vet` before done.
-- **Minimal scope:** match existing style in the file you edit.
-
----
-
-## Formatting
-
-- Run `gofmt` on changed Go files.
-- Import order: stdlib, blank line, third-party, blank line, module path (`github.com/behaviorengineering/gitboard/...`).
-- Comments on exported symbols: complete sentences ending with a period.
-
----
-
-## Error handling
-
-```go
-// Good
-if err != nil {
-    return fmt.Errorf("sync projects: %w", err)
-}
-
-// Bad: bare return
-if err != nil {
-    return err
-}
-
-// Bad: silent ignore on critical path
-_ = os.Remove(path)
-```
-
-- Check errors from `os.Open`, `os.Create`, `io.Copy`, `scanner.Err()`, CLI exec, HTTP handlers.
-- User-facing CLI: print to `stderr` / `log` and exit non-zero; domain returns `error`.
-
----
-
-## Resource management
-
-```go
-f, err := os.Open(path)
-if err != nil {
-    return err
-}
-defer f.Close()
-```
-
-- Every opened file: `defer Close()` after successful open.
-- After `bufio.Scanner` loop: check `scanner.Err()`.
-- If using `context.WithCancel` / `WithTimeout`: `defer cancel()`.
-
----
-
-## Nil and bounds safety
-
-- Check nil before pointer dereference.
-- Check `len(slice) > 0` before `slice[0]`.
-- Map lookup: handle missing key when zero value is wrong.
-
----
-
-## Named returns and defer
-
-When using `(err error)` and `defer` reads `err`:
-
-```go
-// Good: assign to named return
-if err = work(); err != nil {
-    return fmt.Errorf("work: %w", err)
-}
-
-// Bad: shadows named return
-if err := work(); err != nil {
-    return err
-}
-```
-
----
-
-## Options structs
-
-Prefer options structs for functions with several parameters (existing pattern in config, server, pruneagent).
-
----
-
-## CLI and forge exec
-
-- Subcommands live in `cmd/gitboard`; keep handlers thin; domain in `internal/*`.
-- Exit codes: `0` success, non-zero error, `2` usage/unknown command where already used.
-- Help: `-h`, `--help`; keep `printUsage` in sync.
-- Shell out only through `internal/cliexec` (or existing forge/localgit helpers). Do not invent ad-hoc `exec.Command` scattered in handlers.
-- Never embed tokens; rely on `gh` / `glab` logged-in sessions and config env overrides.
-
----
-
-## HTTP server
-
-- Bind localhost by default; do not widen listen address without an explicit request.
-- Handlers under `internal/server`; keep static UI co-located under `internal/server/static`.
-- Prefer clear JSON errors over silent 200s on failure.
-
----
-
-## Testing
-
-```go
-func TestSomething(t *testing.T) {
-    dir := t.TempDir()
-    // ...
-}
-```
-
-- Table-driven tests where multiple cases share setup.
-- Prefer fakes for `gh`/`glab`/`git` via injected exec; no live forge calls in unit tests.
-- Test helpers stay in `_test.go`.
-
----
-
-## Visibility
-
-- Export: types and funcs used by other packages, options structs, constructors.
-- Unexport: helpers used only inside the package.
-
-Skill: `review-member-visibility`.
-
----
-
-## DRY
-
-- Duplicated flag parsing or forge parsing: extract shared helper in the same package or a focused shared package.
-- Repeated path or config keys: one constant or config helper.
+- **Testable I/O:** inject `cliexec` for `gh` / `glab` / `git`; no live forge calls in unit tests.
+- **Shell out** only through `internal/cliexec` or existing forge/localgit helpers. Do not scatter ad-hoc `exec.Command` in handlers.
+- **Never embed tokens;** rely on `gh` / `glab` logged-in sessions and config env overrides.
+- **CLI:** subcommands in `cmd/gitboard`; keep handlers thin; domain in `internal/*`.
+- **Exit codes:** `0` success, non-zero error, `2` usage/unknown command where already used. Keep `-h` / `--help` and `printUsage` in sync.
+- **HTTP:** bind localhost by default; do not widen listen address without an explicit request. Handlers under `internal/server`; static UI under `internal/server/static`. Prefer clear JSON errors over silent 200s on failure.
+- **Options structs** for functions with several parameters (config, server, pruneagent).
+- **Visibility:** export only essential API. Skill: `review-member-visibility`.
+- **DRY:** shared flag or forge parsing → helper in the same package or a focused shared package; repeated config keys → one constant or helper.
 
 ---
 
@@ -160,26 +41,15 @@ Skill: `review-member-visibility`.
 - Fallback logic that hides I/O or CLI failures
 - Editing strop inside this repo for app features (change + tag strop upstream, then `go get`)
 
-
 ---
 
-## Tools
+## Done when
 
 ```bash
-make build    # bin/gitboard
 make test
 make vet
-make ci       # tidy check + gofmt + vet + race tests + build
+# or: make ci
 go mod tidy   # after dependency changes
 ```
 
----
-
-## Completion checklist
-
-- [ ] `gofmt` applied
-- [ ] Errors wrapped; critical paths fail clearly
-- [ ] Files and scanners cleaned up
-- [ ] Tests added/updated for new behavior
-- [ ] `make test` and `make vet` pass
-- [ ] CLI usage / API routes updated if surface changed
+- CLI usage / API routes updated if the surface changed
