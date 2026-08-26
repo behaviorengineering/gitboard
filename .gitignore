@@ -6,3 +6,5 @@ projects.yaml
 .gomodcache/
 .gocache/
 .DS_Store
+
+tmp/
