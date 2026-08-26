@@ -54,5 +54,5 @@ goreleaser check
 ## Notes
 
 - GoReleaser sets `main.version` via ldflags; `gitboard version` should match the tag.
-- Changelog comes from GitHub compare since the previous tag (see `.goreleaser.yaml`).
+- Changelog comes from GitHub compare since the previous tag (see `.goreleaser.yaml`): short SHAs, message, optional `@login` only (no email).
 - Contributors keep using `make serve`; end users download the Release binary.
