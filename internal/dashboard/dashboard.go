@@ -14,19 +14,39 @@ import (
 
 // Service aggregates project rows via forge CLIs and optional local git.
 type Service struct {
-	GitHub *forge.GitHub
-	GitLab *forge.GitLab
-	Local  *localgit.Inspector
-	Cache  *forge.TTLCache
+	GitHub      *forge.GitHub
+	GitLab      *forge.GitLab
+	Local       *localgit.Inspector
+	Cache       *forge.TTLCache
+	OriginFetch *localgit.OriginFetchCache
 }
 
-// New returns a dashboard service with an in-memory upstream cache.
+// New returns a dashboard service with in-memory upstream and origin-fetch caches.
 func New(gh *forge.GitHub, gl *forge.GitLab, local *localgit.Inspector) *Service {
-	return &Service{GitHub: gh, GitLab: gl, Local: local, Cache: forge.NewTTLCache()}
+	return &Service{
+		GitHub:      gh,
+		GitLab:      gl,
+		Local:       local,
+		Cache:       forge.NewTTLCache(),
+		OriginFetch: localgit.NewOriginFetchCache(),
+	}
+}
+
+// ClearCaches drops forge and origin-fetch TTL state (for example after sync changes projects).
+func (s *Service) ClearCaches() {
+	if s == nil {
+		return
+	}
+	if s.Cache != nil {
+		s.Cache.Clear()
+	}
+	if s.OriginFetch != nil {
+		s.OriginFetch.Clear()
+	}
 }
 
 // Collect builds the dashboard for all configured projects.
-// When fresh is true, upstream TTL caches are bypassed for this request.
+// When fresh is true, forge and origin-fetch TTL caches are bypassed for this request.
 func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forge.Dashboard {
 	projects := doc.Projects
 	out := forge.Dashboard{
@@ -57,6 +77,7 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forg
 		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
 		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
 	}
+	fetchTTL := time.Duration(doc.EffectiveFetchSeconds()) * time.Second
 
 	rows := make([]forge.ProjectSummary, len(projects))
 	var wg sync.WaitGroup
@@ -65,7 +86,7 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forg
 		go func(i int, p config.Project) {
 			defer wg.Done()
 			row := s.summarize(ctx, p, opts)
-			row.Local = s.attachLocal(ctx, p, disc, labelByKey)
+			row.Local = s.attachLocal(ctx, p, disc, labelByKey, fresh, fetchTTL)
 			forge.EnrichPruneHints(&row)
 			rows[i] = row
 		}(i, p)
@@ -91,7 +112,7 @@ func projectLabelsByKey(projects []config.Project) map[string]string {
 	return out
 }
 
-func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string) *forge.LocalStatus {
+func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string, fresh bool, fetchTTL time.Duration) *forge.LocalStatus {
 	if s.Local == nil {
 		return nil
 	}
@@ -130,6 +151,8 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 		}
 	}
 
+	fetchErrByCommon := s.refreshOrigins(ctx, inspectList, fresh, fetchTTL)
+
 	type inspected struct {
 		checkout localgit.Checkout
 		status   localgit.Status
@@ -142,6 +165,12 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 			defer wg.Done()
 			st := s.Local.InspectPath(ctx, c.Path)
 			s.Local.EnrichOriginSync(ctx, &st)
+			if st.Error == "" {
+				if err := fetchErrFor(c, fetchErrByCommon, s.Local, ctx); err != nil {
+					st.Error = err.Error()
+					localgit.InvalidateOriginSync(&st)
+				}
+			}
 			results[i] = inspected{checkout: c, status: st}
 		}(i, c)
 	}
@@ -183,11 +212,98 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 		// Explicit path inspect may have failed matching; inspect primary alone.
 		st := s.Local.InspectPath(ctx, primary.Path)
 		s.Local.EnrichOriginSync(ctx, &st)
+		if st.Error == "" {
+			if err := fetchErrFor(primary, fetchErrByCommon, s.Local, ctx); err != nil {
+				st.Error = err.Error()
+				localgit.InvalidateOriginSync(&st)
+			}
+		}
 		primaryLocal = toForgeLocal(st)
 	}
 	primaryLocal.Appearances = appearances
 	primaryLocal.Worktrees = union
 	return primaryLocal
+}
+
+// refreshOrigins runs TTL-gated git fetch origin once per unique common git dir.
+// At most originFetchParallel fetches run at once to bound network load.
+const originFetchParallel = 8
+
+func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Checkout, fresh bool, fetchTTL time.Duration) map[string]error {
+	out := map[string]error{}
+	if s.Local == nil || len(checkouts) == 0 {
+		return out
+	}
+	type job struct {
+		path   string
+		common string
+	}
+	jobs := make([]job, 0, len(checkouts))
+	seen := map[string]struct{}{}
+	for _, c := range checkouts {
+		path := c.Path
+		if path == "" {
+			continue
+		}
+		common := strings.TrimSpace(c.CommonGitDir)
+		if common == "" {
+			if cd, err := s.Local.CommonGitDir(ctx, path); err == nil && cd != "" {
+				common = cd
+			} else {
+				common = path
+			}
+		}
+		common = filepath.Clean(common)
+		if _, ok := seen[common]; ok {
+			continue
+		}
+		seen[common] = struct{}{}
+		jobs = append(jobs, job{path: path, common: common})
+	}
+
+	limit := originFetchParallel
+	if limit < 1 {
+		limit = 1
+	}
+	sem := make(chan struct{}, limit)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, j := range jobs {
+		wg.Add(1)
+		go func(j job) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			err := s.Local.FetchOriginCached(ctx, j.path, fetchTTL, fresh, s.OriginFetch)
+			if err == nil {
+				return
+			}
+			mu.Lock()
+			out[j.common] = err
+			mu.Unlock()
+		}(j)
+	}
+	wg.Wait()
+	return out
+}
+
+func fetchErrFor(c localgit.Checkout, byCommon map[string]error, in *localgit.Inspector, ctx context.Context) error {
+	if len(byCommon) == 0 {
+		return nil
+	}
+	common := strings.TrimSpace(c.CommonGitDir)
+	if common == "" && in != nil && c.Path != "" {
+		if cd, err := in.CommonGitDir(ctx, c.Path); err == nil && cd != "" {
+			common = cd
+		} else {
+			common = c.Path
+		}
+	}
+	common = filepath.Clean(common)
+	if err, ok := byCommon[common]; ok {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) parentLabel(ctx context.Context, parentPath string, labelByKey map[string]string, cache map[string]string) string {

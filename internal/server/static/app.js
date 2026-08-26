@@ -130,6 +130,64 @@ function infoDialog(opts) {
   return confirmDialog({ ...opts, info: true, danger: false, confirmLabel: opts.confirmLabel || 'Close' });
 }
 
+/**
+ * Confirm, then keep the modal open in a busy state until work() settles.
+ * Returns false on cancel; true after work() completes (even if work throws, caller handles).
+ */
+async function confirmAndRun(opts, work) {
+  const ok = await confirmDialog({
+    title: opts.title,
+    body: opts.body,
+    detail: opts.detail,
+    confirmLabel: opts.confirmLabel,
+    cancelLabel: opts.cancelLabel,
+    danger: opts.danger,
+  });
+  if (!ok) return false;
+
+  const root = document.getElementById('modal-root');
+  const modal = root?.querySelector('.modal');
+  const title = document.getElementById('modal-title');
+  const body = document.getElementById('modal-body');
+  const detail = document.getElementById('modal-detail');
+  const cancelBtn = document.getElementById('modal-cancel');
+  const confirmBtn = document.getElementById('modal-confirm');
+  if (!root || !confirmBtn) {
+    await work();
+    return true;
+  }
+
+  if (title) title.textContent = opts.busyTitle || opts.title || 'Working…';
+  if (body) body.textContent = opts.busyBody || 'Please wait…';
+  if (detail) {
+    const detailText = String(opts.detail || '').trim();
+    detail.hidden = !detailText;
+    detail.textContent = detailText;
+  }
+  if (cancelBtn) {
+    cancelBtn.hidden = true;
+    cancelBtn.disabled = true;
+  }
+  confirmBtn.disabled = true;
+  confirmBtn.className = 'modal-btn modal-btn--ok';
+  setButtonLabel(confirmBtn, opts.busyIcon || null, opts.busyLabel || 'Working…');
+  if (modal) modal.classList.toggle('modal--wide', Boolean(opts.wide));
+  root.hidden = false;
+
+  try {
+    await work();
+  } finally {
+    root.hidden = true;
+    if (modal) modal.classList.remove('modal--wide');
+    confirmBtn.disabled = false;
+    if (cancelBtn) {
+      cancelBtn.hidden = false;
+      cancelBtn.disabled = false;
+    }
+  }
+  return true;
+}
+
 function bindModal() {
   const root = document.getElementById('modal-root');
   const cancelBtn = document.getElementById('modal-cancel');
@@ -359,41 +417,65 @@ function localColumn(wts, local, branchName, project) {
     const copyBtn = copyPathButton(preferred.path);
     if (copyBtn) marks.appendChild(copyBtn);
   }
+  if (local.error) {
+    marks.appendChild(iconMark(ICONS.alert, 'mark--bad', local.error));
+    cell.title = local.error;
+  }
   cell.appendChild(marks);
 
-  if (syncBits.length) {
+  // Skip ↑/↓ and pull when origin freshness is unknown (for example fetch failed).
+  if (!local.error && syncBits.length) {
     const span = el('span', 'branch-local-sync is-divergent', syncBits.join(' '));
     span.title = originSyncTitle(sync);
     cell.appendChild(span);
   }
-  appendPullButton(cell, {
-    sync,
-    project,
-    branchName,
-    repoPath,
-    dirty: list.some((w) => w.dirty),
-  });
+  if (!local.error) {
+    appendPullButton(cell, {
+      sync,
+      project,
+      branchName,
+      repoPath,
+      dirty: list.some((w) => w.dirty),
+    });
+  }
   return cell;
+}
+
+/** @type {Set<string>} */
+const pendingPulls = new Set();
+
+function pullActionKey(projectID, branch, repoPath) {
+  return `${projectID}\0${branch}\0${repoPath}`;
 }
 
 function appendPullButton(cell, { sync, project, branchName, repoPath, dirty }) {
   if (!sync?.behind || sync.ahead) return;
   if (!project?.id || !branchName || !repoPath) return;
   if (dirty) return;
+  const key = pullActionKey(project.id, branchName, repoPath);
+  const pending = pendingPulls.has(key);
   const btn = el('button', 'branch-pull-ff');
   btn.type = 'button';
-  setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
-  btn.title = `Fast-forward local ${branchName} from origin (${sync.behind} behind)`;
-  btn.addEventListener('click', (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    void pullFFCheckout({
-      project_id: project.id,
-      branch: branchName,
-      repo_path: repoPath,
-      button: btn,
+  if (pending) {
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+    btn.setAttribute('aria-busy', 'true');
+    setButtonLabel(btn, ICONS.pull, 'pulling…');
+    btn.title = `Pulling ${branchName} from origin…`;
+  } else {
+    setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
+    btn.title = `Fast-forward local ${branchName} from origin (${sync.behind} behind)`;
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void pullFFCheckout({
+        project_id: project.id,
+        branch: branchName,
+        repo_path: repoPath,
+        behind: sync.behind,
+      });
     });
-  });
+  }
   cell.appendChild(btn);
 }
 
@@ -1164,7 +1246,7 @@ function schedulePoll() {
   }
   if (pollSeconds <= 0) return;
   pollTimer = setInterval(() => {
-    if (document.hidden || loading) return;
+    if (document.hidden || loading || pendingPulls.size > 0) return;
     void loadDashboard({ quiet: true });
   }, pollSeconds * 1000);
 }
@@ -1242,46 +1324,56 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
   }
 }
 
-async function pullFFCheckout({ project_id, branch, repo_path, button }) {
+async function pullFFCheckout({ project_id, branch, repo_path }) {
   const status = document.getElementById('status');
   if (!project_id || !branch || !repo_path) {
     if (status) status.textContent = 'Missing project, branch, or repo path';
     return;
   }
   const label = `${project_id} / ${branch}`;
-  const ok = await confirmDialog({
-    title: 'Fast-forward from origin?',
-    body: `Update local ${branch} to match origin (ff-only). Refuses dirty trees and diverged history.`,
-    detail: repo_path,
-    confirmLabel: 'Pull',
-    cancelLabel: 'Cancel',
-    danger: false,
-  });
-  if (!ok) return;
-  if (button) {
-    button.disabled = true;
-    setButtonLabel(button, ICONS.pull, 'pulling…');
-  }
-  if (status) status.textContent = `Pulling ${label}…`;
+  const key = pullActionKey(project_id, branch, repo_path);
+
+  pendingPulls.add(key);
+  applyBoard();
+
+  let ran = false;
   try {
-    const res = await fetch('/api/pull/ff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id, branch, repo_path }),
+    ran = await confirmAndRun({
+      title: 'Fast-forward from origin?',
+      body: `Update local ${branch} to match origin (ff-only). Refuses dirty trees and diverged history.`,
+      detail: repo_path,
+      confirmLabel: 'Pull',
+      cancelLabel: 'Cancel',
+      danger: false,
+      busyTitle: `Pulling ${label}`,
+      busyBody: 'Fast-forwarding from origin. This may take a moment…',
+      busyLabel: 'Pulling…',
+      busyIcon: ICONS.pull,
+    }, async () => {
+      if (status) status.textContent = `Pulling ${label}…`;
+      const res = await fetch('/api/pull/ff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id, branch, repo_path }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(text.trim() || `HTTP ${res.status}`);
+      }
+      if (status) status.textContent = `Pulled ${label}`;
+      await loadDashboard({ quiet: true, fresh: true });
     });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(text.trim() || `HTTP ${res.status}`);
-    }
-    if (status) status.textContent = `Pulled ${label}`;
-    await loadDashboard({ quiet: true, fresh: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (status) status.textContent = `Pull failed: ${msg}`;
-    if (button) {
-      button.disabled = false;
-      setButtonLabel(button, ICONS.pull, 'pull');
-    }
+    await infoDialog({
+      title: `Pull failed: ${label}`,
+      body: msg,
+    });
+  } finally {
+    pendingPulls.delete(key);
+    if (!ran) applyBoard();
+    else applyBoard();
   }
 }
 

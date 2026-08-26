@@ -15,7 +15,6 @@ import (
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
 	"github.com/behaviorengineering/gitboard/internal/triage"
 	"github.com/behaviorengineering/strop/agentsession"
@@ -53,15 +52,16 @@ func NewMux(opts Options) http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 
-	var cache *forge.TTLCache
-	if opts.Dash != nil {
-		cache = opts.Dash.Cache
+	clearCaches := func() {
+		if opts.Dash != nil {
+			opts.Dash.ClearCaches()
+		}
 	}
 	live := newConfigLive(opts.ConfigPath, config.File{
 		Projects: opts.Projects,
 		Local:    opts.Local,
 		Upstream: opts.Upstream,
-	}, opts.PollSeconds, cache)
+	}, opts.PollSeconds, clearCaches)
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {

@@ -192,9 +192,9 @@ func runServe(args []string) error {
 		Prune:       prune,
 		PollSeconds: doc.EffectivePollSeconds(),
 	})
-	log.Printf("gitboard: %s (%d projects, config %s, poll %ds, heads cache %ds, merged cache %ds)",
+	log.Printf("gitboard: %s (%d projects, config %s, poll %ds, heads cache %ds, merged cache %ds, fetch cache %ds)",
 		*addr, len(doc.Projects), path, doc.EffectivePollSeconds(),
-		doc.EffectiveHeadsSeconds(), doc.EffectiveMergedSeconds())
+		doc.EffectiveHeadsSeconds(), doc.EffectiveMergedSeconds(), doc.EffectiveFetchSeconds())
 	log.Printf("gitboard: uses gh and glab; local roots=%d; AI triage via llm in config; agents %s",
 		len(doc.Local.Roots), config.AgentsDir())
 
