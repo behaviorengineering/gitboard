@@ -1,5 +1,7 @@
 # Gitboard
 
+![Gitboard dashboard](docs/banner.webp)
+
 Local code-change board for GitLab and GitHub: CI status, open MRs/PRs, failed job triage, and local checkout / worktree state. Uses `gh`, `glab`, and `git` on your machine (not deployments or runtime ops).
 
 ## Quick start
