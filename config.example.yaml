@@ -1,0 +1,46 @@
+# Copy via: gitboard init  (writes ~/.config/gitboard/config.yaml)
+#
+# llm.api_key is optional for local Polypus; set when the endpoint requires it.
+# Env overrides: GITBOARD_LLM_BASE_URL, GITBOARD_LLM_MODEL, GITBOARD_LLM_API_KEY,
+# POLYPUS_BASE_URL, OPENAI_API_KEY, GITBOARD_POLL_SECONDS.
+# Config path override: GITBOARD_CONFIG.
+
+llm:
+  base_url: http://127.0.0.1:1320/v1
+  model: cf_local/@cf/qwen/qwen3-30b-a3b-fp8
+  api_key: ""
+
+# OpenInference tracing + error-only dumps (content-pipelines pattern).
+# Dumps land under ~/.config/gitboard/logs/inference-failures/ when enabled.
+openinference:
+  enabled: true
+  endpoint: ""
+  service_name: gitboard
+  failure_dump:
+    enabled: true
+    dir: ""
+    max_age_hours: 48
+    max_files: 20
+
+ui:
+  poll_seconds: 30
+
+# Server-side forge cache TTLs (0 = always refetch that slice).
+upstream:
+  heads_seconds: 120
+  merged_seconds: 600
+
+# Optional: scan these trees for local checkouts (incl. git worktrees).
+# Match is via origin remote → project host/path. Override per project with local_path.
+local:
+  roots: []
+
+sync:
+  github:
+    orgs: []
+  gitlab:
+    groups: []
+
+# Curated by: gitboard sync
+# Optional per project: local_path: ~/code/my-clone
+projects: []

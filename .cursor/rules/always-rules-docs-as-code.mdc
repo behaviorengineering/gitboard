@@ -1,0 +1,49 @@
+---
+description: Documentation as code. Operational knowledge becomes skills or executable tooling, not long human guides.
+globs:
+  - docs/**
+  - .cursor/**
+  - README.md
+alwaysApply: false
+---
+
+# Documentation as code
+
+**Moral:** Operational knowledge must become **actionable skills**, **rules**, or **code**. The assistant is the primary reader of runbooks; humans ask the assistant. README stays a short human pitch.
+
+## Default
+
+| Knowledge type | Where it lives |
+|----------------|----------------|
+| How the assistant should work | `.cursor/skills/<name>/SKILL.md` |
+| Project invariants / layout / API | `.cursor/rules/*.mdc` |
+| Enforcement, automation, checks | Go tests, Makefile (`make ci`), scripts |
+| Human product pitch | Root `README.md` only |
+
+## MUST NOT
+
+- Add standalone how-to markdown when a skill or rule would carry the behavior
+- Write long human tutorials when `make` targets or skills already cover the flow
+- Duplicate skill or rule content in `docs/`
+- Put design or architecture tables in README (use `architecture.mdc`)
+
+## MUST
+
+- Put operational procedures in **skills** with: `description` (when to load), **when to invoke**, **commands to run**, **must / must not**
+- Put repeatable checks in **code** or `make` rather than checklist-only prose
+- When the user asks to "document" something: create or extend a skill/rule, or implement tooling; ask if unclear
+
+## README voice (human-readable)
+
+| MUST | MUST NOT |
+|------|----------|
+| Active voice, simple ideas, one screen | Long architecture or API dumps |
+| Point to `make help` / commands for ops | Teacher framing, hedges, AI fluff |
+| Keep install + config + commands | Em dashes (U+2014) |
+
+## When editing or adding docs
+
+1. **Is it how the assistant operates?** → skill in `.cursor/skills/`
+2. **Is it a durable project invariant?** → rule in `.cursor/rules/`
+3. **Is it a rule machines should enforce?** → test, Makefile, or script
+4. **Otherwise** → fold into an existing skill/rule or do not add

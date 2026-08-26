@@ -1,0 +1,77 @@
+---
+description: Gitboard architecture, package layout, API surface, and strop dependency workflow
+alwaysApply: true
+---
+
+# Architecture
+
+Local code-change board (not deployments/runtime ops). Talks to forges via CLIs on the machine.
+
+| Layer | Choice |
+|-------|--------|
+| GitHub | `gh` |
+| GitLab | `glab` |
+| Auth | Existing CLI login sessions |
+| AI triage | Optional OpenAI-compatible chat in config `llm` |
+| Agent sessions | `strop/agentsession` (prune investigate) via published module |
+| Supervision | process-compose (`make serve`); `gitboard serve` for one-off |
+
+## Packages
+
+```
+cmd/gitboard/           # CLI: init, sync, serve
+internal/config/        # XDG config load/save
+internal/cliexec/       # shared gh/glab/git exec
+internal/forge/         # GitHub + GitLab adapters
+internal/localgit/      # checkouts, worktrees, pull ff-only
+internal/syncproj/      # discover + select tracked projects
+internal/dashboard/     # aggregate rows for UI
+internal/server/        # HTTP + static UI
+internal/server/static/ # dashboard assets
+internal/triage/        # AI failure triage
+internal/llm/           # OpenAI-compatible client
+internal/pruneagent/    # investigate removable branches
+internal/observability/ # OTEL hooks
+```
+
+**Dependency direction:** `cmd` → `internal/*`; domain packages must not import `cmd`. Prefer `cliexec` for process calls. Do not grow business logic in `main` switch arms beyond flag parse + wire-up.
+
+## strop dependency
+
+`go.mod` requires the published module (`github.com/behaviorengineering/strop vX.Y.Z`). No git submodule.
+
+**Bump a release:** `go get github.com/behaviorengineering/strop@vX.Y.Z` then `go mod tidy`.
+
+**Local strop changes (rare):** develop in a sibling clone, temporarily add it to root `go.work`, then release strop and bump the require. Do not commit a long-lived `replace` or re-add a submodule unless the user asks.
+
+```
+# sibling layout example
+use (
+	.
+	../strop
+)
+```
+
+After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with `.` only), `go get …@vX.Y.Z`, `go mod tidy`.
+
+## Dashboard behavior
+
+- Branches column: remote heads from the forge (up to 20); default + open PR/MR first, then by recency. Each row has its own latest CI. CI-only refs do not invent branch rows.
+- Local status beside each remote branch (checked out, dirty, ↑/↓ vs origin). Behind + clean → **pull** is ff-only (`git pull --ff-only`, or `git fetch origin branch:branch` when not checked out). Worktrees with no remote head are “local only”.
+
+## HTTP API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/health` | Liveness |
+| `GET` | `/api/meta` | Server meta |
+| `GET` | `/api/dashboard` | Aggregated rows (`?fresh=1` forces refresh) |
+| `GET` | `/api/failures?project=&run_id=` | Failed jobs |
+| `POST` | `/api/triage` | AI log analysis |
+| `POST` | `/api/prune/safe` | Re-check hints; remove a safe local checkout |
+| `POST` | `/api/pull/ff` | Fast-forward local branch from origin (ff-only) |
+| `POST` | `/api/agents/prune/investigate` | Likely-removable branch evidence + session card |
+| `GET` | `/api/agents/sessions/:id` | Session meta, card, turns |
+| `GET` | `/api/agents/sessions/:id/failure` | Failure dump when present |
+
+**Review skills (on request):** `review-go-code`, `review-go-smells`, `review-go-architecture`, `review-go-cli`, `review-member-visibility`.

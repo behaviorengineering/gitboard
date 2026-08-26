@@ -1,0 +1,32 @@
+---
+description: >-
+  Convert project-owned PNG (or JPEG screenshots saved as .png) to WebP, update
+  markdown path refs, and remove the source raster. Apply when adding README
+  banners, docs screenshots, or any new raster in the repo.
+globs: "**/*.{png,jpg,jpeg,heic,heif},docs/**/*.md,README.md"
+alwaysApply: false
+---
+
+# Raster images to WebP
+
+## Scope
+
+- MUST convert **any** new or updated project-owned raster the assistant adds or touches to **`.webp`** before finishing the task.
+- **In scope:** `docs/`, root README assets, and other first-party screenshots.
+- **Out of scope:** `tmp/`, `node_modules/`, and third-party trees unless the user points at them.
+
+## Conversion
+
+```bash
+cwebp -q 85 path.png -o path.webp
+# then update markdown refs and remove the source raster
+```
+
+- If **`cwebp`** is not installed, MUST report that and stop; MUST NOT silently keep PNG.
+- MUST update every markdown path reference to the new **`.webp`** extension.
+- Default removes the source raster after success (keep only when the user asks).
+- MAY leave existing **`.webp`** unchanged unless the user asks to recompress.
+
+## Verify
+
+- README / docs preview shows the image; broken refs are fixed before claiming done.

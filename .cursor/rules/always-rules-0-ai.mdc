@@ -1,0 +1,33 @@
+---
+alwaysApply: true
+---
+
+# AI protocol
+
+## Conversation before implementation
+
+- MUST NOT implement, fix, or edit code when the user only asks a question or raises a concern without a clear implementation request.
+- MUST answer with analysis, options, and clarifying questions first.
+- MUST implement only after explicit requests (for example: "implement this", "fix this", "make these changes").
+
+## Before setup or environment changes
+
+- MUST state the planned action, cite which rules apply, and list next steps before running commands that change setup.
+
+## Language (code and docs)
+
+- MUST use English only for code, identifiers, comments, strings, paths, and documentation.
+- MUST use simple words, short sentences, and one consistent English term per concept.
+- MUST NOT use non-English text in the codebase.
+
+## Punctuation (all written output)
+
+- MUST NOT use the em dash character (U+2014, `—`) in any written output: chat responses, generated files, or docs. Use comma, semicolon, colon, or parentheses instead.
+
+## Library source for debugging
+
+- MAY clone upstream into `tmp/<library-name>` to read or debug. MUST NOT modify or commit to upstream repos. MUST keep clones out of unrelated paths.
+
+## Documentation
+
+- Operational docs → skills or code, not long human guides. See **`always-rules-docs-as-code.mdc`**.

@@ -12,10 +12,10 @@ import (
 
 // GitHub uses the gh CLI.
 type GitHub struct {
-	Run *cliexec.Runner
+	Run cliexec.Exec
 }
 
-func NewGitHub(run *cliexec.Runner) *GitHub {
+func NewGitHub(run cliexec.Exec) *GitHub {
 	if run == nil {
 		run = cliexec.New()
 	}
@@ -23,7 +23,7 @@ func NewGitHub(run *cliexec.Runner) *GitHub {
 }
 
 func (g *GitHub) AuthStatus(ctx context.Context) (bool, bool, string) {
-	if _, err := cliexec.LookPath("gh"); err != nil {
+	if _, err := g.Run.LookPath("gh"); err != nil {
 		return false, false, "gh not on PATH"
 	}
 	_, err := g.Run.Run(ctx, "gh", "auth", "status")
@@ -33,7 +33,7 @@ func (g *GitHub) AuthStatus(ctx context.Context) (bool, bool, string) {
 	return true, true, ""
 }
 
-func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project) (ProjectSummary, error) {
+func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (ProjectSummary, error) {
 	summary := baseSummary(p)
 	installed, authed, detail := g.AuthStatus(ctx)
 	if !installed {
@@ -45,14 +45,112 @@ func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 		return summary, nil
 	}
 	repo := p.Path
+	key := cacheKey(string(p.Host), repo)
+	branches := newBranchAccum()
+
+	heads, err := opts.Cache.GetOrLoadHeads(key, opts.HeadsTTL, opts.Fresh, func() (HeadsSnapshot, error) {
+		return g.loadHeads(ctx, repo)
+	})
+	if err != nil {
+		if summary.Error == "" {
+			summary.Error = err.Error()
+		}
+		summary.RemoteNamesOK = false
+	} else {
+		summary.RemoteNamesOK = true
+		if heads.DefaultBranch != "" {
+			branches.setDefault(heads.DefaultBranch)
+		}
+		names := make([]string, 0, len(heads.Heads))
+		for _, h := range heads.Heads {
+			branches.addRemote(h.Name, h.UpdatedAt, h.WebURL)
+			if n := trimBranch(h.Name); n != "" {
+				names = append(names, n)
+			}
+		}
+		summary.RemoteNames = names
+	}
+
+	if err := g.loadCI(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
+		summary.Error = err.Error()
+	}
+	if err := g.loadOpenReviews(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
+		summary.Error = err.Error()
+	}
+
+	merged, mergedOK := opts.Cache.GetOrLoadMerged(key, opts.MergedTTL, opts.Fresh, func() ([]MergedReview, error) {
+		return g.loadMerged(ctx, repo)
+	})
+	summary.Merged = merged
+	summary.MergedOK = mergedOK
+	summary.Branches = branches.list()
+	return summary, nil
+}
+
+func (g *GitHub) loadHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
+	var snap HeadsSnapshot
+	if raw, err := g.Run.RunJSON(ctx, "gh", "api", "repos/"+repo, "--jq", "{default: .default_branch}"); err != nil {
+		return snap, fmt.Errorf("github default branch: %w", err)
+	} else {
+		var meta struct {
+			Default string `json:"default"`
+		}
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			return snap, fmt.Errorf("parse github default branch: %w", err)
+		}
+		snap.DefaultBranch = meta.Default
+	}
+	const perPage = 100
+	const maxPages = 50
+	for page := 1; page <= maxPages; page++ {
+		path := fmt.Sprintf("repos/%s/branches?per_page=%d&page=%d", repo, perPage, page)
+		raw, err := g.Run.RunJSON(ctx, "gh", "api", path)
+		if err != nil {
+			return snap, err
+		}
+		var heads []struct {
+			Name   string `json:"name"`
+			Commit struct {
+				Commit struct {
+					Committer struct {
+						Date string `json:"date"`
+					} `json:"committer"`
+					Author struct {
+						Date string `json:"date"`
+					} `json:"author"`
+				} `json:"commit"`
+			} `json:"commit"`
+		}
+		if err := json.Unmarshal(raw, &heads); err != nil {
+			return snap, err
+		}
+		if len(heads) == 0 {
+			break
+		}
+		for _, h := range heads {
+			snap.Heads = append(snap.Heads, RemoteHead{
+				Name:      h.Name,
+				UpdatedAt: firstNonEmpty(h.Commit.Commit.Committer.Date, h.Commit.Commit.Author.Date),
+			})
+		}
+		if len(heads) < perPage {
+			break
+		}
+		if page == maxPages {
+			return snap, fmt.Errorf("github branches: truncated after %d pages", maxPages)
+		}
+	}
+	return snap, nil
+}
+
+func (g *GitHub) loadCI(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
 	raw, err := g.Run.RunJSON(ctx, "gh", "run", "list",
 		"--repo", repo,
-		"--limit", "1",
+		"--limit", "20",
 		"--json", "databaseId,status,conclusion,displayTitle,url,headBranch,updatedAt,workflowName",
 	)
 	if err != nil {
-		summary.Error = err.Error()
-		return summary, nil
+		return err
 	}
 	var runs []struct {
 		ID         int64  `json:"databaseId"`
@@ -65,43 +163,93 @@ func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project) (ProjectS
 		Workflow   string `json:"workflowName"`
 	}
 	if err := json.Unmarshal(raw, &runs); err != nil {
-		summary.Error = err.Error()
-		return summary, nil
+		return err
 	}
-	if len(runs) > 0 {
-		r := runs[0]
-		summary.CI = &CIStatus{
-			Status:     firstNonEmpty(r.Conclusion, r.Status),
-			Conclusion: r.Conclusion,
-			Ref:        r.Branch,
-			Name:       firstNonEmpty(r.Workflow, r.Title),
-			WebURL:     r.URL,
-			UpdatedAt:  r.UpdatedAt,
-			RunID:      fmt.Sprintf("%d", r.ID),
+	for i, r := range runs {
+		status := firstNonEmpty(r.Conclusion, r.Status)
+		branches.setCI(r.Branch, status, r.URL, r.UpdatedAt, fmt.Sprintf("%d", r.ID))
+		if i == 0 {
+			summary.CI = &CIStatus{
+				Status:     status,
+				Conclusion: r.Conclusion,
+				Ref:        r.Branch,
+				Name:       firstNonEmpty(r.Workflow, r.Title),
+				WebURL:     r.URL,
+				UpdatedAt:  r.UpdatedAt,
+				RunID:      fmt.Sprintf("%d", r.ID),
+			}
 		}
 	}
+	return nil
+}
+
+func (g *GitHub) loadOpenReviews(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
 	prRaw, err := g.Run.RunJSON(ctx, "gh", "pr", "list",
 		"--repo", repo,
 		"--state", "open",
-		"--json", "number",
+		"--json", "number,headRefName,url,mergeable,mergeStateStatus,updatedAt,isDraft",
 	)
 	if err != nil {
-		if summary.Error == "" {
-			summary.Error = err.Error()
-		}
-		return summary, nil
+		return err
 	}
 	var prs []struct {
-		Number int `json:"number"`
+		Number           int    `json:"number"`
+		Head             string `json:"headRefName"`
+		URL              string `json:"url"`
+		Mergeable        string `json:"mergeable"`
+		MergeStateStatus string `json:"mergeStateStatus"`
+		UpdatedAt        string `json:"updatedAt"`
+		IsDraft          bool   `json:"isDraft"`
 	}
 	if err := json.Unmarshal(prRaw, &prs); err != nil {
-		if summary.Error == "" {
-			summary.Error = err.Error()
-		}
-		return summary, nil
+		return err
 	}
 	summary.OpenItems.PullRequests = len(prs)
-	return summary, nil
+	for _, pr := range prs {
+		branches.setOpenReview(pr.Head, reviewInfo{
+			ID:        pr.Number,
+			URL:       pr.URL,
+			Conflict:  githubHasConflict(pr.Mergeable, pr.MergeStateStatus),
+			UpdatedAt: pr.UpdatedAt,
+			Draft:     pr.IsDraft,
+		})
+	}
+	return nil
+}
+
+func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]MergedReview, error) {
+	raw, err := g.Run.RunJSON(ctx, "gh", "pr", "list",
+		"--repo", repo,
+		"--state", "merged",
+		"--limit", "50",
+		"--json", "number,headRefName,url,mergedAt",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var prs []struct {
+		Number   int    `json:"number"`
+		Head     string `json:"headRefName"`
+		URL      string `json:"url"`
+		MergedAt string `json:"mergedAt"`
+	}
+	if err := json.Unmarshal(raw, &prs); err != nil {
+		return nil, err
+	}
+	out := make([]MergedReview, 0, len(prs))
+	for _, pr := range prs {
+		name := trimBranch(pr.Head)
+		if name == "" {
+			continue
+		}
+		out = append(out, MergedReview{
+			Branch:   name,
+			ID:       pr.Number,
+			URL:      pr.URL,
+			MergedAt: pr.MergedAt,
+		})
+	}
+	return out, nil
 }
 
 func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string) ([]FailedJob, error) {
@@ -159,13 +307,66 @@ func (g *GitHub) JobLog(ctx context.Context, p config.Project, runID, jobID stri
 	return truncateLog(string(out)), nil
 }
 
+// ListOrgRepos lists non-archived repositories for a GitHub org or user.
+func (g *GitHub) ListOrgRepos(ctx context.Context, org string) ([]RepoRef, error) {
+	org = strings.TrimSpace(org)
+	if org == "" {
+		return nil, fmt.Errorf("missing github org")
+	}
+	raw, err := g.Run.RunJSON(ctx, "gh", "repo", "list", org,
+		"--limit", "1000",
+		"--no-archived",
+		"--json", "nameWithOwner,name,isArchived",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		NameWithOwner string `json:"nameWithOwner"`
+		Name          string `json:"name"`
+		IsArchived    bool   `json:"isArchived"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("parse gh repo list: %w", err)
+	}
+	out := make([]RepoRef, 0, len(rows))
+	for _, r := range rows {
+		if r.IsArchived {
+			continue
+		}
+		path := strings.Trim(r.NameWithOwner, "/")
+		name := r.Name
+		if name == "" {
+			parts := strings.Split(path, "/")
+			name = parts[len(parts)-1]
+		}
+		out = append(out, RepoRef{
+			Host: config.HostGitHub,
+			Path: path,
+			Name: name,
+		})
+	}
+	return out, nil
+}
+
 func baseSummary(p config.Project) ProjectSummary {
 	return ProjectSummary{
 		ID:      p.ID,
 		Label:   p.Label,
 		Host:    string(p.Host),
+		Path:    strings.Trim(p.Path, "/"),
+		Org:     pathOrg(p.Path),
 		OpenURL: p.OpenURL(),
 	}
+}
+
+func pathOrg(path string) string {
+	path = strings.Trim(path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.Join(parts[:len(parts)-1], "/")
 }
 
 func firstNonEmpty(values ...string) string {
