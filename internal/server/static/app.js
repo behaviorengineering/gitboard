@@ -435,7 +435,7 @@ function localColumn(wts, local, branchName, project) {
       project,
       branchName,
       repoPath,
-      dirty: list.some((w) => w.dirty),
+      dirty: Boolean(preferred?.dirty),
     });
   }
   return cell;
@@ -443,6 +443,57 @@ function localColumn(wts, local, branchName, project) {
 
 /** @type {Set<string>} */
 const pendingPulls = new Set();
+
+/** @type {{ label: string, path: string, message: string }[]} */
+const pullFailures = [];
+
+let pullFlushScheduled = false;
+
+function pullStatusText() {
+  const n = pendingPulls.size;
+  if (n <= 0) return '';
+  if (n === 1) return 'Pulling 1 checkout…';
+  return `Pulling ${n} checkouts…`;
+}
+
+function schedulePullFlush() {
+  if (pendingPulls.size > 0 || pullFlushScheduled) return;
+  pullFlushScheduled = true;
+  queueMicrotask(() => {
+    void flushPullBatch();
+  });
+}
+
+async function flushPullBatch() {
+  pullFlushScheduled = false;
+  if (pendingPulls.size > 0) return;
+  const failures = pullFailures.splice(0, pullFailures.length);
+  const status = document.getElementById('status');
+  try {
+    await loadDashboard({ quiet: true, fresh: true });
+  } catch {
+    // loadDashboard already writes status on error
+  }
+  if (failures.length === 0) {
+    if (status && !String(status.textContent || '').startsWith('Error:')) {
+      status.textContent = status.textContent || 'Pulls finished';
+    }
+    return;
+  }
+  if (status) {
+    status.textContent = failures.length === 1
+      ? `Pull failed: ${failures[0].message}`
+      : `${failures.length} pulls failed`;
+  }
+  const body = failures.map((f) => {
+    const where = f.path ? `${f.label}\n${f.path}` : f.label;
+    return `${where}\n${f.message}`;
+  }).join('\n\n');
+  await infoDialog({
+    title: failures.length === 1 ? `Pull failed: ${failures[0].label}` : `${failures.length} pulls failed`,
+    body,
+  });
+}
 
 function pullActionKey(projectID, branch, repoPath) {
   return `${projectID}\0${branch}\0${repoPath}`;
@@ -692,6 +743,28 @@ function pruneCommand(branchName, localWt, local) {
   return `git branch -d ${branch}`;
 }
 
+/** Origin sync for an appearance's current branch (list entry or top-level ahead/behind). */
+function appearanceBranchSync(app) {
+  if (!app || app.detached || app.error) return null;
+  const branch = String(app.branch || '').trim();
+  if (!branch) return null;
+  const fromList = originSyncFor(app, branch);
+  if (fromList) return fromList;
+  if (app.ahead || app.behind) {
+    return { name: branch, ahead: app.ahead || 0, behind: app.behind || 0 };
+  }
+  return null;
+}
+
+/** True when the appearance checkout of branch is dirty (blocks ff pull). */
+function appearancePullDirty(app, branch) {
+  const name = String(branch || '').trim();
+  if (!name || !app) return true;
+  if (app.dirty && !app.detached && String(app.branch || '') === name) return true;
+  const trees = Array.isArray(app.worktrees) ? app.worktrees : [];
+  return trees.some((w) => !w.bare && String(w.branch || '') === name && w.dirty);
+}
+
 function appearanceStatusMarks(app) {
   const marks = el('span', 'appearance-marks');
   if (app.error) {
@@ -705,12 +778,8 @@ function appearanceStatusMarks(app) {
   if (app.dirty) {
     marks.appendChild(iconMark(ICONS.laptop, 'mark--warn', 'dirty working tree'));
   }
-  const sync = originSyncFor(app, app.branch);
+  const sync = appearanceBranchSync(app);
   const bits = originSyncBits(sync);
-  if (!bits.length) {
-    if (app.ahead) bits.push(`↑${app.ahead}`);
-    if (app.behind) bits.push(`↓${app.behind}`);
-  }
   if (bits.length) {
     const span = el('span', 'appearance-sync is-divergent', bits.join(' '));
     span.title = originSyncTitle(sync) || 'versus upstream';
@@ -751,7 +820,7 @@ function renderAppearanceDetail(app) {
   return detail;
 }
 
-function renderAppearances(local) {
+function renderAppearances(local, project) {
   if (!local?.mapped) return null;
   const apps = Array.isArray(local.appearances) && local.appearances.length
     ? local.appearances
@@ -793,6 +862,15 @@ function renderAppearances(local) {
       row.classList.toggle('is-open', !open);
     });
     line.appendChild(head);
+    const sync = appearanceBranchSync(app);
+    const branchName = String(app.branch || '').trim();
+    appendPullButton(line, {
+      sync,
+      project,
+      branchName,
+      repoPath: app.path,
+      dirty: appearancePullDirty(app, branchName),
+    });
     row.appendChild(line);
     row.appendChild(detail);
     wrap.appendChild(row);
@@ -1208,7 +1286,7 @@ function renderRows(projects) {
     }
     titleCell.appendChild(titleRow);
     const local = row.local;
-    const appearanceBlock = renderAppearances(local);
+    const appearanceBlock = renderAppearances(local, row);
     if (appearanceBlock) {
       titleCell.appendChild(appearanceBlock);
     } else if (local && local.mapped === false) {
@@ -1332,48 +1410,33 @@ async function pullFFCheckout({ project_id, branch, repo_path }) {
   }
   const label = `${project_id} / ${branch}`;
   const key = pullActionKey(project_id, branch, repo_path);
+  if (pendingPulls.has(key)) return;
 
   pendingPulls.add(key);
   applyBoard();
+  if (status) status.textContent = pullStatusText();
 
-  let ran = false;
   try {
-    ran = await confirmAndRun({
-      title: 'Fast-forward from origin?',
-      body: `Update local ${branch} to match origin (ff-only). Refuses dirty trees and diverged history.`,
-      detail: repo_path,
-      confirmLabel: 'Pull',
-      cancelLabel: 'Cancel',
-      danger: false,
-      busyTitle: `Pulling ${label}`,
-      busyBody: 'Fast-forwarding from origin. This may take a moment…',
-      busyLabel: 'Pulling…',
-      busyIcon: ICONS.pull,
-    }, async () => {
-      if (status) status.textContent = `Pulling ${label}…`;
-      const res = await fetch('/api/pull/ff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id, branch, repo_path }),
-      });
-      const text = await res.text();
-      if (!res.ok) {
-        throw new Error(text.trim() || `HTTP ${res.status}`);
-      }
-      if (status) status.textContent = `Pulled ${label}`;
-      await loadDashboard({ quiet: true, fresh: true });
+    const res = await fetch('/api/pull/ff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id, branch, repo_path }),
     });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(text.trim() || `HTTP ${res.status}`);
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (status) status.textContent = `Pull failed: ${msg}`;
-    await infoDialog({
-      title: `Pull failed: ${label}`,
-      body: msg,
-    });
+    pullFailures.push({ label, path: repo_path, message: msg });
   } finally {
     pendingPulls.delete(key);
-    if (!ran) applyBoard();
-    else applyBoard();
+    applyBoard();
+    if (pendingPulls.size > 0) {
+      if (status) status.textContent = pullStatusText();
+    } else {
+      schedulePullFlush();
+    }
   }
 }
 

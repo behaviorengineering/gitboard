@@ -57,7 +57,7 @@ After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with
 ## Dashboard behavior
 
 - Branches column: remote heads from the forge (up to 20); default + open PR/MR first, then by recency. Each row has its own latest CI. CI-only refs do not invent branch rows.
-- Local status beside each remote branch (checked out, dirty, ↑/↓ vs origin). Ahead/behind uses `git fetch --prune origin` (TTL: `local.fetch_seconds`, default 120; `?fresh=1` bypasses) then compares local heads to `origin/<branch>`. Behind + clean → **pull** is ff-only (`git pull --ff-only`, or `git fetch origin branch:branch` when not checked out). Worktrees with no remote head are “local only”.
+- Local status beside each remote branch (checked out, dirty, ↑/↓ vs origin). Ahead/behind uses `git fetch --prune origin` (TTL: `local.fetch_seconds`, default 120; `?fresh=1` bypasses) then compares local heads to `origin/<branch>`. Behind + clean → **pull** is ff-only (`git pull --ff-only`, or `git fetch origin branch:branch` when not checked out). Each local appearance (checkout/submodule) with behind-only + clean also gets its own pull control; pulls start immediately (no confirm) and may run in parallel. Worktrees with no remote head are “local only”.
 - `gitboard sync` writes config; a running `serve` reloads that file when its mtime advances and clears the forge + origin-fetch TTL caches when the tracked project set changes (no restart required for add/remove).
 
 ## HTTP API

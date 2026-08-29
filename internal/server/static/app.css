@@ -455,6 +455,12 @@ body {
   min-width: 0;
 }
 
+.appearance-line > button.branch-pull-ff {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  align-self: flex-start;
+}
+
 .appearance-row--primary .appearance-id {
   color: var(--text, #e8eef7);
 }
