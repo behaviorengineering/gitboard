@@ -20,6 +20,7 @@ import (
 type Worktree struct {
 	Path     string `json:"path"`
 	Branch   string `json:"branch,omitempty"`
+	Tag      string `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached bool   `json:"detached,omitempty"`
 	Bare     bool   `json:"bare,omitempty"`
 	Locked   bool   `json:"locked,omitempty"`
@@ -37,6 +38,7 @@ type Status struct {
 	Path          string       `json:"path,omitempty"`
 	Error         string       `json:"error,omitempty"`
 	Branch        string       `json:"branch,omitempty"`
+	Tag           string       `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached      bool         `json:"detached,omitempty"`
 	Dirty         bool         `json:"dirty,omitempty"`
 	Ahead         int          `json:"ahead,omitempty"`
@@ -129,6 +131,7 @@ func summarize(path string, trees []Worktree) Status {
 	}
 	st.Path = primary.Path
 	st.Branch = primary.Branch
+	st.Tag = primary.Tag
 	st.Detached = primary.Detached
 	st.Dirty = primary.Dirty
 	st.Ahead = primary.Ahead
@@ -219,6 +222,7 @@ func (in *Inspector) inspectWorktree(ctx context.Context, dir string, isMain boo
 		wt.Detached = true
 		short, _ := in.git(ctx, dir, "rev-parse", "--short", "HEAD")
 		wt.Branch = strings.TrimSpace(string(short))
+		wt.Tag = in.exactTagAtHEAD(ctx, dir)
 	} else {
 		wt.Branch = branch
 	}
@@ -239,6 +243,16 @@ func (in *Inspector) inspectWorktree(ctx context.Context, dir string, isMain boo
 		}
 	}
 	return wt, nil
+}
+
+// exactTagAtHEAD returns a tag name when HEAD points exactly at a tag.
+// Prefer lightweight/version tags via describe; empty when HEAD is not tagged.
+func (in *Inspector) exactTagAtHEAD(ctx context.Context, dir string) string {
+	out, err := in.git(ctx, dir, "describe", "--exact-match", "--tags", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (in *Inspector) leftRight(ctx context.Context, dir, left, right string) (ahead, behind int, ok bool) {

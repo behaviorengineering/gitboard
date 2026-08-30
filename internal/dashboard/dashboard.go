@@ -336,6 +336,7 @@ func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, pare
 		RelPath:       c.RelPath,
 		Error:         st.Error,
 		Branch:        st.Branch,
+		Tag:           st.Tag,
 		Detached:      st.Detached,
 		Dirty:         st.Dirty,
 		Ahead:         st.Ahead,
@@ -356,6 +357,7 @@ func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, pare
 		app.Worktrees = append(app.Worktrees, forge.LocalWorktree{
 			Path:            wt.Path,
 			Branch:          wt.Branch,
+			Tag:             wt.Tag,
 			Detached:        wt.Detached,
 			Bare:            wt.Bare,
 			Main:            wt.Main,
@@ -376,6 +378,7 @@ func toForgeLocal(st localgit.Status) *forge.LocalStatus {
 		Path:          st.Path,
 		Error:         st.Error,
 		Branch:        st.Branch,
+		Tag:           st.Tag,
 		Detached:      st.Detached,
 		Dirty:         st.Dirty,
 		Ahead:         st.Ahead,
@@ -393,6 +396,7 @@ func toForgeLocal(st localgit.Status) *forge.LocalStatus {
 		out.Worktrees = append(out.Worktrees, forge.LocalWorktree{
 			Path:     wt.Path,
 			Branch:   wt.Branch,
+			Tag:      wt.Tag,
 			Detached: wt.Detached,
 			Bare:     wt.Bare,
 			Main:     wt.Main,

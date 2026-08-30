@@ -95,6 +95,7 @@ type LocalAppearance struct {
 	Primary       bool               `json:"primary,omitempty"`
 	Error         string             `json:"error,omitempty"`
 	Branch        string             `json:"branch,omitempty"`
+	Tag           string             `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached      bool               `json:"detached,omitempty"`
 	Dirty         bool               `json:"dirty,omitempty"`
 	Ahead         int                `json:"ahead,omitempty"`
@@ -114,6 +115,7 @@ type LocalStatus struct {
 	Path          string             `json:"path,omitempty"`
 	Error         string             `json:"error,omitempty"`
 	Branch        string             `json:"branch,omitempty"`
+	Tag           string             `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached      bool               `json:"detached,omitempty"`
 	Dirty         bool               `json:"dirty,omitempty"`
 	Ahead         int                `json:"ahead,omitempty"`
@@ -138,6 +140,7 @@ type BranchOriginSync struct {
 type LocalWorktree struct {
 	Path            string `json:"path"`
 	Branch          string `json:"branch,omitempty"`
+	Tag             string `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached        bool   `json:"detached,omitempty"`
 	Bare            bool   `json:"bare,omitempty"`
 	Main            bool   `json:"main,omitempty"`
