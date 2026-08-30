@@ -14,8 +14,8 @@ func TestInspectPathWithFakeExec(t *testing.T) {
 			"worktree list --porcelain": []byte(
 				"worktree " + dir + "\nHEAD abcdef\nbranch refs/heads/main\n\n",
 			),
-			"rev-parse --abbrev-ref HEAD": []byte("main\n"),
-			"status --porcelain":         []byte(""),
+			"rev-parse --abbrev-ref HEAD":        []byte("main\n"),
+			"status --porcelain":                 []byte(""),
 			"rev-parse --abbrev-ref @{upstream}": []byte("origin/main\n"),
 			"rev-list --left-right --count":      []byte("0\t0\n"),
 		},
@@ -54,9 +54,9 @@ func TestEnrichOriginSyncWithFakeExec(t *testing.T) {
 	dir := t.TempDir()
 	fk := &fakeExec{
 		responses: map[string][]byte{
-			"symbolic-ref --quiet refs/remotes/origin/HEAD":              []byte("refs/remotes/origin/main\n"),
-			"for-each-ref --format=%(refname:short) refs/heads/":         []byte("main\nfeature\n"),
-			"for-each-ref --format=%(refname:short) refs/remotes/origin/": []byte("origin/main\norigin/feature\n"),
+			"symbolic-ref --quiet refs/remotes/origin/HEAD":                                  []byte("refs/remotes/origin/main\n"),
+			"for-each-ref --format=%(refname:short) refs/heads/":                             []byte("main\nfeature\n"),
+			"for-each-ref --format=%(refname:short) refs/remotes/origin/":                    []byte("origin/main\norigin/feature\n"),
 			"rev-list --left-right --count refs/remotes/origin/main...refs/heads/main":       []byte("1\t0\n"),
 			"rev-list --left-right --count refs/remotes/origin/feature...refs/heads/feature": []byte("0\t2\n"),
 		},
