@@ -22,10 +22,11 @@ Local code-change board (not deployments/runtime ops). Talks to forges via CLIs 
 cmd/gitboard/           # CLI: init, sync, serve
 internal/config/        # XDG config load/save
 internal/cliexec/       # shared gh/glab/git exec
-internal/forge/         # GitHub + GitLab adapters
+internal/board/         # shared JSON data types (DTOs) for dashboard UI and forge adapters
+internal/remotegit/     # GitHub + GitLab adapters (uses board for shared types)
 internal/localgit/      # checkouts, worktrees, pull ff-only
 internal/syncproj/      # discover + select tracked projects
-internal/dashboard/     # aggregate rows for UI
+internal/dashboard/     # aggregate rows for UI; Service (read) and Commands (write) types
 internal/server/        # HTTP + static UI
 internal/server/static/ # dashboard assets
 internal/triage/        # AI failure triage

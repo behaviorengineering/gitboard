@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 )
 
 func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
@@ -29,11 +29,11 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 	}
 	_ = st
 
-	cache := forge.NewTTLCache()
+	cache := remotegit.NewTTLCache()
 	loads := 0
-	_, err = cache.GetOrLoadHeads("github/org/a", time.Minute, false, func() (forge.HeadsSnapshot, error) {
+	_, err = cache.GetOrLoadHeads("github/org/a", time.Minute, false, func() (remotegit.HeadsSnapshot, error) {
 		loads++
-		return forge.HeadsSnapshot{DefaultBranch: "main"}, nil
+		return remotegit.HeadsSnapshot{DefaultBranch: "main"}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -69,9 +69,9 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 		t.Fatalf("after sync reload: %+v", got.Projects)
 	}
 
-	_, err = cache.GetOrLoadHeads("github/org/a", time.Minute, false, func() (forge.HeadsSnapshot, error) {
+	_, err = cache.GetOrLoadHeads("github/org/a", time.Minute, false, func() (remotegit.HeadsSnapshot, error) {
 		loads++
-		return forge.HeadsSnapshot{DefaultBranch: "main"}, nil
+		return remotegit.HeadsSnapshot{DefaultBranch: "main"}, nil
 	})
 	if err != nil {
 		t.Fatal(err)

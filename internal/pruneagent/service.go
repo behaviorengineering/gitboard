@@ -19,6 +19,10 @@ const (
 	kindPruneInvestigate = "prune_investigate"
 	sourceLLM            = "llm"
 	sourceRules          = "rules"
+
+	VerdictDrop    = "drop"
+	VerdictKeep    = "keep"
+	VerdictAskUser = "ask_user"
 )
 
 const cardSystemPrompt = `You judge whether a local git branch is safe to delete.
@@ -80,7 +84,7 @@ type Result struct {
 
 // Service runs investigations into agentsession directories.
 type Service struct {
-	Store *agentsession.Store
+	Store SessionStore
 	Run   cliexec.Exec
 	LLM   *llm.Client
 }
@@ -91,14 +95,25 @@ func New(agentsRoot string, run cliexec.Exec, llmClient *llm.Client) (*Service, 
 	if err != nil {
 		return nil, err
 	}
-	if run == nil {
-		run = cliexec.New()
+	return NewWithStore(store, run, llmClient), nil
+}
+
+// NewWithStore builds a Service with an injected session store (for tests).
+func NewWithStore(store SessionStore, run cliexec.Exec, llmClient *llm.Client) *Service {
+	if store == nil {
+		panic("pruneagent.NewWithStore: Store is required")
 	}
-	return &Service{Store: store, Run: run, LLM: llmClient}, nil
+	if run == nil {
+		panic("pruneagent.NewWithStore: Exec is required")
+	}
+	return &Service{Store: store, Run: run, LLM: llmClient}
 }
 
 // Investigate gathers evidence, writes a session directory, and synthesizes a card.
 func (s *Service) Investigate(ctx context.Context, req Request) (*Result, error) {
+	if s == nil || s.Store == nil {
+		return nil, fmt.Errorf("prune agent missing")
+	}
 	branch := strings.TrimSpace(req.Branch)
 	wt := strings.TrimSpace(req.WorktreePath)
 	def := strings.TrimSpace(req.DefaultBranch)
@@ -106,7 +121,7 @@ func (s *Service) Investigate(ctx context.Context, req Request) (*Result, error)
 		return nil, fmt.Errorf("branch and worktree_path are required")
 	}
 	if err := localgit.ValidateBranchName(branch); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("branch: %w", err)
 	}
 	if def == "" {
 		def = "main"
@@ -129,32 +144,44 @@ func (s *Service) Investigate(ctx context.Context, req Request) (*Result, error)
 		"default_branch": def,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create session: %w", err)
 	}
 
 	ev, err := s.gather(ctx, abs, branch, def)
 	if err != nil {
-		_ = s.Store.AppendTurn(ctx, meta.ID, agentsession.Turn{Role: "system", Content: "evidence error: " + err.Error()})
+		if turnErr := s.Store.AppendTurn(ctx, meta.ID, agentsession.Turn{Role: "system", Content: "evidence error: " + err.Error()}); turnErr != nil {
+			return nil, fmt.Errorf("evidence: %w (also append turn: %v)", err, turnErr)
+		}
 		return nil, err
 	}
 	if err := s.Store.SaveJSON(ctx, meta.ID, agentsession.FileEvidence, ev); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("save evidence: %w", err)
 	}
 
-	userPrompt := buildUserPrompt(ev)
-	_ = s.Store.AppendTurn(ctx, meta.ID, agentsession.Turn{Role: "user", Content: userPrompt})
+	userPrompt, err := buildUserPrompt(ev)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Store.AppendTurn(ctx, meta.ID, agentsession.Turn{Role: "user", Content: userPrompt}); err != nil {
+		return nil, fmt.Errorf("append user turn: %w", err)
+	}
 
-	card, model, source := s.synthesize(ctx, meta.ID, ev, userPrompt)
+	card, model, source, err := s.synthesize(ctx, meta.ID, ev, userPrompt)
+	if err != nil {
+		return nil, err
+	}
 	card = clampCard(ev, card)
 
 	if err := s.Store.SaveJSON(ctx, meta.ID, agentsession.FileCard, card); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("save card: %w", err)
 	}
-	_ = s.Store.AppendTurn(ctx, meta.ID, agentsession.Turn{
+	if err := s.Store.AppendTurn(ctx, meta.ID, agentsession.Turn{
 		Role:    "assistant",
 		Content: card.Summary,
 		Refs:    map[string]any{"card": true, "verdict": card.Verdict, "source": source, "model": model},
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("append assistant turn: %w", err)
+	}
 
 	return &Result{
 		SessionID: meta.ID,
@@ -165,42 +192,57 @@ func (s *Service) Investigate(ctx context.Context, req Request) (*Result, error)
 	}, nil
 }
 
-func (s *Service) synthesize(ctx context.Context, sessionID string, ev Evidence, userPrompt string) (Card, string, string) {
-	if s == nil || !s.LLM.Enabled() {
-		return synthesizeCard(ev), "", sourceRules
+func (s *Service) synthesize(ctx context.Context, sessionID string, ev Evidence, userPrompt string) (Card, string, string, error) {
+	if s == nil || s.LLM == nil || !s.LLM.Enabled() {
+		return synthesizeCard(ev), "", sourceRules, nil
 	}
 	raw, model, err := s.LLM.Chat(ctx, cardSystemPrompt, userPrompt)
 	if err != nil {
-		_ = s.Store.SaveJSON(ctx, sessionID, agentsession.FileFailure, map[string]any{
+		if persistErr := s.persistLLMFailure(ctx, sessionID, map[string]any{
 			"error": err.Error(),
 			"at":    time.Now().UTC().Format(time.RFC3339),
-		})
-		_ = s.Store.AppendTurn(ctx, sessionID, agentsession.Turn{
+		}, agentsession.Turn{
 			Role:    "system",
 			Content: "llm error, falling back to rules: " + err.Error(),
-		})
-		return synthesizeCard(ev), "", sourceRules
+		}); persistErr != nil {
+			return Card{}, "", "", fmt.Errorf("llm chat: %w (also persist failure: %v)", err, persistErr)
+		}
+		return synthesizeCard(ev), "", sourceRules, nil
 	}
 	card, ok := parseCard(raw)
 	if !ok {
-		_ = s.Store.SaveJSON(ctx, sessionID, agentsession.FileFailure, map[string]any{
+		if persistErr := s.persistLLMFailure(ctx, sessionID, map[string]any{
 			"error": "unparseable card",
 			"raw":   raw,
 			"at":    time.Now().UTC().Format(time.RFC3339),
-		})
-		_ = s.Store.AppendTurn(ctx, sessionID, agentsession.Turn{
+		}, agentsession.Turn{
 			Role:    "system",
 			Content: "llm response unparseable, falling back to rules",
 			Refs:    map[string]any{"raw": raw},
-		})
-		return synthesizeCard(ev), model, sourceRules
+		}); persistErr != nil {
+			return Card{}, model, "", fmt.Errorf("persist unparseable card: %w", persistErr)
+		}
+		return synthesizeCard(ev), model, sourceRules, nil
 	}
-	return card, model, sourceLLM
+	return card, model, sourceLLM, nil
 }
 
-func buildUserPrompt(ev Evidence) string {
-	raw, _ := json.MarshalIndent(ev, "", "  ")
-	return "Judge this local branch for deletion. Evidence JSON:\n" + string(raw)
+func (s *Service) persistLLMFailure(ctx context.Context, sessionID string, failure map[string]any, turn agentsession.Turn) error {
+	if err := s.Store.SaveJSON(ctx, sessionID, agentsession.FileFailure, failure); err != nil {
+		return fmt.Errorf("save failure: %w", err)
+	}
+	if err := s.Store.AppendTurn(ctx, sessionID, turn); err != nil {
+		return fmt.Errorf("append failure turn: %w", err)
+	}
+	return nil
+}
+
+func buildUserPrompt(ev Evidence) (string, error) {
+	raw, err := json.MarshalIndent(ev, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal evidence: %w", err)
+	}
+	return "Judge this local branch for deletion. Evidence JSON:\n" + string(raw), nil
 }
 
 func parseCard(raw string) (Card, bool) {
@@ -243,7 +285,7 @@ func parseCard(raw string) (Card, bool) {
 	}
 	out.Bullets = bullets
 	switch out.Verdict {
-	case "drop", "keep", "ask_user":
+	case VerdictDrop, VerdictKeep, VerdictAskUser:
 		if out.Summary == "" {
 			return out, false
 		}
@@ -255,36 +297,36 @@ func parseCard(raw string) (Card, bool) {
 
 func clampCard(ev Evidence, card Card) Card {
 	switch card.Verdict {
-	case "drop", "keep", "ask_user":
+	case VerdictDrop, VerdictKeep, VerdictAskUser:
 	default:
-		card.Verdict = "ask_user"
+		card.Verdict = VerdictAskUser
 		if card.Summary == "" {
 			card.Summary = "Ambiguous verdict; inspect before deleting."
 		}
 		card.Command = ""
 	}
 	if ev.Dirty {
-		card.Verdict = "ask_user"
+		card.Verdict = VerdictAskUser
 		card.Command = ""
 		if card.Summary == "" {
 			card.Summary = "Working tree is dirty; do not delete until changes are committed or discarded."
 		}
 	}
 	if !ev.RelatedHistories {
-		card.Verdict = "ask_user"
+		card.Verdict = VerdictAskUser
 		card.Command = ""
 		if card.Summary == "" {
 			card.Summary = "Branch history is unrelated to the default branch; inspect before deleting."
 		}
 	}
-	if ev.UniqueCommitN > 0 && card.Verdict == "drop" {
-		card.Verdict = "keep"
+	if ev.UniqueCommitN > 0 && card.Verdict == VerdictDrop {
+		card.Verdict = VerdictKeep
 		card.Command = ""
 		if card.Summary == "" {
 			card.Summary = "Unique commits remain on this branch; keep until you merge, cherry-pick, or explicitly drop that work."
 		}
 	}
-	if card.Verdict == "drop" {
+	if card.Verdict == VerdictDrop {
 		card.Command = dropCommand(ev)
 	} else {
 		card.Command = ""
@@ -323,9 +365,12 @@ func (s *Service) gather(ctx context.Context, dir, branch, def string) (Evidence
 	if ev.RelatedHistories {
 		if out, err := s.git(ctx, dir, "rev-list", "--left-right", "--count", def+"..."+branch); err == nil {
 			var behind, ahead int
-			fmt.Sscanf(strings.TrimSpace(string(out)), "%d\t%d", &behind, &ahead)
-			ev.BehindDefault = behind
-			ev.AheadOfDefault = ahead
+			if _, scanErr := fmt.Sscanf(strings.TrimSpace(string(out)), "%d\t%d", &behind, &ahead); scanErr == nil {
+				ev.BehindDefault = behind
+				ev.AheadOfDefault = ahead
+			} else {
+				ev.Notes = append(ev.Notes, "rev-list count parse: "+scanErr.Error())
+			}
 		}
 		if out, err := s.git(ctx, dir, "log", "--oneline", def+".."+branch); err == nil {
 			lines := nonEmptyLines(string(out))
@@ -355,7 +400,7 @@ func synthesizeCard(ev Evidence) Card {
 	}
 	if ev.Dirty {
 		return Card{
-			Verdict: "ask_user",
+			Verdict: VerdictAskUser,
 			Summary: "Working tree is dirty; do not delete until changes are committed or discarded.",
 			Bullets: append(bullets, "dirty working tree"),
 			Command: "",
@@ -363,7 +408,7 @@ func synthesizeCard(ev Evidence) Card {
 	}
 	if !ev.RelatedHistories {
 		return Card{
-			Verdict: "ask_user",
+			Verdict: VerdictAskUser,
 			Summary: "Branch history is unrelated to the default branch; inspect before deleting.",
 			Bullets: append(bullets, "unrelated histories"),
 			Command: "",
@@ -375,7 +420,7 @@ func synthesizeCard(ev Evidence) Card {
 			bullets = append(bullets, fmt.Sprintf("%d file(s) differ from %s", ev.UniqueFileN, ev.DefaultBranch))
 		}
 		return Card{
-			Verdict: "keep",
+			Verdict: VerdictKeep,
 			Summary: "Unique commits remain on this branch; keep until you merge, cherry-pick, or explicitly drop that work.",
 			Bullets: bullets,
 			Command: "",
@@ -383,7 +428,7 @@ func synthesizeCard(ev Evidence) Card {
 	}
 	bullets = append(bullets, "no unique commits vs "+ev.DefaultBranch)
 	return Card{
-		Verdict: "drop",
+		Verdict: VerdictDrop,
 		Summary: "No unique commits vs default and tree is clean; safe to delete the local branch after switching away.",
 		Bullets: bullets,
 		Command: dropCommand(ev),

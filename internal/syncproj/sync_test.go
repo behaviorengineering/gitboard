@@ -7,20 +7,20 @@ import (
 	"testing"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 	"github.com/behaviorengineering/gitboard/internal/syncproj"
 )
 
 type fakeLister struct {
-	gh map[string][]forge.RepoRef
-	gl map[string][]forge.RepoRef
+	gh map[string][]remotegit.RepoRef
+	gl map[string][]remotegit.RepoRef
 }
 
-func (f fakeLister) ListGitHub(_ context.Context, org string) ([]forge.RepoRef, error) {
+func (f fakeLister) ListGitHub(_ context.Context, org string) ([]remotegit.RepoRef, error) {
 	return f.gh[org], nil
 }
 
-func (f fakeLister) ListGitLab(_ context.Context, group string) ([]forge.RepoRef, error) {
+func (f fakeLister) ListGitLab(_ context.Context, group string) ([]remotegit.RepoRef, error) {
 	return f.gl[group], nil
 }
 
@@ -35,13 +35,13 @@ func TestDiscoverAndApplySelection(t *testing.T) {
 		}},
 	}
 	lister := fakeLister{
-		gh: map[string][]forge.RepoRef{
+		gh: map[string][]remotegit.RepoRef{
 			"acme": {
 				{Host: config.HostGitHub, Path: "acme/alpha", Name: "alpha"},
 				{Host: config.HostGitHub, Path: "acme/beta", Name: "beta"},
 			},
 		},
-		gl: map[string][]forge.RepoRef{
+		gl: map[string][]remotegit.RepoRef{
 			"acme": {
 				{Host: config.HostGitLab, Path: "acme/gamma", Name: "gamma"},
 			},
@@ -151,10 +151,10 @@ func TestDiscoverHostFilter(t *testing.T) {
 		},
 	}
 	lister := fakeLister{
-		gh: map[string][]forge.RepoRef{
+		gh: map[string][]remotegit.RepoRef{
 			"acme": {{Host: config.HostGitHub, Path: "acme/a", Name: "a"}},
 		},
-		gl: map[string][]forge.RepoRef{
+		gl: map[string][]remotegit.RepoRef{
 			"acme": {{Host: config.HostGitLab, Path: "acme/b", Name: "b"}},
 		},
 	}

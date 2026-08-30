@@ -144,17 +144,17 @@ func (p *failureDumpProcessor) writeLocked(doc dumpedTrace) {
 	})
 	doc.SpanCount = len(doc.Spans)
 	if err := os.MkdirAll(p.dir, 0o750); err != nil {
-		logf("mkdir dump dir: %v", err)
+		logf("failure dump: mkdir dir=%s: %v", p.dir, err)
 		return
 	}
 	path := filepath.Join(p.dir, doc.TraceID+".json")
 	body, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		logf("marshal dump: %v", err)
+		logf("failure dump: marshal trace_id=%s: %v", doc.TraceID, err)
 		return
 	}
 	if err := os.WriteFile(path, body, 0o640); err != nil {
-		logf("write dump: %v", err)
+		logf("failure dump: write path=%s trace_id=%s: %v", path, doc.TraceID, err)
 		return
 	}
 	logf("Inference failure dump written path=%s trace_id=%s spans=%d", path, doc.TraceID, doc.SpanCount)

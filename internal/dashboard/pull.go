@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
 )
 
@@ -29,8 +29,9 @@ type PullFFResult struct {
 
 // PullFF validates the mapped checkout, then fast-forwards the branch from origin.
 // Ahead/behind is decided inside PullFFOnly after a fresh fetch.
-func (s *Service) PullFF(ctx context.Context, doc config.File, req PullFFRequest) (PullFFResult, error) {
+func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFRequest) (PullFFResult, error) {
 	var zero PullFFResult
+	s := c.Service
 	if s == nil || s.Local == nil {
 		return zero, fmt.Errorf("local git inspector missing")
 	}
@@ -82,7 +83,7 @@ func (s *Service) PullFF(ctx context.Context, doc config.File, req PullFFRequest
 	return PullFFResult{OK: true, Branch: branch, Path: abs}, nil
 }
 
-func repoPathAllowed(local *forge.LocalStatus, abs string) bool {
+func repoPathAllowed(local *board.LocalStatus, abs string) bool {
 	if local == nil {
 		return false
 	}
@@ -119,7 +120,8 @@ func repoPathAllowed(local *forge.LocalStatus, abs string) bool {
 }
 
 // RequireMappedPath expands path and ensures it belongs to the project's mapped checkouts.
-func (s *Service) RequireMappedPath(ctx context.Context, doc config.File, projectID, repoPath string) (string, error) {
+func (c *Commands) RequireMappedPath(ctx context.Context, doc config.File, projectID, repoPath string) (string, error) {
+	s := c.Service
 	if s == nil || s.Local == nil {
 		return "", fmt.Errorf("local git inspector missing")
 	}

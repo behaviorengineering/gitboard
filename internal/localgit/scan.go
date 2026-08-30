@@ -28,8 +28,12 @@ func (in *Inspector) ScanRoots(ctx context.Context, roots []string) Discovery {
 		if err != nil || !st.IsDir() {
 			continue
 		}
-		_ = filepath.WalkDir(abs, func(path string, de os.DirEntry, walkErr error) error {
-			if walkErr != nil {
+		walkErr := filepath.WalkDir(abs, func(path string, de os.DirEntry, entryErr error) error {
+			if entryErr != nil {
+				// Skip individual unreadable entries but propagate ctx cancel.
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				return nil
 			}
 			if ctx.Err() != nil {
@@ -63,6 +67,10 @@ func (in *Inspector) ScanRoots(ctx context.Context, roots []string) Discovery {
 			// Keep walking so nested clones / submodules are indexed too.
 			return nil
 		})
+		if walkErr != nil && ctx.Err() != nil {
+			// Context canceled; stop processing further roots.
+			return d
+		}
 	}
 	return d
 }

@@ -1,30 +1,11 @@
-package forge
+package remotegit
 
 import (
 	"sync"
 	"time"
+
+	"github.com/behaviorengineering/gitboard/internal/board"
 )
-
-// HeadsSnapshot is the cached remote branch list for one project.
-type HeadsSnapshot struct {
-	DefaultBranch string
-	Heads         []RemoteHead
-}
-
-// RemoteHead is one forge branch tip.
-type RemoteHead struct {
-	Name      string
-	UpdatedAt string
-	WebURL    string
-}
-
-// SummaryOpts controls which forge slices use the TTL cache.
-type SummaryOpts struct {
-	Fresh     bool
-	Cache     *TTLCache
-	HeadsTTL  time.Duration // 0 = always refetch heads
-	MergedTTL time.Duration // 0 = always refetch merged
-}
 
 // TTLCache stores slow-changing forge slices in memory.
 type TTLCache struct {
@@ -37,7 +18,7 @@ type cacheEntry struct {
 	heads     HeadsSnapshot
 	headsAt   time.Time
 	hasHeads  bool
-	merged    []MergedReview
+	merged    []board.MergedReview
 	mergedOK  bool
 	mergedAt  time.Time
 	hasMerged bool
@@ -129,7 +110,7 @@ func (c *TTLCache) GetOrLoadHeads(key string, ttl time.Duration, fresh bool, loa
 
 // GetOrLoadMerged returns cached merged reviews or calls load.
 // ok is false when load fails and there is no prior successful cache.
-func (c *TTLCache) GetOrLoadMerged(key string, ttl time.Duration, fresh bool, load func() ([]MergedReview, error)) (merged []MergedReview, ok bool) {
+func (c *TTLCache) GetOrLoadMerged(key string, ttl time.Duration, fresh bool, load func() ([]board.MergedReview, error)) (merged []board.MergedReview, ok bool) {
 	if c == nil || ttl <= 0 || fresh {
 		list, err := load()
 		if err != nil {
@@ -170,9 +151,9 @@ func cloneHeads(in HeadsSnapshot) HeadsSnapshot {
 	return out
 }
 
-func cloneMerged(in []MergedReview) []MergedReview {
+func cloneMerged(in []board.MergedReview) []board.MergedReview {
 	if len(in) == 0 {
 		return nil
 	}
-	return append([]MergedReview(nil), in...)
+	return append([]board.MergedReview(nil), in...)
 }

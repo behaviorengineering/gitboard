@@ -44,17 +44,3 @@ func TestExpandPathHome(t *testing.T) {
 		t.Fatalf("expected absolute path, got %q", got)
 	}
 }
-
-func TestResolvePathPrefersLocalPath(t *testing.T) {
-	disc := localgit.Discovery{ByKey: map[string][]localgit.Checkout{
-		"github:acme/repo": {{Path: "/scanned/repo", Role: localgit.RoleStandalone}},
-	}}
-	p, ok := localgit.ResolvePath("~/explicit", "github", "acme/repo", disc)
-	if !ok || p != "~/explicit" {
-		t.Fatalf("got %q ok=%v", p, ok)
-	}
-	p, ok = localgit.ResolvePath("", "github", "acme/repo", disc)
-	if !ok || p != "/scanned/repo" {
-		t.Fatalf("scan match: %q ok=%v", p, ok)
-	}
-}

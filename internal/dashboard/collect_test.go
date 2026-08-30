@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 )
 
 // fakeExec mirrors forge client_test fake (kept local to avoid test helper packages).
@@ -75,7 +76,7 @@ func dualHostFake() *fakeExec {
 
 func TestCollectWithFakeForge(t *testing.T) {
 	fx := dualHostFake()
-	s := New(forge.NewGitHub(fx), forge.NewGitLab(fx), nil)
+	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
 	doc := config.File{
 		Projects: []config.Project{
 			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
@@ -92,7 +93,7 @@ func TestCollectWithFakeForge(t *testing.T) {
 	if len(out.Projects) != 2 {
 		t.Fatalf("projects: %d", len(out.Projects))
 	}
-	byID := map[string]forge.ProjectSummary{}
+	byID := map[string]board.ProjectSummary{}
 	for _, p := range out.Projects {
 		byID[p.ID] = p
 	}

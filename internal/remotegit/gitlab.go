@@ -1,4 +1,4 @@
-package forge
+package remotegit
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/cliexec"
 	"github.com/behaviorengineering/gitboard/internal/config"
 )
@@ -17,7 +18,7 @@ type GitLab struct {
 
 func NewGitLab(run cliexec.Exec) *GitLab {
 	if run == nil {
-		run = cliexec.New()
+		panic("remotegit.NewGitLab: Exec is required")
 	}
 	return &GitLab{Run: run}
 }
@@ -33,61 +34,18 @@ func (g *GitLab) AuthStatus(ctx context.Context) (bool, bool, string) {
 	return true, true, ""
 }
 
-func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (ProjectSummary, error) {
-	summary := baseSummary(p)
-	installed, authed, detail := g.AuthStatus(ctx)
-	if !installed {
-		summary.Error = detail
-		return summary, nil
-	}
-	if !authed {
-		summary.Error = "glab not authenticated: " + detail
-		return summary, nil
-	}
-	repo := p.Path
-	key := cacheKey(string(p.Host), repo)
-	branches := newBranchAccum()
-
-	heads, err := opts.Cache.GetOrLoadHeads(key, opts.HeadsTTL, opts.Fresh, func() (HeadsSnapshot, error) {
-		return g.loadHeads(ctx, repo)
-	})
-	if err != nil {
-		if summary.Error == "" {
-			summary.Error = err.Error()
-		}
-		summary.RemoteNamesOK = false
-	} else {
-		summary.RemoteNamesOK = true
-		if heads.DefaultBranch != "" {
-			branches.setDefault(heads.DefaultBranch)
-		}
-		names := make([]string, 0, len(heads.Heads))
-		for _, h := range heads.Heads {
-			branches.addRemote(h.Name, h.UpdatedAt, h.WebURL)
-			if n := trimBranch(h.Name); n != "" {
-				names = append(names, n)
-			}
-		}
-		summary.RemoteNames = names
-	}
-
-	if err := g.loadCI(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
-		summary.Error = err.Error()
-	}
-	if err := g.loadOpenReviews(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
-		summary.Error = err.Error()
-	}
-
-	merged, mergedOK := opts.Cache.GetOrLoadMerged(key, opts.MergedTTL, opts.Fresh, func() ([]MergedReview, error) {
-		return g.loadMerged(ctx, repo)
-	})
-	summary.Merged = merged
-	summary.MergedOK = mergedOK
-	summary.Branches = branches.list()
-	return summary, nil
+func (g *GitLab) unauthMsg(detail string) string {
+	return "glab not authenticated: " + detail
 }
 
-func (g *GitLab) loadHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
+func (g *GitLab) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (board.ProjectSummary, error) {
+	return projectSummaryShared(ctx, p, opts, g)
+}
+
+// seedHeads loads the default branch and the first page of remote branches.
+// This replaces the old 50-page census; open MR branches are added separately
+// by loadOpenReviews.
+func (g *GitLab) seedHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
 	var snap HeadsSnapshot
 	encoded := strings.ReplaceAll(repo, "/", "%2F")
 	raw, err := g.Run.RunJSON(ctx, "glab", "api", "projects/"+encoded+"?simple=true")
@@ -103,45 +61,33 @@ func (g *GitLab) loadHeads(ctx context.Context, repo string) (HeadsSnapshot, err
 	snap.DefaultBranch = meta.DefaultBranch
 
 	const perPage = 100
-	const maxPages = 50
-	for page := 1; page <= maxPages; page++ {
-		path := fmt.Sprintf("projects/%s/repository/branches?per_page=%d&page=%d", encoded, perPage, page)
-		raw, err := g.Run.RunJSON(ctx, "glab", "api", path)
-		if err != nil {
-			return snap, err
-		}
-		var heads []struct {
-			Name   string `json:"name"`
-			WebURL string `json:"web_url"`
-			Commit struct {
-				CommittedDate string `json:"committed_date"`
-				AuthoredDate  string `json:"authored_date"`
-			} `json:"commit"`
-		}
-		if err := json.Unmarshal(raw, &heads); err != nil {
-			return snap, err
-		}
-		if len(heads) == 0 {
-			break
-		}
-		for _, h := range heads {
-			snap.Heads = append(snap.Heads, RemoteHead{
-				Name:      h.Name,
-				UpdatedAt: firstNonEmpty(h.Commit.CommittedDate, h.Commit.AuthoredDate),
-				WebURL:    h.WebURL,
-			})
-		}
-		if len(heads) < perPage {
-			break
-		}
-		if page == maxPages {
-			return snap, fmt.Errorf("gitlab branches: truncated after %d pages", maxPages)
-		}
+	path := fmt.Sprintf("projects/%s/repository/branches?per_page=%d&page=1", encoded, perPage)
+	raw, err = g.Run.RunJSON(ctx, "glab", "api", path)
+	if err != nil {
+		return snap, fmt.Errorf("gitlab branches page 1: %w", err)
+	}
+	var heads []struct {
+		Name   string `json:"name"`
+		WebURL string `json:"web_url"`
+		Commit struct {
+			CommittedDate string `json:"committed_date"`
+			AuthoredDate  string `json:"authored_date"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(raw, &heads); err != nil {
+		return snap, fmt.Errorf("parse gitlab branches: %w", err)
+	}
+	for _, h := range heads {
+		snap.Heads = append(snap.Heads, RemoteHead{
+			Name:      h.Name,
+			UpdatedAt: firstNonEmpty(h.Commit.CommittedDate, h.Commit.AuthoredDate),
+			WebURL:    h.WebURL,
+		})
 	}
 	return snap, nil
 }
 
-func (g *GitLab) loadCI(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
+func (g *GitLab) loadCI(ctx context.Context, repo string, summary *board.ProjectSummary, branches *branchAccum) error {
 	raw, err := g.Run.RunJSON(ctx, "glab", "ci", "list",
 		"-R", repo,
 		"-P", "20",
@@ -164,7 +110,7 @@ func (g *GitLab) loadCI(ctx context.Context, repo string, summary *ProjectSummar
 	for i, pl := range pipelines {
 		branches.setCI(pl.Ref, pl.Status, pl.WebURL, pl.UpdatedAt, fmt.Sprintf("%d", pl.ID))
 		if i == 0 {
-			summary.CI = &CIStatus{
+			summary.CI = &board.CIStatus{
 				Status:    pl.Status,
 				Ref:       pl.Ref,
 				Name:      "pipeline",
@@ -177,7 +123,7 @@ func (g *GitLab) loadCI(ctx context.Context, repo string, summary *ProjectSummar
 	return nil
 }
 
-func (g *GitLab) loadOpenReviews(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
+func (g *GitLab) loadOpenReviews(ctx context.Context, repo string, summary *board.ProjectSummary, branches *branchAccum) error {
 	mrRaw, err := g.Run.RunJSON(ctx, "glab", "mr", "list",
 		"-R", repo,
 		"--output", "json",
@@ -211,7 +157,7 @@ func (g *GitLab) loadOpenReviews(ctx context.Context, repo string, summary *Proj
 	return nil
 }
 
-func (g *GitLab) loadMerged(ctx context.Context, repo string) ([]MergedReview, error) {
+func (g *GitLab) loadMerged(ctx context.Context, repo string) ([]board.MergedReview, error) {
 	raw, err := g.Run.RunJSON(ctx, "glab", "mr", "list",
 		"-R", repo,
 		"--merged",
@@ -230,13 +176,13 @@ func (g *GitLab) loadMerged(ctx context.Context, repo string) ([]MergedReview, e
 	if err := json.Unmarshal(raw, &mrs); err != nil {
 		return nil, err
 	}
-	out := make([]MergedReview, 0, len(mrs))
+	out := make([]board.MergedReview, 0, len(mrs))
 	for _, mr := range mrs {
 		name := trimBranch(mr.SourceBranch)
 		if name == "" {
 			continue
 		}
-		out = append(out, MergedReview{
+		out = append(out, board.MergedReview{
 			Branch:   name,
 			ID:       mr.IID,
 			URL:      mr.WebURL,
@@ -246,7 +192,7 @@ func (g *GitLab) loadMerged(ctx context.Context, repo string) ([]MergedReview, e
 	return out, nil
 }
 
-func (g *GitLab) FailedJobs(ctx context.Context, p config.Project, pipelineID string) ([]FailedJob, error) {
+func (g *GitLab) FailedJobs(ctx context.Context, p config.Project, pipelineID string) ([]board.FailedJob, error) {
 	if strings.TrimSpace(pipelineID) == "" {
 		return nil, fmt.Errorf("missing pipeline id")
 	}
@@ -255,7 +201,7 @@ func (g *GitLab) FailedJobs(ctx context.Context, p config.Project, pipelineID st
 		"--output", "json",
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gitlab failed jobs: %w", err)
 	}
 	var payload struct {
 		Jobs []struct {
@@ -267,14 +213,14 @@ func (g *GitLab) FailedJobs(ctx context.Context, p config.Project, pipelineID st
 		} `json:"jobs"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse gitlab jobs: %w", err)
 	}
-	var out []FailedJob
+	var out []board.FailedJob
 	for _, j := range payload.Jobs {
 		if j.Status != "failed" {
 			continue
 		}
-		out = append(out, FailedJob{
+		out = append(out, board.FailedJob{
 			ID:     fmt.Sprintf("gitlab:%d", j.ID),
 			Name:   j.Name,
 			Stage:  j.Stage,
@@ -291,7 +237,7 @@ func (g *GitLab) JobLog(ctx context.Context, p config.Project, _, jobID string) 
 	}
 	out, err := g.Run.Run(ctx, "glab", "ci", "trace", jobID, "-R", p.Path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("gitlab job log: %w", err)
 	}
 	return truncateLog(string(out)), nil
 }
@@ -313,7 +259,7 @@ func (g *GitLab) ListGroupRepos(ctx context.Context, group string) ([]RepoRef, e
 			"--output", "json",
 		)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("gitlab list repos: %w", err)
 		}
 		var rows []struct {
 			PathWithNamespace string `json:"path_with_namespace"`
