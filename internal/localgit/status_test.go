@@ -1,3 +1,5 @@
+//go:build integration
+
 package localgit_test
 
 import (
@@ -58,6 +60,100 @@ func TestInspectPathWorktree(t *testing.T) {
 	}
 	if !foundFeature {
 		t.Fatalf("missing feature worktree: %+v", st.Worktrees)
+	}
+}
+
+func TestInspectPathDetachedExactTag(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README")
+	run("commit", "-m", "init")
+	run("tag", "v0.1.1")
+	run("checkout", "--detach", "v0.1.1")
+
+	in := localgit.NewInspector(cliexec.New())
+	st := in.InspectPath(context.Background(), dir)
+	if !st.Mapped || st.Error != "" {
+		t.Fatalf("status: %+v", st)
+	}
+	if !st.Detached {
+		t.Fatalf("want detached, got %+v", st)
+	}
+	if st.Tag != "v0.1.1" {
+		t.Fatalf("tag=%q want v0.1.1 (branch/sha=%q)", st.Tag, st.Branch)
+	}
+	if st.Branch == "" {
+		t.Fatalf("want short SHA in Branch when detached, got empty")
+	}
+}
+
+func TestInspectPathDetachedUntagged(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "t@example.com")
+	run("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README")
+	run("commit", "-m", "init")
+	run("checkout", "--detach", "HEAD")
+
+	in := localgit.NewInspector(cliexec.New())
+	st := in.InspectPath(context.Background(), dir)
+	if !st.Mapped || st.Error != "" {
+		t.Fatalf("status: %+v", st)
+	}
+	if !st.Detached {
+		t.Fatalf("want detached, got %+v", st)
+	}
+	if st.Tag != "" {
+		t.Fatalf("tag=%q want empty for untagged detached HEAD", st.Tag)
 	}
 }
 

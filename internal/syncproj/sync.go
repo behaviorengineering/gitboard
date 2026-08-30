@@ -9,26 +9,32 @@ import (
 	"strings"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 )
 
 // Lister discovers repositories from configured forges.
 type Lister interface {
-	ListGitHub(ctx context.Context, org string) ([]forge.RepoRef, error)
-	ListGitLab(ctx context.Context, group string) ([]forge.RepoRef, error)
+	ListGitHub(ctx context.Context, org string) ([]remotegit.RepoRef, error)
+	ListGitLab(ctx context.Context, group string) ([]remotegit.RepoRef, error)
 }
 
 // ForgeLister adapts GitHub and GitLab clients.
 type ForgeLister struct {
-	GitHub *forge.GitHub
-	GitLab *forge.GitLab
+	GitHub *remotegit.GitHub
+	GitLab *remotegit.GitLab
 }
 
-func (f ForgeLister) ListGitHub(ctx context.Context, org string) ([]forge.RepoRef, error) {
+func (f ForgeLister) ListGitHub(ctx context.Context, org string) ([]remotegit.RepoRef, error) {
+	if f.GitHub == nil {
+		return nil, fmt.Errorf("github client missing")
+	}
 	return f.GitHub.ListOrgRepos(ctx, org)
 }
 
-func (f ForgeLister) ListGitLab(ctx context.Context, group string) ([]forge.RepoRef, error) {
+func (f ForgeLister) ListGitLab(ctx context.Context, group string) ([]remotegit.RepoRef, error) {
+	if f.GitLab == nil {
+		return nil, fmt.Errorf("gitlab client missing")
+	}
 	return f.GitLab.ListGroupRepos(ctx, group)
 }
 
@@ -43,6 +49,9 @@ type Candidate struct {
 
 // Discover lists unique repos from sync sources, marking already tracked ones.
 func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter string) ([]Candidate, error) {
+	if lister == nil {
+		return nil, fmt.Errorf("lister missing")
+	}
 	hostFilter = strings.ToLower(strings.TrimSpace(hostFilter))
 	tracked := map[string]struct{}{}
 	for _, p := range doc.Projects {
@@ -50,7 +59,7 @@ func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter st
 	}
 
 	seen := map[string]struct{}{}
-	var refs []forge.RepoRef
+	var refs []remotegit.RepoRef
 
 	if hostFilter == "" || hostFilter == "github" {
 		for _, org := range doc.Sync.GitHub.Orgs {
@@ -250,7 +259,9 @@ func FormatCandidates(w io.Writer, cands []Candidate) {
 		if c.Tracked {
 			mark = "x"
 		}
-		fmt.Fprintf(w, "[%d] [%s] %s %s\n", c.Index, mark, c.Host, c.Path)
+		if _, err := fmt.Fprintf(w, "[%d] [%s] %s %s\n", c.Index, mark, c.Host, c.Path); err != nil {
+			return
+		}
 	}
 }
 

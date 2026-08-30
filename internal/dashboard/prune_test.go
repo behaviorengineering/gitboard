@@ -1,11 +1,13 @@
 package dashboard
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
 )
 
@@ -13,7 +15,7 @@ func TestFindSafeWorktree(t *testing.T) {
 	abs := filepath.Clean("/tmp/wt-feature")
 	tests := []struct {
 		name   string
-		local  *forge.LocalStatus
+		local  *board.LocalStatus
 		branch string
 		path   string
 		wantOK bool
@@ -26,11 +28,11 @@ func TestFindSafeWorktree(t *testing.T) {
 		},
 		{
 			name: "safe match",
-			local: &forge.LocalStatus{
-				Worktrees: []forge.LocalWorktree{{
+			local: &board.LocalStatus{
+				Worktrees: []board.LocalWorktree{{
 					Path:      abs,
 					Branch:    "feature",
-					PruneHint: forge.PruneSafe,
+					PruneHint: board.PruneSafe,
 				}},
 			},
 			branch: "feature",
@@ -39,11 +41,11 @@ func TestFindSafeWorktree(t *testing.T) {
 		},
 		{
 			name: "likely not enough",
-			local: &forge.LocalStatus{
-				Worktrees: []forge.LocalWorktree{{
+			local: &board.LocalStatus{
+				Worktrees: []board.LocalWorktree{{
 					Path:      abs,
 					Branch:    "feature",
-					PruneHint: forge.PruneLikely,
+					PruneHint: board.PruneLikely,
 				}},
 			},
 			branch: "feature",
@@ -52,11 +54,11 @@ func TestFindSafeWorktree(t *testing.T) {
 		},
 		{
 			name: "wrong branch",
-			local: &forge.LocalStatus{
-				Worktrees: []forge.LocalWorktree{{
+			local: &board.LocalStatus{
+				Worktrees: []board.LocalWorktree{{
 					Path:      abs,
 					Branch:    "other",
-					PruneHint: forge.PruneSafe,
+					PruneHint: board.PruneSafe,
 				}},
 			},
 			branch: "feature",
@@ -65,11 +67,11 @@ func TestFindSafeWorktree(t *testing.T) {
 		},
 		{
 			name: "wrong path",
-			local: &forge.LocalStatus{
-				Worktrees: []forge.LocalWorktree{{
+			local: &board.LocalStatus{
+				Worktrees: []board.LocalWorktree{{
 					Path:      filepath.Clean("/tmp/other"),
 					Branch:    "feature",
-					PruneHint: forge.PruneSafe,
+					PruneHint: board.PruneSafe,
 				}},
 			},
 			branch: "feature",
@@ -115,26 +117,29 @@ func TestClientForNilInterface(t *testing.T) {
 }
 
 func TestPruneSafeValidation(t *testing.T) {
+	fk := &fakeExecForPrune{}
 	s := &Service{}
-	err := s.PruneSafe(t.Context(), config.File{}, PruneSafeRequest{
+	cmds := NewCommands(s)
+	err := cmds.PruneSafe(t.Context(), config.File{}, PruneSafeRequest{
 		ProjectID: "p", Branch: "b", WorktreePath: "/tmp/x",
 	})
 	if err == nil || err.Error() != "local git inspector missing" {
 		t.Fatalf("got %v", err)
 	}
 
-	s = &Service{Local: localgit.NewInspector(nil)}
-	err = s.PruneSafe(t.Context(), config.File{}, PruneSafeRequest{})
+	s = &Service{Local: localgit.NewInspector(fk)}
+	cmds = NewCommands(s)
+	err = cmds.PruneSafe(t.Context(), config.File{}, PruneSafeRequest{})
 	if !IsBadRequest(err) {
 		t.Fatalf("empty request want bad request, got %v", err)
 	}
-	err = s.PruneSafe(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PruneSafeRequest{
+	err = cmds.PruneSafe(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PruneSafeRequest{
 		ProjectID: "missing", Branch: "feature", WorktreePath: "/tmp/x",
 	})
 	if !IsBadRequest(err) {
 		t.Fatalf("unknown project want bad request, got %v", err)
 	}
-	err = s.PruneSafe(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PruneSafeRequest{
+	err = cmds.PruneSafe(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PruneSafeRequest{
 		ProjectID: "p", Branch: "evil:ref", WorktreePath: "/tmp/x",
 	})
 	if !IsBadRequest(err) {
@@ -143,26 +148,29 @@ func TestPruneSafeValidation(t *testing.T) {
 }
 
 func TestPullFFValidation(t *testing.T) {
+	fk := &fakeExecForPrune{}
 	s := &Service{}
-	_, err := s.PullFF(t.Context(), config.File{}, PullFFRequest{
+	cmds := NewCommands(s)
+	_, err := cmds.PullFF(t.Context(), config.File{}, PullFFRequest{
 		ProjectID: "p", Branch: "main", RepoPath: "/tmp/x",
 	})
 	if err == nil || err.Error() != "local git inspector missing" {
 		t.Fatalf("got %v", err)
 	}
 
-	s = &Service{Local: localgit.NewInspector(nil)}
-	_, err = s.PullFF(t.Context(), config.File{}, PullFFRequest{})
+	s = &Service{Local: localgit.NewInspector(fk)}
+	cmds = NewCommands(s)
+	_, err = cmds.PullFF(t.Context(), config.File{}, PullFFRequest{})
 	if !IsBadRequest(err) {
 		t.Fatalf("empty request want bad request, got %v", err)
 	}
-	_, err = s.PullFF(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PullFFRequest{
+	_, err = cmds.PullFF(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PullFFRequest{
 		ProjectID: "missing", Branch: "main", RepoPath: "/tmp/x",
 	})
 	if !IsBadRequest(err) {
 		t.Fatalf("unknown project want bad request, got %v", err)
 	}
-	_, err = s.PullFF(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PullFFRequest{
+	_, err = cmds.PullFF(t.Context(), config.File{Projects: []config.Project{{ID: "p"}}}, PullFFRequest{
 		ProjectID: "p", Branch: "evil:ref", RepoPath: "/tmp/x",
 	})
 	if !IsBadRequest(err) {
@@ -172,10 +180,10 @@ func TestPullFFValidation(t *testing.T) {
 
 func TestRepoPathAllowed(t *testing.T) {
 	abs := filepath.Clean("/tmp/repo")
-	local := &forge.LocalStatus{
+	local := &board.LocalStatus{
 		Mapped: true,
 		Path:   abs,
-		Appearances: []forge.LocalAppearance{{
+		Appearances: []board.LocalAppearance{{
 			Path: filepath.Clean("/tmp/other"),
 		}},
 	}
@@ -188,4 +196,19 @@ func TestRepoPathAllowed(t *testing.T) {
 	if repoPathAllowed(local, filepath.Clean("/tmp/evil")) {
 		t.Fatal("foreign path must be rejected")
 	}
+}
+
+// fakeExecForPrune satisfies cliexec.Exec for validation-only tests.
+type fakeExecForPrune struct{}
+
+func (f *fakeExecForPrune) LookPath(name string) (string, error) {
+	return "/fake/" + name, nil
+}
+
+func (f *fakeExecForPrune) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (f *fakeExecForPrune) RunJSON(_ context.Context, _ string, _ ...string) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
 }

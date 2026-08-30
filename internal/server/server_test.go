@@ -10,12 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/llm"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 	"github.com/behaviorengineering/gitboard/internal/server"
 	"github.com/behaviorengineering/gitboard/internal/triage"
 )
@@ -81,10 +82,11 @@ func testMux(t *testing.T, fx *fakeExec, triageA *triage.Analyzer) http.Handler 
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), nil)
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
 	return server.NewMux(server.Options{
 		Projects:    projects,
 		Dash:        dash,
+		Commands:    dashboard.NewCommands(dash),
 		Triage:      triageA,
 		PollSeconds: 42,
 	})
@@ -133,7 +135,7 @@ func TestDashboardHappy(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
 	}
-	var payload forge.Dashboard
+	var payload board.Dashboard
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +166,7 @@ func TestFailuresHappy(t *testing.T) {
 		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		Jobs []forge.FailedJob `json:"jobs"`
+		Jobs []board.FailedJob `json:"jobs"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -189,10 +191,11 @@ func TestPruneSafeValidation(t *testing.T) {
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), localgit.NewInspector(nil))
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
 		Projects:    projects,
 		Dash:        dash,
+		Commands:    dashboard.NewCommands(dash),
 		PollSeconds: 42,
 	})
 	body := `{"project_id":"gh-app","branch":"feat","worktree_path":"/tmp/x"}`
@@ -300,10 +303,11 @@ func TestPruneInvestigateLLM(t *testing.T) {
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
-	dash := dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), localgit.NewInspector(fx))
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
 		Projects: projects,
 		Dash:     dash,
+		Commands: dashboard.NewCommands(dash),
 		Prune:    prune,
 	})
 	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"feat/x","worktree_path":%q,"default_branch":"main"}`, dir)
@@ -350,9 +354,11 @@ func TestPruneInvestigateLLMFallback(t *testing.T) {
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
 		Projects: projects,
-		Dash:     dashboard.New(forge.NewGitHub(fx), forge.NewGitLab(fx), localgit.NewInspector(fx)),
+		Dash:     dash,
+		Commands: dashboard.NewCommands(dash),
 		Prune:    prune,
 	})
 	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"feat/x","worktree_path":%q,"default_branch":"main"}`, dir)

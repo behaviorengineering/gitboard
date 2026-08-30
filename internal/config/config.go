@@ -187,8 +187,8 @@ func DefaultPath() string {
 	if fileExists(userPath) {
 		return userPath
 	}
-	cwd, _ := os.Getwd()
-	if cwd != "" {
+	cwd, cwdErr := os.Getwd()
+	if cwdErr == nil && cwd != "" {
 		for _, name := range []string{"config.yaml", "projects.yaml"} {
 			p := filepath.Join(cwd, name)
 			if fileExists(p) {

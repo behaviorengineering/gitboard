@@ -60,7 +60,7 @@ func (a *Analyzer) Analyze(ctx context.Context, req Request) (Response, error) {
 		prompt,
 	)
 	if err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("triage chat: %w", err)
 	}
 	return parseAnswer(raw, model), nil
 }

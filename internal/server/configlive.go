@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -57,6 +58,7 @@ func (c *configLive) snapshot() (config.File, int) {
 	}
 	doc, err := config.Load(c.path)
 	if err != nil {
+		log.Printf("gitboard: config reload failed path=%s: %v", c.path, err)
 		return c.doc, c.poll
 	}
 	if projectsChanged(c.doc.Projects, doc.Projects) {

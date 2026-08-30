@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,6 +29,14 @@ var staticFS embed.FS
 
 const maxJSONBody = 4 << 20 // 4 MiB
 
+// HTTP error message constants for repeated handler responses.
+const (
+	errMethodNotAllowed     = "method not allowed"
+	errDashboardUnavailable = "dashboard unavailable"
+	errForgeClientMissing   = "forge client missing"
+	errUnknownProject       = "unknown project"
+)
+
 // Options configures the HTTP server.
 type Options struct {
 	Addr string
@@ -38,6 +47,7 @@ type Options struct {
 	Local       config.Local
 	Upstream    config.Upstream
 	Dash        *dashboard.Service
+	Commands    *dashboard.Commands
 	Triage      *triage.Analyzer
 	Prune       *pruneagent.Service
 	PollSeconds int
@@ -65,7 +75,7 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -76,7 +86,7 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/meta", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 		_, poll := live.snapshot()
@@ -87,11 +97,11 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 		if opts.Dash == nil {
-			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
+			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
 			return
 		}
 		fresh := r.URL.Query().Get("fresh") == "1" || strings.EqualFold(r.URL.Query().Get("fresh"), "true")
@@ -109,11 +119,11 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/failures", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 		if opts.Dash == nil {
-			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
+			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
 			return
 		}
 		doc, _ := live.snapshot()
@@ -121,12 +131,12 @@ func NewMux(opts Options) http.Handler {
 		runID := strings.TrimSpace(r.URL.Query().Get("run_id"))
 		p, ok := dashboard.FindProject(doc.Projects, projectID)
 		if !ok {
-			http.Error(w, "unknown project", http.StatusBadRequest)
+			http.Error(w, errUnknownProject, http.StatusBadRequest)
 			return
 		}
 		client := dashboard.ClientFor(opts.Dash, p)
 		if client == nil {
-			http.Error(w, "forge client missing", http.StatusInternalServerError)
+			http.Error(w, errForgeClientMissing, http.StatusInternalServerError)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
@@ -141,7 +151,7 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/triage", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 		if opts.Dash == nil || opts.Triage == nil {
@@ -155,12 +165,12 @@ func NewMux(opts Options) http.Handler {
 		doc, _ := live.snapshot()
 		p, ok := dashboard.FindProject(doc.Projects, body.ProjectID)
 		if !ok {
-			http.Error(w, "unknown project", http.StatusBadRequest)
+			http.Error(w, errUnknownProject, http.StatusBadRequest)
 			return
 		}
 		client := dashboard.ClientFor(opts.Dash, p)
 		if client == nil {
-			http.Error(w, "forge client missing", http.StatusInternalServerError)
+			http.Error(w, errForgeClientMissing, http.StatusInternalServerError)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
@@ -183,11 +193,11 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/prune/safe", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
-		if opts.Dash == nil {
-			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
+		if opts.Commands == nil {
+			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
 			return
 		}
 		var body dashboard.PruneSafeRequest
@@ -197,7 +207,7 @@ func NewMux(opts Options) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 		doc, _ := live.snapshot()
-		if err := opts.Dash.PruneSafe(ctx, doc, body); err != nil {
+		if err := opts.Commands.PruneSafe(ctx, doc, body); err != nil {
 			code := http.StatusInternalServerError
 			if dashboard.IsBadRequest(err) {
 				code = http.StatusBadRequest
@@ -210,11 +220,11 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/pull/ff", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
-		if opts.Dash == nil {
-			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
+		if opts.Commands == nil {
+			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
 			return
 		}
 		var body dashboard.PullFFRequest
@@ -224,7 +234,7 @@ func NewMux(opts Options) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		doc, _ := live.snapshot()
-		result, err := opts.Dash.PullFF(ctx, doc, body)
+		result, err := opts.Commands.PullFF(ctx, doc, body)
 		if err != nil {
 			code := http.StatusInternalServerError
 			if dashboard.IsBadRequest(err) {
@@ -238,15 +248,15 @@ func NewMux(opts Options) http.Handler {
 
 	mux.HandleFunc("/api/agents/prune/investigate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 		if opts.Prune == nil {
 			http.Error(w, "prune agent unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if opts.Dash == nil {
-			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
+		if opts.Dash == nil || opts.Commands == nil {
+			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
 			return
 		}
 		var body pruneagent.Request
@@ -259,12 +269,12 @@ func NewMux(opts Options) http.Handler {
 		}
 		doc, _ := live.snapshot()
 		if _, ok := dashboard.FindProject(doc.Projects, body.ProjectID); !ok {
-			http.Error(w, "unknown project", http.StatusBadRequest)
+			http.Error(w, errUnknownProject, http.StatusBadRequest)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()
-		abs, err := opts.Dash.RequireMappedPath(ctx, doc, body.ProjectID, body.WorktreePath)
+		abs, err := opts.Commands.RequireMappedPath(ctx, doc, body.ProjectID, body.WorktreePath)
 		if err != nil {
 			code := http.StatusBadRequest
 			if !dashboard.IsBadRequest(err) {
@@ -320,7 +330,7 @@ func NewMux(opts Options) http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet || len(parts) != 1 {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 		meta, err := opts.Prune.Store.Load(ctx, id)
@@ -353,7 +363,7 @@ func NewMux(opts Options) http.Handler {
 }
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	limited := io.LimitReader(r.Body, maxJSONBody+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil {
@@ -374,5 +384,7 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("gitboard: write json: %v", err)
+	}
 }

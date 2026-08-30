@@ -1,4 +1,4 @@
-package forge
+package remotegit
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
 )
 
@@ -133,10 +134,11 @@ func TestGitHubProjectSummaryHappy(t *testing.T) {
 	if !sum.RemoteNamesOK {
 		t.Fatal("expected RemoteNamesOK")
 	}
-	var feat *BranchRef
+	var feat *board.BranchRef
 	for i := range sum.Branches {
 		if sum.Branches[i].Name == "feat/x" {
-			feat = &sum.Branches[i]
+			b := sum.Branches[i]
+			feat = &b
 			break
 		}
 	}
@@ -179,16 +181,16 @@ func TestGitLabProjectSummaryHappy(t *testing.T) {
 	if !sum.MergedOK || len(sum.Merged) != 1 || sum.Merged[0].Branch != "feat/done" {
 		t.Fatalf("merged: ok=%v %+v", sum.MergedOK, sum.Merged)
 	}
-	var feat *BranchRef
 	for i := range sum.Branches {
 		if sum.Branches[i].Name == "feat/y" {
-			feat = &sum.Branches[i]
-			break
+			feat := sum.Branches[i]
+			if !feat.OpenReview || feat.ReviewID != 3 || feat.CIStatus != "success" {
+				t.Fatalf("feat/y branch: %+v", feat)
+			}
+			return
 		}
 	}
-	if feat == nil || !feat.OpenReview || feat.ReviewID != 3 || feat.CIStatus != "success" {
-		t.Fatalf("feat/y branch: %+v", feat)
-	}
+	t.Fatal("feat/y branch not found")
 }
 
 func TestGitLabFailedJobsHappy(t *testing.T) {
@@ -211,6 +213,18 @@ func TestGitlabHasConflict(t *testing.T) {
 		t.Fatal("merge_status cannot_be_merged")
 	}
 	if gitlabHasConflict(false, "can_be_merged") {
+		t.Fatal("clean should not conflict")
+	}
+}
+
+func TestGithubHasConflict(t *testing.T) {
+	if !githubHasConflict("CONFLICTING", "") {
+		t.Fatal("mergeable CONFLICTING")
+	}
+	if !githubHasConflict("MERGEABLE", "DIRTY") {
+		t.Fatal("state DIRTY")
+	}
+	if githubHasConflict("MERGEABLE", "CLEAN") {
 		t.Fatal("clean should not conflict")
 	}
 }

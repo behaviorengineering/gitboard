@@ -1,24 +1,37 @@
-package forge
+package remotegit
 
 import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/behaviorengineering/gitboard/internal/board"
 )
 
-// StaleAfter is how long without updates before a branch is marked stale.
+// staleAfter is how long without updates before a branch is marked stale.
 const staleAfter = 14 * 24 * time.Hour
 
 type branchAccum struct {
-	byName map[string]*BranchRef
+	byName map[string]*board.BranchRef
 	order  []string
+	now    func() time.Time
 }
 
 func newBranchAccum() *branchAccum {
-	return &branchAccum{byName: map[string]*BranchRef{}}
+	return &branchAccum{
+		byName: map[string]*board.BranchRef{},
+		now:    func() time.Time { return time.Now().UTC() },
+	}
 }
 
-func (a *branchAccum) ensure(name string) *BranchRef {
+// setNow injects a clock (for tests).
+func (a *branchAccum) setNow(fn func() time.Time) {
+	if fn != nil {
+		a.now = fn
+	}
+}
+
+func (a *branchAccum) ensure(name string) *board.BranchRef {
 	name = trimBranch(name)
 	if name == "" {
 		return nil
@@ -26,7 +39,7 @@ func (a *branchAccum) ensure(name string) *BranchRef {
 	if b, ok := a.byName[name]; ok {
 		return b
 	}
-	b := &BranchRef{Name: name}
+	b := &board.BranchRef{Name: name}
 	a.byName[name] = b
 	a.order = append(a.order, name)
 	return b
@@ -123,11 +136,15 @@ func (a *branchAccum) touchUpdated(name, updatedAt string) {
 	}
 }
 
-func (a *branchAccum) list() []BranchRef {
-	now := time.Now().UTC()
-	out := make([]BranchRef, 0, len(a.order))
+func (a *branchAccum) list() []board.BranchRef {
+	now := a.now()
+	out := make([]board.BranchRef, 0, len(a.order))
 	for _, name := range a.order {
-		b := *a.byName[name]
+		bPtr, ok := a.byName[name]
+		if !ok || bPtr == nil {
+			continue
+		}
+		b := *bPtr
 		if t, ok := parseTime(b.UpdatedAt); ok && now.Sub(t) > staleAfter {
 			b.Stale = true
 		}
@@ -183,18 +200,4 @@ func parseTime(raw string) (time.Time, bool) {
 
 func trimBranch(name string) string {
 	return strings.TrimSpace(name)
-}
-
-func githubHasConflict(mergeable, mergeState string) bool {
-	m := strings.ToUpper(strings.TrimSpace(mergeable))
-	s := strings.ToUpper(strings.TrimSpace(mergeState))
-	return m == "CONFLICTING" || s == "DIRTY" || s == "CONFLICTING"
-}
-
-func gitlabHasConflict(hasConflicts bool, mergeStatus string) bool {
-	if hasConflicts {
-		return true
-	}
-	s := strings.ToLower(strings.TrimSpace(mergeStatus))
-	return s == "cannot_be_merged" || s == "cannot_be_merged_recheck"
 }

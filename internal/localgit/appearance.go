@@ -37,8 +37,8 @@ func (d Discovery) Appearances(host, repoPath string) []Checkout {
 	return cp
 }
 
-// ResolvePath picks an explicit local_path or the primary scanned checkout path.
-func ResolvePath(localPath string, host, repoPath string, disc Discovery) (string, bool) {
+// resolvePath picks an explicit local_path or the primary scanned checkout path.
+func resolvePath(localPath string, host, repoPath string, disc Discovery) (string, bool) {
 	if strings.TrimSpace(localPath) != "" {
 		return strings.TrimSpace(localPath), true
 	}
@@ -91,8 +91,8 @@ func pathDepth(p string) int {
 	return strings.Count(p, string(filepath.Separator))
 }
 
-// HomeShortPath replaces the home directory prefix with ~/.
-func HomeShortPath(abs string) string {
+// homeShortPath replaces the home directory prefix with ~/.
+func homeShortPath(abs string) string {
 	abs = filepath.Clean(strings.TrimSpace(abs))
 	if abs == "" {
 		return abs
@@ -129,7 +129,7 @@ func DisplayID(c Checkout, parentLabel string) string {
 		}
 		return label + " → " + rel
 	}
-	return HomeShortPath(c.Path)
+	return homeShortPath(c.Path)
 }
 
 // FillCheckoutMeta sets Role, RelPath, and ParentBasename from Path and Superproject.

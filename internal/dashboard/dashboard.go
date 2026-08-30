@@ -7,27 +7,28 @@ import (
 	"sync"
 	"time"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 )
 
 // Service aggregates project rows via forge CLIs and optional local git.
 type Service struct {
-	GitHub      *forge.GitHub
-	GitLab      *forge.GitLab
-	Local       *localgit.Inspector
-	Cache       *forge.TTLCache
+	GitHub      *remotegit.GitHub
+	GitLab      *remotegit.GitLab
+	Local       LocalGit
+	Cache       *remotegit.TTLCache
 	OriginFetch *localgit.OriginFetchCache
 }
 
 // New returns a dashboard service with in-memory upstream and origin-fetch caches.
-func New(gh *forge.GitHub, gl *forge.GitLab, local *localgit.Inspector) *Service {
+func New(gh *remotegit.GitHub, gl *remotegit.GitLab, local LocalGit) *Service {
 	return &Service{
 		GitHub:      gh,
 		GitLab:      gl,
 		Local:       local,
-		Cache:       forge.NewTTLCache(),
+		Cache:       remotegit.NewTTLCache(),
 		OriginFetch: localgit.NewOriginFetchCache(),
 	}
 }
@@ -47,11 +48,14 @@ func (s *Service) ClearCaches() {
 
 // Collect builds the dashboard for all configured projects.
 // When fresh is true, forge and origin-fetch TTL caches are bypassed for this request.
-func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forge.Dashboard {
-	projects := doc.Projects
-	out := forge.Dashboard{
+func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) board.Dashboard {
+	out := board.Dashboard{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+	if s == nil {
+		return out
+	}
+	projects := doc.Projects
 	if s.GitHub != nil {
 		installed, authed, detail := s.GitHub.AuthStatus(ctx)
 		out.Tooling.GitHub.Installed = installed
@@ -71,7 +75,7 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forg
 	}
 	labelByKey := projectLabelsByKey(doc.Projects)
 
-	opts := forge.SummaryOpts{
+	opts := remotegit.SummaryOpts{
 		Fresh:     fresh,
 		Cache:     s.Cache,
 		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
@@ -79,15 +83,24 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) forg
 	}
 	fetchTTL := time.Duration(doc.EffectiveFetchSeconds()) * time.Second
 
-	rows := make([]forge.ProjectSummary, len(projects))
+	rows := make([]board.ProjectSummary, len(projects))
+	sem := make(chan struct{}, originFetchParallel)
 	var wg sync.WaitGroup
 	for i, p := range projects {
+		if ctx.Err() != nil {
+			break
+		}
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(i int, p config.Project) {
 			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
 			row := s.summarize(ctx, p, opts)
 			row.Local = s.attachLocal(ctx, p, disc, labelByKey, fresh, fetchTTL)
-			forge.EnrichPruneHints(&row)
+			remotegit.EnrichPruneHints(&row)
 			rows[i] = row
 		}(i, p)
 	}
@@ -112,7 +125,7 @@ func projectLabelsByKey(projects []config.Project) map[string]string {
 	return out
 }
 
-func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string, fresh bool, fetchTTL time.Duration) *forge.LocalStatus {
+func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string, fresh bool, fetchTTL time.Duration) *board.LocalStatus {
 	if s.Local == nil {
 		return nil
 	}
@@ -122,12 +135,12 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 		if len(disc.ByKey) == 0 {
 			return nil
 		}
-		return &forge.LocalStatus{Mapped: false}
+		return &board.LocalStatus{Mapped: false}
 	}
 
 	primary, ok := localgit.PickPrimary(explicit, checkouts)
 	if !ok {
-		return &forge.LocalStatus{Mapped: false}
+		return &board.LocalStatus{Mapped: false}
 	}
 
 	// Ensure primary path is in the inspect list even when local_path is outside scan.
@@ -177,9 +190,9 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 	wg.Wait()
 
 	parentLabelCache := map[string]string{}
-	appearances := make([]forge.LocalAppearance, 0, len(results))
-	var union []forge.LocalWorktree
-	var primaryLocal *forge.LocalStatus
+	appearances := make([]board.LocalAppearance, 0, len(results))
+	var union []board.LocalWorktree
+	var primaryLocal *board.LocalStatus
 
 	primaryPath := filepath.Clean(primary.Path)
 	for _, r := range results {
@@ -204,7 +217,7 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 		}
 
 		if isPrimary {
-			primaryLocal = toForgeLocal(r.status)
+			primaryLocal = toBoardLocal(r.status)
 		}
 	}
 
@@ -218,7 +231,7 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 				localgit.InvalidateOriginSync(&st)
 			}
 		}
-		primaryLocal = toForgeLocal(st)
+		primaryLocal = toBoardLocal(st)
 	}
 	primaryLocal.Appearances = appearances
 	primaryLocal.Worktrees = union
@@ -287,7 +300,7 @@ func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Check
 	return out
 }
 
-func fetchErrFor(c localgit.Checkout, byCommon map[string]error, in *localgit.Inspector, ctx context.Context) error {
+func fetchErrFor(c localgit.Checkout, byCommon map[string]error, in LocalGit, ctx context.Context) error {
 	if len(byCommon) == 0 {
 		return nil
 	}
@@ -326,8 +339,8 @@ func (s *Service) parentLabel(ctx context.Context, parentPath string, labelByKey
 	return label
 }
 
-func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, parentLabel string) forge.LocalAppearance {
-	app := forge.LocalAppearance{
+func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, parentLabel string) board.LocalAppearance {
+	app := board.LocalAppearance{
 		Role:          c.Role,
 		Path:          c.Path,
 		DisplayID:     displayID,
@@ -336,6 +349,7 @@ func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, pare
 		RelPath:       c.RelPath,
 		Error:         st.Error,
 		Branch:        st.Branch,
+		Tag:           st.Tag,
 		Detached:      st.Detached,
 		Dirty:         st.Dirty,
 		Ahead:         st.Ahead,
@@ -344,18 +358,19 @@ func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, pare
 		DefaultBranch: st.DefaultBranch,
 		DefaultBehind: st.DefaultBehind,
 		DefaultAhead:  st.DefaultAhead,
-		OriginSync:    originSyncToForge(st.OriginSync),
+		OriginSync:    originSyncToBoard(st.OriginSync),
 	}
 	if app.Role == "" {
-		app.Role = forge.AppearanceStandalone
+		app.Role = board.AppearanceStandalone
 	}
 	for _, wt := range st.Worktrees {
 		if wt.Bare {
 			continue
 		}
-		app.Worktrees = append(app.Worktrees, forge.LocalWorktree{
+		app.Worktrees = append(app.Worktrees, board.LocalWorktree{
 			Path:            wt.Path,
 			Branch:          wt.Branch,
+			Tag:             wt.Tag,
 			Detached:        wt.Detached,
 			Bare:            wt.Bare,
 			Main:            wt.Main,
@@ -370,12 +385,13 @@ func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, pare
 	return app
 }
 
-func toForgeLocal(st localgit.Status) *forge.LocalStatus {
-	out := &forge.LocalStatus{
+func toBoardLocal(st localgit.Status) *board.LocalStatus {
+	out := &board.LocalStatus{
 		Mapped:        st.Mapped,
 		Path:          st.Path,
 		Error:         st.Error,
 		Branch:        st.Branch,
+		Tag:           st.Tag,
 		Detached:      st.Detached,
 		Dirty:         st.Dirty,
 		Ahead:         st.Ahead,
@@ -384,15 +400,16 @@ func toForgeLocal(st localgit.Status) *forge.LocalStatus {
 		DefaultBranch: st.DefaultBranch,
 		DefaultBehind: st.DefaultBehind,
 		DefaultAhead:  st.DefaultAhead,
-		OriginSync:    originSyncToForge(st.OriginSync),
+		OriginSync:    originSyncToBoard(st.OriginSync),
 	}
 	for _, wt := range st.Worktrees {
 		if wt.Bare {
 			continue
 		}
-		out.Worktrees = append(out.Worktrees, forge.LocalWorktree{
+		out.Worktrees = append(out.Worktrees, board.LocalWorktree{
 			Path:     wt.Path,
 			Branch:   wt.Branch,
+			Tag:      wt.Tag,
 			Detached: wt.Detached,
 			Bare:     wt.Bare,
 			Main:     wt.Main,
@@ -405,22 +422,22 @@ func toForgeLocal(st localgit.Status) *forge.LocalStatus {
 	return out
 }
 
-func originSyncToForge(in []localgit.BranchSync) []forge.BranchOriginSync {
+func originSyncToBoard(in []localgit.BranchSync) []board.BranchOriginSync {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]forge.BranchOriginSync, len(in))
+	out := make([]board.BranchOriginSync, len(in))
 	for i, s := range in {
-		out[i] = forge.BranchOriginSync{Name: s.Name, Ahead: s.Ahead, Behind: s.Behind}
+		out[i] = board.BranchOriginSync{Name: s.Name, Ahead: s.Ahead, Behind: s.Behind}
 	}
 	return out
 }
 
-func (s *Service) summarize(ctx context.Context, p config.Project, opts forge.SummaryOpts) forge.ProjectSummary {
+func (s *Service) summarize(ctx context.Context, p config.Project, opts remotegit.SummaryOpts) board.ProjectSummary {
 	switch p.Host {
 	case config.HostGitHub:
 		if s.GitHub == nil {
-			return forge.ProjectSummary{
+			return board.ProjectSummary{
 				ID: p.ID, Label: p.Label, Host: string(p.Host), Path: p.Path, Org: forgeOrg(p.Path),
 				OpenURL: p.OpenURL(), Error: "github client missing",
 			}
@@ -429,7 +446,7 @@ func (s *Service) summarize(ctx context.Context, p config.Project, opts forge.Su
 		return row
 	default:
 		if s.GitLab == nil {
-			return forge.ProjectSummary{
+			return board.ProjectSummary{
 				ID: p.ID, Label: p.Label, Host: string(p.Host), Path: p.Path, Org: forgeOrg(p.Path),
 				OpenURL: p.OpenURL(), Error: "gitlab client missing",
 			}
@@ -460,7 +477,7 @@ func FindProject(projects []config.Project, id string) (config.Project, bool) {
 
 // ClientFor returns the forge client for a project host.
 // A missing client is a true nil interface (not a typed nil pointer).
-func ClientFor(s *Service, p config.Project) forge.Client {
+func ClientFor(s *Service, p config.Project) remotegit.Client {
 	if s == nil {
 		return nil
 	}

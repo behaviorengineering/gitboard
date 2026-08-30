@@ -1,10 +1,6 @@
-package forge
-
-import (
-	"context"
-
-	"github.com/behaviorengineering/gitboard/internal/config"
-)
+// Package board contains the JSON data types shared across the dashboard UI,
+// forge adapters, and server handlers. No domain logic lives here.
+package board
 
 // CIStatus is the latest pipeline or workflow run.
 type CIStatus struct {
@@ -69,7 +65,7 @@ type ProjectSummary struct {
 	Error     string         `json:"error,omitempty"`
 
 	// RemoteNames is the full remote head set for prune matching (not sent to UI).
-	// Loaded via paginated forge API calls; may be incomplete only when RemoteNamesOK is false.
+	// Loaded via forge API calls; may be incomplete only when RemoteNamesOK is false.
 	RemoteNames []string `json:"-"`
 	// RemoteNamesOK is true when heads were loaded successfully (live or cache).
 	// When false, EnrichPruneHints suppresses all prune hints (fail closed).
@@ -95,6 +91,7 @@ type LocalAppearance struct {
 	Primary       bool               `json:"primary,omitempty"`
 	Error         string             `json:"error,omitempty"`
 	Branch        string             `json:"branch,omitempty"`
+	Tag           string             `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached      bool               `json:"detached,omitempty"`
 	Dirty         bool               `json:"dirty,omitempty"`
 	Ahead         int                `json:"ahead,omitempty"`
@@ -114,6 +111,7 @@ type LocalStatus struct {
 	Path          string             `json:"path,omitempty"`
 	Error         string             `json:"error,omitempty"`
 	Branch        string             `json:"branch,omitempty"`
+	Tag           string             `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached      bool               `json:"detached,omitempty"`
 	Dirty         bool               `json:"dirty,omitempty"`
 	Ahead         int                `json:"ahead,omitempty"`
@@ -138,6 +136,7 @@ type BranchOriginSync struct {
 type LocalWorktree struct {
 	Path            string `json:"path"`
 	Branch          string `json:"branch,omitempty"`
+	Tag             string `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached        bool   `json:"detached,omitempty"`
 	Bare            bool   `json:"bare,omitempty"`
 	Main            bool   `json:"main,omitempty"`
@@ -181,20 +180,4 @@ type Dashboard struct {
 	PollIntervalSeconds int              `json:"poll_interval_seconds"`
 	Tooling             Tooling          `json:"tooling"`
 	Projects            []ProjectSummary `json:"projects"`
-}
-
-// RepoRef is a discoverable repository from an org or group.
-type RepoRef struct {
-	Host     config.Host
-	Path     string // owner/repo
-	Name     string
-	Archived bool
-}
-
-// Client summarizes one forge via its official CLI.
-type Client interface {
-	AuthStatus(ctx context.Context) (installed, authed bool, detail string)
-	ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (ProjectSummary, error)
-	FailedJobs(ctx context.Context, p config.Project, runID string) ([]FailedJob, error)
-	JobLog(ctx context.Context, p config.Project, runID, jobID string) (string, error)
 }

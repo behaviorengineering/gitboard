@@ -69,7 +69,7 @@ func (r *Runner) Run(ctx context.Context, name string, args ...string) ([]byte, 
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, fmt.Errorf("%s %s: %s", name, strings.Join(args, " "), msg)
+		return nil, fmt.Errorf("%s %s: %s: %w", name, strings.Join(args, " "), msg, err)
 	}
 	return stdout.Bytes(), nil
 }

@@ -20,6 +20,7 @@ import (
 type Worktree struct {
 	Path     string `json:"path"`
 	Branch   string `json:"branch,omitempty"`
+	Tag      string `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached bool   `json:"detached,omitempty"`
 	Bare     bool   `json:"bare,omitempty"`
 	Locked   bool   `json:"locked,omitempty"`
@@ -37,6 +38,7 @@ type Status struct {
 	Path          string       `json:"path,omitempty"`
 	Error         string       `json:"error,omitempty"`
 	Branch        string       `json:"branch,omitempty"`
+	Tag           string       `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
 	Detached      bool         `json:"detached,omitempty"`
 	Dirty         bool         `json:"dirty,omitempty"`
 	Ahead         int          `json:"ahead,omitempty"`
@@ -64,7 +66,7 @@ type Inspector struct {
 // NewInspector returns an Inspector with a short timeout (status is cheap).
 func NewInspector(run cliexec.Exec) *Inspector {
 	if run == nil {
-		run = cliexec.New()
+		panic("localgit.NewInspector: Exec is required")
 	}
 	return &Inspector{Run: run}
 }
@@ -129,6 +131,7 @@ func summarize(path string, trees []Worktree) Status {
 	}
 	st.Path = primary.Path
 	st.Branch = primary.Branch
+	st.Tag = primary.Tag
 	st.Detached = primary.Detached
 	st.Dirty = primary.Dirty
 	st.Ahead = primary.Ahead
@@ -217,8 +220,11 @@ func (in *Inspector) inspectWorktree(ctx context.Context, dir string, isMain boo
 	branch := strings.TrimSpace(string(branchOut))
 	if branch == "HEAD" {
 		wt.Detached = true
-		short, _ := in.git(ctx, dir, "rev-parse", "--short", "HEAD")
-		wt.Branch = strings.TrimSpace(string(short))
+		short, shortErr := in.git(ctx, dir, "rev-parse", "--short", "HEAD")
+		if shortErr == nil {
+			wt.Branch = strings.TrimSpace(string(short))
+		}
+		wt.Tag = in.exactTagAtHEAD(ctx, dir)
 	} else {
 		wt.Branch = branch
 	}
@@ -239,6 +245,16 @@ func (in *Inspector) inspectWorktree(ctx context.Context, dir string, isMain boo
 		}
 	}
 	return wt, nil
+}
+
+// exactTagAtHEAD returns a tag name when HEAD points exactly at a tag.
+// Prefer lightweight/version tags via describe; empty when HEAD is not tagged.
+func (in *Inspector) exactTagAtHEAD(ctx context.Context, dir string) string {
+	out, err := in.git(ctx, dir, "describe", "--exact-match", "--tags", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (in *Inspector) leftRight(ctx context.Context, dir, left, right string) (ahead, behind int, ok bool) {
@@ -262,9 +278,11 @@ func (in *Inspector) leftRight(ctx context.Context, dir, left, right string) (ah
 
 // EnrichOriginSync compares each local branch to origin/<same name>.
 // DefaultAhead/DefaultBehind copy the default-branch row when both refs exist.
-// Comparisons run in parallel to limit wall time when many branches share an origin twin.
+// Comparisons run in parallel (capped) to limit wall time when many branches share an origin twin.
+const originCompareParallel = 8
+
 func (in *Inspector) EnrichOriginSync(ctx context.Context, st *Status) {
-	if st == nil || !st.Mapped || st.Path == "" || st.Error != "" {
+	if in == nil || st == nil || !st.Mapped || st.Path == "" || st.Error != "" {
 		return
 	}
 	if def, ok := in.defaultBranch(ctx, st.Path); ok {
@@ -306,10 +324,21 @@ func (in *Inspector) EnrichOriginSync(ctx context.Context, st *Status) {
 	syncs := make([]BranchSync, len(names))
 	var wg sync.WaitGroup
 	var failed atomic.Bool
+	sem := make(chan struct{}, originCompareParallel)
 	for i, name := range names {
+		if ctx.Err() != nil {
+			failed.Store(true)
+			break
+		}
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(i int, name string) {
 			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				failed.Store(true)
+				return
+			}
 			ahead, behind, ok := in.leftRight(ctx, st.Path, "refs/remotes/origin/"+name, "refs/heads/"+name)
 			if !ok {
 				failed.Store(true)

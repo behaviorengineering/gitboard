@@ -1,24 +1,28 @@
-package forge
+package remotegit
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/behaviorengineering/gitboard/internal/board"
+)
 
 func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main", "feat/open", "feat/still-remote"},
 		RemoteNamesOK: true,
-		Branches: []BranchRef{
+		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
 			{Name: "feat/open", OpenReview: true},
 		},
-		Merged: []MergedReview{
+		Merged: []board.MergedReview{
 			{Branch: "feat/merged", ID: 42, URL: "https://example/pr/42", MergedAt: "2026-08-20T10:00:00Z"},
 			{Branch: "feat/merged", ID: 41, URL: "https://example/pr/41", MergedAt: "2026-08-10T10:00:00Z"},
 		},
 		MergedOK: true,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/repo", Branch: "main", Main: true},
 				{Path: "/repo-merged", Branch: "feat/merged"},
 				{Path: "/repo-likely", Branch: "feat/gone"},
@@ -31,15 +35,15 @@ func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
 
 	EnrichPruneHints(summary)
 
-	byBranch := map[string]LocalWorktree{}
+	byBranch := map[string]board.LocalWorktree{}
 	for _, wt := range summary.Local.Worktrees {
 		byBranch[wt.Branch] = wt
 	}
 
-	if got := byBranch["feat/merged"]; got.PruneHint != PruneSafe || got.MergedID != 42 {
+	if got := byBranch["feat/merged"]; got.PruneHint != board.PruneSafe || got.MergedID != 42 {
 		t.Fatalf("merged: %+v", got)
 	}
-	if got := byBranch["feat/gone"]; got.PruneHint != PruneLikely {
+	if got := byBranch["feat/gone"]; got.PruneHint != board.PruneLikely {
 		t.Fatalf("likely: %+v", got)
 	}
 	for _, name := range []string{"main", "feat/dirty", "feat/still-remote", "feat/open"} {
@@ -50,18 +54,17 @@ func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
 }
 
 func TestEnrichPruneHintsUsesFullRemoteNames(t *testing.T) {
-	// Truncated Branches list omits feat/hidden-remote, but RemoteNames has it.
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main", "feat/hidden-remote"},
 		RemoteNamesOK: true,
-		Branches: []BranchRef{
+		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
 		},
 		MergedOK: true,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/wt", Branch: "feat/hidden-remote"},
 			},
 		},
@@ -73,16 +76,16 @@ func TestEnrichPruneHintsUsesFullRemoteNames(t *testing.T) {
 }
 
 func TestEnrichPruneHintsRemoteNamesNotOKSuppressesAll(t *testing.T) {
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNamesOK: false,
-		Merged: []MergedReview{
+		Merged: []board.MergedReview{
 			{Branch: "feat/merged", ID: 1, MergedAt: "2026-08-20T10:00:00Z"},
 		},
 		MergedOK: true,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/wt", Branch: "feat/merged"},
 			},
 		},
@@ -94,37 +97,36 @@ func TestEnrichPruneHintsRemoteNamesNotOKSuppressesAll(t *testing.T) {
 }
 
 func TestEnrichPruneHintsEmptyRemoteNamesOKStillAllowsGone(t *testing.T) {
-	// Empty but successful heads list means every local-only branch is gone from remote.
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNames:   nil,
 		RemoteNamesOK: true,
-		Merged: []MergedReview{
+		Merged: []board.MergedReview{
 			{Branch: "feat/merged", ID: 1, MergedAt: "2026-08-20T10:00:00Z"},
 		},
 		MergedOK: true,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/wt", Branch: "feat/merged"},
 			},
 		},
 	}
 	EnrichPruneHints(summary)
-	if got := summary.Local.Worktrees[0].PruneHint; got != PruneSafe {
+	if got := summary.Local.Worktrees[0].PruneHint; got != board.PruneSafe {
 		t.Fatalf("want safe when heads OK and empty, got %q", got)
 	}
 }
 
 func TestEnrichPruneHintsMergedNotOKSuppressesLikely(t *testing.T) {
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
 		MergedOK:      false,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/wt", Branch: "feat/gone"},
 			},
 		},
@@ -136,20 +138,20 @@ func TestEnrichPruneHintsMergedNotOKSuppressesLikely(t *testing.T) {
 }
 
 func TestEnrichPruneHintsPrimaryCheckout(t *testing.T) {
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
-		Branches: []BranchRef{
+		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
 		},
-		Merged: []MergedReview{
+		Merged: []board.MergedReview{
 			{Branch: "feat/primary-merged", ID: 7, URL: "https://example/pr/7", MergedAt: "2026-08-24T01:00:00Z"},
 		},
 		MergedOK: true,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/repo", Branch: "feat/primary-merged", Main: true},
 				{Path: "/repo-gone", Branch: "feat/primary-gone", Main: true},
 			},
@@ -158,35 +160,35 @@ func TestEnrichPruneHintsPrimaryCheckout(t *testing.T) {
 
 	EnrichPruneHints(summary)
 
-	byBranch := map[string]LocalWorktree{}
+	byBranch := map[string]board.LocalWorktree{}
 	for _, wt := range summary.Local.Worktrees {
 		byBranch[wt.Branch] = wt
 	}
 
-	if got := byBranch["feat/primary-merged"]; got.PruneHint != PruneSafe || got.MergedID != 7 {
+	if got := byBranch["feat/primary-merged"]; got.PruneHint != board.PruneSafe || got.MergedID != 7 {
 		t.Fatalf("primary checkout merged: %+v", got)
 	}
-	if got := byBranch["feat/primary-gone"]; got.PruneHint != PruneLikely {
+	if got := byBranch["feat/primary-gone"]; got.PruneHint != board.PruneLikely {
 		t.Fatalf("primary checkout likely: %+v", got)
 	}
 }
 
 func TestEnrichPruneHintsMultiAppearanceWorktrees(t *testing.T) {
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
-		Branches: []BranchRef{
+		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
 		},
-		Merged: []MergedReview{
+		Merged: []board.MergedReview{
 			{Branch: "feat/a", ID: 1, URL: "https://example/pr/1", MergedAt: "2026-08-20T10:00:00Z"},
 		},
 		MergedOK: true,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			Path:          "/standalone",
 			DefaultBranch: "main",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/standalone", Branch: "feat/a", Main: true, AppearancePath: "/standalone", AppearanceLabel: "~/standalone"},
 				{Path: "/parent/providers/repo", Branch: "feat/a", Main: true, AppearancePath: "/parent/providers/repo", AppearanceLabel: "parent → providers/repo"},
 				{Path: "/parent/providers/repo", Branch: "feat/gone", Main: true, AppearancePath: "/parent/providers/repo", AppearanceLabel: "parent → providers/repo"},
@@ -198,9 +200,9 @@ func TestEnrichPruneHintsMultiAppearanceWorktrees(t *testing.T) {
 	var safe, likely int
 	for _, wt := range summary.Local.Worktrees {
 		switch {
-		case wt.Branch == "feat/a" && wt.PruneHint == PruneSafe:
+		case wt.Branch == "feat/a" && wt.PruneHint == board.PruneSafe:
 			safe++
-		case wt.Branch == "feat/gone" && wt.PruneHint == PruneLikely:
+		case wt.Branch == "feat/gone" && wt.PruneHint == board.PruneLikely:
 			likely++
 		}
 	}
@@ -214,25 +216,24 @@ func TestEnrichPruneHintsMultiAppearanceWorktrees(t *testing.T) {
 
 func TestEnrichPruneHintsNilSafe(t *testing.T) {
 	EnrichPruneHints(nil)
-	EnrichPruneHints(&ProjectSummary{})
+	EnrichPruneHints(&board.ProjectSummary{})
 }
 
 func TestEnrichPruneHintsPrefersForgeDefaultOverStaleOriginHEAD(t *testing.T) {
-	// Local origin/HEAD still points at the feature branch after a non-default clone.
-	summary := &ProjectSummary{
+	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
-		Branches: []BranchRef{
+		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
 		},
-		Merged: []MergedReview{
+		Merged: []board.MergedReview{
 			{Branch: "feat/config-sync-dashboard", ID: 4, URL: "https://example/pr/4", MergedAt: "2026-08-26T05:12:17Z"},
 		},
 		MergedOK: true,
-		Local: &LocalStatus{
+		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "feat/config-sync-dashboard",
-			Worktrees: []LocalWorktree{
+			Worktrees: []board.LocalWorktree{
 				{Path: "/repo", Branch: "feat/config-sync-dashboard", Main: true},
 			},
 		},
@@ -243,7 +244,7 @@ func TestEnrichPruneHintsPrefersForgeDefaultOverStaleOriginHEAD(t *testing.T) {
 	if got := summary.Local.DefaultBranch; got != "main" {
 		t.Fatalf("aligned default_branch: got %q want main", got)
 	}
-	if got := summary.Local.Worktrees[0].PruneHint; got != PruneSafe {
+	if got := summary.Local.Worktrees[0].PruneHint; got != board.PruneSafe {
 		t.Fatalf("stale origin/HEAD must not block safe prune, got %q", got)
 	}
 }

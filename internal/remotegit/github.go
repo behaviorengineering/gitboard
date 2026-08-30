@@ -1,4 +1,4 @@
-package forge
+package remotegit
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/cliexec"
 	"github.com/behaviorengineering/gitboard/internal/config"
 )
@@ -17,7 +18,7 @@ type GitHub struct {
 
 func NewGitHub(run cliexec.Exec) *GitHub {
 	if run == nil {
-		run = cliexec.New()
+		panic("remotegit.NewGitHub: Exec is required")
 	}
 	return &GitHub{Run: run}
 }
@@ -33,117 +34,63 @@ func (g *GitHub) AuthStatus(ctx context.Context) (bool, bool, string) {
 	return true, true, ""
 }
 
-func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (ProjectSummary, error) {
-	summary := baseSummary(p)
-	installed, authed, detail := g.AuthStatus(ctx)
-	if !installed {
-		summary.Error = detail
-		return summary, nil
-	}
-	if !authed {
-		summary.Error = "gh not authenticated: " + detail
-		return summary, nil
-	}
-	repo := p.Path
-	key := cacheKey(string(p.Host), repo)
-	branches := newBranchAccum()
-
-	heads, err := opts.Cache.GetOrLoadHeads(key, opts.HeadsTTL, opts.Fresh, func() (HeadsSnapshot, error) {
-		return g.loadHeads(ctx, repo)
-	})
-	if err != nil {
-		if summary.Error == "" {
-			summary.Error = err.Error()
-		}
-		summary.RemoteNamesOK = false
-	} else {
-		summary.RemoteNamesOK = true
-		if heads.DefaultBranch != "" {
-			branches.setDefault(heads.DefaultBranch)
-		}
-		names := make([]string, 0, len(heads.Heads))
-		for _, h := range heads.Heads {
-			branches.addRemote(h.Name, h.UpdatedAt, h.WebURL)
-			if n := trimBranch(h.Name); n != "" {
-				names = append(names, n)
-			}
-		}
-		summary.RemoteNames = names
-	}
-
-	if err := g.loadCI(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
-		summary.Error = err.Error()
-	}
-	if err := g.loadOpenReviews(ctx, repo, &summary, branches); err != nil && summary.Error == "" {
-		summary.Error = err.Error()
-	}
-
-	merged, mergedOK := opts.Cache.GetOrLoadMerged(key, opts.MergedTTL, opts.Fresh, func() ([]MergedReview, error) {
-		return g.loadMerged(ctx, repo)
-	})
-	summary.Merged = merged
-	summary.MergedOK = mergedOK
-	summary.Branches = branches.list()
-	return summary, nil
+func (g *GitHub) unauthMsg(detail string) string {
+	return "gh not authenticated: " + detail
 }
 
-func (g *GitHub) loadHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
+func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (board.ProjectSummary, error) {
+	return projectSummaryShared(ctx, p, opts, g)
+}
+
+// seedHeads loads the default branch and the first page of remote branches.
+// This replaces the old 50-page census; open PR branches are added separately
+// by loadOpenReviews.
+func (g *GitHub) seedHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
 	var snap HeadsSnapshot
-	if raw, err := g.Run.RunJSON(ctx, "gh", "api", "repos/"+repo, "--jq", "{default: .default_branch}"); err != nil {
+	raw, err := g.Run.RunJSON(ctx, "gh", "api", "repos/"+repo, "--jq", "{default: .default_branch}")
+	if err != nil {
 		return snap, fmt.Errorf("github default branch: %w", err)
-	} else {
-		var meta struct {
-			Default string `json:"default"`
-		}
-		if err := json.Unmarshal(raw, &meta); err != nil {
-			return snap, fmt.Errorf("parse github default branch: %w", err)
-		}
-		snap.DefaultBranch = meta.Default
 	}
+	var meta struct {
+		Default string `json:"default"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return snap, fmt.Errorf("parse github default branch: %w", err)
+	}
+	snap.DefaultBranch = meta.Default
+
 	const perPage = 100
-	const maxPages = 50
-	for page := 1; page <= maxPages; page++ {
-		path := fmt.Sprintf("repos/%s/branches?per_page=%d&page=%d", repo, perPage, page)
-		raw, err := g.Run.RunJSON(ctx, "gh", "api", path)
-		if err != nil {
-			return snap, err
-		}
-		var heads []struct {
-			Name   string `json:"name"`
+	path := fmt.Sprintf("repos/%s/branches?per_page=%d&page=1", repo, perPage)
+	raw, err = g.Run.RunJSON(ctx, "gh", "api", path)
+	if err != nil {
+		return snap, fmt.Errorf("github branches page 1: %w", err)
+	}
+	var heads []struct {
+		Name   string `json:"name"`
+		Commit struct {
 			Commit struct {
-				Commit struct {
-					Committer struct {
-						Date string `json:"date"`
-					} `json:"committer"`
-					Author struct {
-						Date string `json:"date"`
-					} `json:"author"`
-				} `json:"commit"`
+				Committer struct {
+					Date string `json:"date"`
+				} `json:"committer"`
+				Author struct {
+					Date string `json:"date"`
+				} `json:"author"`
 			} `json:"commit"`
-		}
-		if err := json.Unmarshal(raw, &heads); err != nil {
-			return snap, err
-		}
-		if len(heads) == 0 {
-			break
-		}
-		for _, h := range heads {
-			snap.Heads = append(snap.Heads, RemoteHead{
-				Name:      h.Name,
-				UpdatedAt: firstNonEmpty(h.Commit.Commit.Committer.Date, h.Commit.Commit.Author.Date),
-			})
-		}
-		if len(heads) < perPage {
-			break
-		}
-		if page == maxPages {
-			return snap, fmt.Errorf("github branches: truncated after %d pages", maxPages)
-		}
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(raw, &heads); err != nil {
+		return snap, fmt.Errorf("parse github branches: %w", err)
+	}
+	for _, h := range heads {
+		snap.Heads = append(snap.Heads, RemoteHead{
+			Name:      h.Name,
+			UpdatedAt: firstNonEmpty(h.Commit.Commit.Committer.Date, h.Commit.Commit.Author.Date),
+		})
 	}
 	return snap, nil
 }
 
-func (g *GitHub) loadCI(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
+func (g *GitHub) loadCI(ctx context.Context, repo string, summary *board.ProjectSummary, branches *branchAccum) error {
 	raw, err := g.Run.RunJSON(ctx, "gh", "run", "list",
 		"--repo", repo,
 		"--limit", "20",
@@ -169,7 +116,7 @@ func (g *GitHub) loadCI(ctx context.Context, repo string, summary *ProjectSummar
 		status := firstNonEmpty(r.Conclusion, r.Status)
 		branches.setCI(r.Branch, status, r.URL, r.UpdatedAt, fmt.Sprintf("%d", r.ID))
 		if i == 0 {
-			summary.CI = &CIStatus{
+			summary.CI = &board.CIStatus{
 				Status:     status,
 				Conclusion: r.Conclusion,
 				Ref:        r.Branch,
@@ -183,7 +130,7 @@ func (g *GitHub) loadCI(ctx context.Context, repo string, summary *ProjectSummar
 	return nil
 }
 
-func (g *GitHub) loadOpenReviews(ctx context.Context, repo string, summary *ProjectSummary, branches *branchAccum) error {
+func (g *GitHub) loadOpenReviews(ctx context.Context, repo string, summary *board.ProjectSummary, branches *branchAccum) error {
 	prRaw, err := g.Run.RunJSON(ctx, "gh", "pr", "list",
 		"--repo", repo,
 		"--state", "open",
@@ -217,7 +164,7 @@ func (g *GitHub) loadOpenReviews(ctx context.Context, repo string, summary *Proj
 	return nil
 }
 
-func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]MergedReview, error) {
+func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]board.MergedReview, error) {
 	raw, err := g.Run.RunJSON(ctx, "gh", "pr", "list",
 		"--repo", repo,
 		"--state", "merged",
@@ -236,13 +183,13 @@ func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]MergedReview, e
 	if err := json.Unmarshal(raw, &prs); err != nil {
 		return nil, err
 	}
-	out := make([]MergedReview, 0, len(prs))
+	out := make([]board.MergedReview, 0, len(prs))
 	for _, pr := range prs {
 		name := trimBranch(pr.Head)
 		if name == "" {
 			continue
 		}
-		out = append(out, MergedReview{
+		out = append(out, board.MergedReview{
 			Branch:   name,
 			ID:       pr.Number,
 			URL:      pr.URL,
@@ -252,7 +199,7 @@ func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]MergedReview, e
 	return out, nil
 }
 
-func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string) ([]FailedJob, error) {
+func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string) ([]board.FailedJob, error) {
 	if strings.TrimSpace(runID) == "" {
 		return nil, fmt.Errorf("missing run id")
 	}
@@ -261,7 +208,7 @@ func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string)
 		"--json", "jobs",
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("github failed jobs: %w", err)
 	}
 	var payload struct {
 		Jobs []struct {
@@ -272,14 +219,14 @@ func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string)
 		} `json:"jobs"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse github jobs: %w", err)
 	}
-	var out []FailedJob
+	var out []board.FailedJob
 	for _, j := range payload.Jobs {
 		if j.Conclusion != "failure" {
 			continue
 		}
-		out = append(out, FailedJob{
+		out = append(out, board.FailedJob{
 			ID:     fmt.Sprintf("github:%d", j.DatabaseID),
 			Name:   j.Name,
 			WebURL: j.URL,
@@ -302,7 +249,7 @@ func (g *GitHub) JobLog(ctx context.Context, p config.Project, runID, jobID stri
 	}
 	out, err := g.Run.Run(ctx, "gh", args...)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("github job log: %w", err)
 	}
 	return truncateLog(string(out)), nil
 }
@@ -319,7 +266,7 @@ func (g *GitHub) ListOrgRepos(ctx context.Context, org string) ([]RepoRef, error
 		"--json", "nameWithOwner,name,isArchived",
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("github list repos: %w", err)
 	}
 	var rows []struct {
 		NameWithOwner string `json:"nameWithOwner"`
@@ -347,41 +294,4 @@ func (g *GitHub) ListOrgRepos(ctx context.Context, org string) ([]RepoRef, error
 		})
 	}
 	return out, nil
-}
-
-func baseSummary(p config.Project) ProjectSummary {
-	return ProjectSummary{
-		ID:      p.ID,
-		Label:   p.Label,
-		Host:    string(p.Host),
-		Path:    strings.Trim(p.Path, "/"),
-		Org:     pathOrg(p.Path),
-		OpenURL: p.OpenURL(),
-	}
-}
-
-func pathOrg(path string) string {
-	path = strings.Trim(path, "/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		return ""
-	}
-	return strings.Join(parts[:len(parts)-1], "/")
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-func truncateLog(s string) string {
-	const max = 96 * 1024
-	if len(s) <= max {
-		return s
-	}
-	return s[len(s)-max:]
 }

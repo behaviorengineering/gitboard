@@ -765,14 +765,32 @@ function appearancePullDirty(app, branch) {
   return trees.some((w) => !w.bare && String(w.branch || '') === name && w.dirty);
 }
 
+/** Display label for an appearance checkout (branch, tag, or detached SHA). */
+function appearanceRefLabel(app) {
+  if (!app) return '';
+  if (app.detached) {
+    const tag = String(app.tag || '').trim();
+    if (tag) return tag;
+    const sha = String(app.branch || '').trim();
+    return sha ? `detached ${sha}` : 'detached';
+  }
+  return String(app.branch || '').trim();
+}
+
 function appearanceStatusMarks(app) {
   const marks = el('span', 'appearance-marks');
   if (app.error) {
     marks.appendChild(iconMark(ICONS.alert, 'mark--bad', app.error));
     return marks;
   }
-  if (app.branch) {
-    const br = el('span', 'appearance-branch', app.detached ? `detached ${app.branch}` : app.branch);
+  if (app.branch || app.tag) {
+    const label = appearanceRefLabel(app);
+    const br = el('span', 'appearance-branch', label);
+    if (app.detached && app.tag && app.branch) {
+      br.title = `detached at ${app.branch}`;
+    } else if (app.detached && app.branch) {
+      br.title = 'detached HEAD';
+    }
     marks.appendChild(br);
   }
   if (app.dirty) {
@@ -829,6 +847,7 @@ function renderAppearances(local, project) {
       display_id: local.path,
       primary: true,
       branch: local.branch,
+      tag: local.tag,
       dirty: local.dirty,
       ahead: local.ahead,
       behind: local.behind,
@@ -972,14 +991,17 @@ function searchFields(row) {
   const localBits = [];
   if (local?.path) localBits.push(local.path);
   if (local?.branch) localBits.push(local.branch);
+  if (local?.tag) localBits.push(local.tag);
   for (const app of local?.appearances || []) {
     if (app.display_id) localBits.push(app.display_id);
     if (app.path) localBits.push(app.path);
     if (app.branch) localBits.push(app.branch);
+    if (app.tag) localBits.push(app.tag);
     if (app.parent_label) localBits.push(app.parent_label);
   }
   for (const wt of local?.worktrees || []) {
     if (wt.branch) localBits.push(wt.branch);
+    if (wt.tag) localBits.push(wt.tag);
     if (wt.path) localBits.push(wt.path);
   }
   return {

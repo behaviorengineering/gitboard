@@ -1,6 +1,10 @@
-package forge
+package remotegit
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/behaviorengineering/gitboard/internal/board"
+)
 
 // EnrichPruneHints marks local worktrees that are candidates for removal.
 // Safe: remote head gone, clean tree, forge has a merged PR/MR for the branch.
@@ -14,7 +18,7 @@ import "strings"
 //
 // Fail closed: when RemoteNamesOK is false (heads unknown or incomplete), no hints
 // are set. Remote membership never falls back to the UI-capped Branches list.
-func EnrichPruneHints(summary *ProjectSummary) {
+func EnrichPruneHints(summary *board.ProjectSummary) {
 	if summary == nil || summary.Local == nil {
 		return
 	}
@@ -52,7 +56,7 @@ func EnrichPruneHints(summary *ProjectSummary) {
 }
 
 // resolveDefaultBranch prefers the forge default branch over local origin/HEAD.
-func resolveDefaultBranch(summary *ProjectSummary) string {
+func resolveDefaultBranch(summary *board.ProjectSummary) string {
 	if summary == nil {
 		return ""
 	}
@@ -70,8 +74,8 @@ func resolveDefaultBranch(summary *ProjectSummary) string {
 	return strings.TrimSpace(summary.Local.DefaultBranch)
 }
 
-func newestMergedByBranch(merged []MergedReview) map[string]MergedReview {
-	out := make(map[string]MergedReview, len(merged))
+func newestMergedByBranch(merged []board.MergedReview) map[string]board.MergedReview {
+	out := make(map[string]board.MergedReview, len(merged))
 	for _, m := range merged {
 		name := trimBranch(m.Branch)
 		if name == "" {
@@ -92,10 +96,10 @@ func newestMergedByBranch(merged []MergedReview) map[string]MergedReview {
 }
 
 func applyPruneHint(
-	wt *LocalWorktree,
+	wt *board.LocalWorktree,
 	defaultName string,
 	remote, open map[string]struct{},
-	mergedByBranch map[string]MergedReview,
+	mergedByBranch map[string]board.MergedReview,
 	mergedOK bool,
 ) {
 	if wt == nil {
@@ -115,7 +119,7 @@ func applyPruneHint(
 		return
 	}
 	if m, ok := mergedByBranch[branch]; ok {
-		wt.PruneHint = PruneSafe
+		wt.PruneHint = board.PruneSafe
 		wt.MergedID = m.ID
 		wt.MergedURL = m.URL
 		wt.MergedAt = m.MergedAt
@@ -127,5 +131,5 @@ func applyPruneHint(
 	if _, stillOpen := open[branch]; stillOpen {
 		return
 	}
-	wt.PruneHint = PruneLikely
+	wt.PruneHint = board.PruneLikely
 }

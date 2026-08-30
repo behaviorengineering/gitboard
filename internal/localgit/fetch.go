@@ -93,6 +93,9 @@ func (c *OriginFetchCache) MarkSuccess(commonDir string) {
 
 // FetchOrigin runs git fetch --prune origin to refresh refs/remotes/origin/*.
 func (in *Inspector) FetchOrigin(ctx context.Context, repoPath string) error {
+	if in == nil {
+		return fmt.Errorf("inspector missing")
+	}
 	abs, err := ExpandPath(repoPath)
 	if err != nil {
 		return fmt.Errorf("expand path: %w", err)
@@ -107,6 +110,9 @@ func (in *Inspector) FetchOrigin(ctx context.Context, repoPath string) error {
 // On success it records the fetch time. On failure it returns the error and does not
 // update the cache (so the next call retries).
 func (in *Inspector) FetchOriginCached(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *OriginFetchCache) error {
+	if in == nil {
+		return fmt.Errorf("inspector missing")
+	}
 	abs, err := ExpandPath(repoPath)
 	if err != nil {
 		return fmt.Errorf("expand path: %w", err)

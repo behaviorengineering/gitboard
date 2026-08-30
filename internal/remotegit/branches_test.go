@@ -1,4 +1,4 @@
-package forge
+package remotegit
 
 import (
 	"testing"
@@ -48,14 +48,21 @@ func TestBranchAccumRemoteAndReviews(t *testing.T) {
 	}
 }
 
-func TestGithubHasConflict(t *testing.T) {
-	if !githubHasConflict("CONFLICTING", "") {
-		t.Fatal("mergeable CONFLICTING")
-	}
-	if !githubHasConflict("MERGEABLE", "DIRTY") {
-		t.Fatal("state DIRTY")
-	}
-	if githubHasConflict("MERGEABLE", "CLEAN") {
-		t.Fatal("clean should not conflict")
+func TestBranchAccumInjectableClock(t *testing.T) {
+	fixed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := newBranchAccum()
+	a.setNow(func() time.Time { return fixed })
+	recent := fixed.Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	staleTs := fixed.Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	a.addRemote("fresh", recent, "")
+	a.addRemote("old", staleTs, "")
+	list := a.list()
+	for _, b := range list {
+		if b.Name == "old" && !b.Stale {
+			t.Fatalf("old branch should be stale: %+v", b)
+		}
+		if b.Name == "fresh" && b.Stale {
+			t.Fatalf("fresh branch should not be stale: %+v", b)
+		}
 	}
 }

@@ -18,11 +18,11 @@ import (
 	"github.com/behaviorengineering/gitboard/internal/cliexec"
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/llm"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
 	"github.com/behaviorengineering/gitboard/internal/observability"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 	"github.com/behaviorengineering/gitboard/internal/server"
 	"github.com/behaviorengineering/gitboard/internal/syncproj"
 	"github.com/behaviorengineering/gitboard/internal/triage"
@@ -175,12 +175,13 @@ func runServe(args []string) error {
 	run := cliexec.New()
 	run.Timeout = 120 * time.Second
 	local := localgit.NewInspector(run)
-	dash := dashboard.New(forge.NewGitHub(run), forge.NewGitLab(run), local)
+	dash := dashboard.New(remotegit.NewGitHub(run), remotegit.NewGitLab(run), local)
 	llmClient := llm.New(doc.EffectiveLLM())
 	prune, err := pruneagent.New(config.AgentsDir(), run, llmClient)
 	if err != nil {
 		return fmt.Errorf("prune agent: %w", err)
 	}
+	cmds := dashboard.NewCommands(dash)
 	handler := server.NewMux(server.Options{
 		Addr:        *addr,
 		ConfigPath:  path,
@@ -188,6 +189,7 @@ func runServe(args []string) error {
 		Local:       doc.Local,
 		Upstream:    doc.Upstream,
 		Dash:        dash,
+		Commands:    cmds,
 		Triage:      &triage.Analyzer{LLM: llmClient},
 		Prune:       prune,
 		PollSeconds: doc.EffectivePollSeconds(),
@@ -198,7 +200,13 @@ func runServe(args []string) error {
 	log.Printf("gitboard: uses gh and glab; local roots=%d; AI triage via llm in config; agents %s",
 		len(doc.Local.Roots), config.AgentsDir())
 
-	srv := &http.Server{Addr: *addr, Handler: handler}
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.ListenAndServe()
@@ -307,8 +315,8 @@ func runSync(args []string) error {
 	run := cliexec.New()
 	run.Timeout = 120 * time.Second
 	lister := syncproj.ForgeLister{
-		GitHub: forge.NewGitHub(run),
-		GitLab: forge.NewGitLab(run),
+		GitHub: remotegit.NewGitHub(run),
+		GitLab: remotegit.NewGitLab(run),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/forge"
 	"github.com/behaviorengineering/gitboard/internal/localgit"
+	"github.com/behaviorengineering/gitboard/internal/remotegit"
 )
 
 // BadRequestError is a client/validation failure for prune APIs.
@@ -43,7 +44,8 @@ type PruneSafeRequest struct {
 }
 
 // PruneSafe re-checks forge prune hints, then removes the local checkout when still safe.
-func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeRequest) error {
+func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafeRequest) error {
+	s := c.Service
 	if s == nil || s.Local == nil {
 		return fmt.Errorf("local git inspector missing")
 	}
@@ -70,7 +72,7 @@ func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeR
 	}
 	abs = filepath.Clean(abs)
 
-	opts := forge.SummaryOpts{
+	opts := remotegit.SummaryOpts{
 		Fresh:     true,
 		Cache:     s.Cache,
 		HeadsTTL:  0,
@@ -91,7 +93,7 @@ func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeR
 	if !repoPathAllowed(row.Local, abs) {
 		return badRequest("worktree_path is not a mapped checkout for this project")
 	}
-	forge.EnrichPruneHints(&row)
+	remotegit.EnrichPruneHints(&row)
 
 	wt, ok := findSafeWorktree(row.Local, branch, abs)
 	if !ok {
@@ -110,9 +112,9 @@ func (s *Service) PruneSafe(ctx context.Context, doc config.File, req PruneSafeR
 	return nil
 }
 
-func findSafeWorktree(local *forge.LocalStatus, branch, absPath string) (forge.LocalWorktree, bool) {
+func findSafeWorktree(local *board.LocalStatus, branch, absPath string) (board.LocalWorktree, bool) {
 	if local == nil {
-		return forge.LocalWorktree{}, false
+		return board.LocalWorktree{}, false
 	}
 	branch = strings.TrimSpace(branch)
 	for _, wt := range local.Worktrees {
@@ -126,11 +128,11 @@ func findSafeWorktree(local *forge.LocalStatus, branch, absPath string) (forge.L
 		if wtPath != absPath {
 			continue
 		}
-		if wt.PruneHint != forge.PruneSafe {
+		if wt.PruneHint != board.PruneSafe {
 			continue
 		}
 		wt.Path = wtPath
 		return wt, true
 	}
-	return forge.LocalWorktree{}, false
+	return board.LocalWorktree{}, false
 }
