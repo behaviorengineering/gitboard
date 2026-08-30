@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // fakeExec returns canned git output matched by argv substrings (longest match wins).
 type fakeExec struct {
+	mu        sync.Mutex
 	responses map[string][]byte
 	errors    map[string]error
 	calls     []string
@@ -19,6 +21,8 @@ func (f *fakeExec) LookPath(name string) (string, error) {
 
 func (f *fakeExec) match(name string, args ...string) ([]byte, error) {
 	key := name + " " + strings.Join(args, " ")
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, key)
 	var best string
 	for substr := range f.responses {
