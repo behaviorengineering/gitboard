@@ -101,6 +101,7 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) boar
 			row := s.summarize(ctx, p, opts)
 			row.Local = s.attachLocal(ctx, p, disc, labelByKey, fresh, fetchTTL)
 			remotegit.EnrichPruneHints(&row)
+			row.Branches = filterHiddenBranches(row.Branches, doc.UI.HideBranches)
 			rows[i] = row
 		}(i, p)
 	}

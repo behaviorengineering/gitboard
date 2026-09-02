@@ -609,18 +609,19 @@ button.branch-inspect {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  column-gap: 0.55rem;
+  row-gap: 0;
   min-width: 22rem;
   max-width: 34rem;
 }
 
 .branch-item {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
-  column-gap: 0.55rem;
   row-gap: 0.15rem;
   padding: 0.45rem 0.15rem;
   border-bottom: 1px solid #243041;
@@ -708,6 +709,11 @@ button.branch-inspect {
   box-sizing: border-box;
 }
 
+.branch-local:empty {
+  padding: 0;
+  min-height: 0;
+}
+
 .branch-local-marks {
   display: inline-flex;
   align-items: center;
@@ -738,14 +744,19 @@ button.branch-inspect {
   box-sizing: border-box;
 }
 
+.branch-actions:empty {
+  padding: 0;
+  min-height: 0;
+}
+
 /* Alternating Local + CI cell backgrounds (skip header row). */
-.branch-list > .branch-item:not(.branch-item--head):nth-child(even) .branch-local,
-.branch-list > .branch-item:not(.branch-item--head):nth-child(even) .branch-actions {
+.branch-list > .branch-item:not(.branch-item--head):nth-child(even) .branch-local:not(:empty),
+.branch-list > .branch-item:not(.branch-item--head):nth-child(even) .branch-actions:not(:empty) {
   background: rgba(231, 236, 243, 0.04);
 }
 
-.branch-list > .branch-item:not(.branch-item--head):nth-child(odd) .branch-local,
-.branch-list > .branch-item:not(.branch-item--head):nth-child(odd) .branch-actions {
+.branch-list > .branch-item:not(.branch-item--head):nth-child(odd) .branch-local:not(:empty),
+.branch-list > .branch-item:not(.branch-item--head):nth-child(odd) .branch-actions:not(:empty) {
   background: rgba(231, 236, 243, 0.09);
 }
 
@@ -761,10 +772,21 @@ button.branch-inspect {
   margin-left: 0.1rem;
 }
 
-.branch-ci-slot {
+button.branch-triage {
+  display: inline-flex;
   width: 1.15rem;
   height: 1.15rem;
-  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.branch-triage:hover {
+  opacity: 0.9;
 }
 
 .branch-goto {
@@ -931,8 +953,9 @@ button.branch-pull-ff.is-busy {
   background: rgba(240, 193, 75, 0.12);
 }
 
-.branch-investigate:disabled {
-  opacity: 0.5;
+button.branch-investigate.is-busy,
+button.branch-prune-safe.is-busy {
+  opacity: 0.85;
   cursor: wait;
 }
 
@@ -983,6 +1006,18 @@ button.branch-pull-ff.is-busy {
   width: 1rem;
   height: 1rem;
   display: block;
+}
+
+@keyframes mark-spin {
+  to { transform: rotate(360deg); }
+}
+
+.mark-icon--spin {
+  animation: mark-spin 0.75s linear infinite;
+}
+
+button.is-busy {
+  cursor: wait;
 }
 
 .mark--default { color: var(--link); }
@@ -1177,6 +1212,10 @@ a { color: var(--link); }
   border-radius: 3px;
   padding: 0.4rem 0.75rem;
   cursor: pointer;
+}
+
+.modal-btn[hidden] {
+  display: none;
 }
 
 .modal-btn .mark-icon {

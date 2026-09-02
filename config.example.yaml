@@ -24,6 +24,11 @@ openinference:
 
 ui:
   poll_seconds: 30
+  # Optional path.Match patterns; empty / omitted = show all branches.
+  # Hides matching names from the dashboard Branches column only.
+  # hide_branches:
+  #   - majordomo-context/*
+  #   - dependabot/*
 
 # Server-side forge cache TTLs (0 = always refetch that slice).
 upstream:

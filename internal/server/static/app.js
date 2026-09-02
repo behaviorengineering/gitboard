@@ -24,6 +24,7 @@ const ICONS = {
   trash: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h-3ZM2.25 3.75a.75.75 0 0 1 0-1.5h11.5a.75.75 0 0 1 0 1.5H13v9.5A1.75 1.75 0 0 1 11.25 15h-6.5A1.75 1.75 0 0 1 3 13.25v-9.5Zm1.5 0v9.5c0 .138.112.25.25.25h6.5a.25.25 0 0 0 .25-.25v-9.5Zm2 1.75a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75Zm3 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75Z"/></svg>`,
   search: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"/></svg>`,
   pull: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8.75 1.75a.75.75 0 0 0-1.5 0v7.19L4.72 6.41a.75.75 0 0 0-1.06 1.06l3.75 3.75a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.94ZM2.75 13.5a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5Z"/></svg>`,
+  spinner: `<svg class="mark-icon mark-icon--spin" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 6.5 6.5h-1.5A5 5 0 1 1 8 3V1.5Z"/></svg>`,
 };
 
 function setButtonLabel(btn, svg, label) {
@@ -32,6 +33,26 @@ function setButtonLabel(btn, svg, label) {
   if (svg) btn.insertAdjacentHTML('beforeend', svg);
   const text = el('span', 'btn-label', label);
   btn.appendChild(text);
+}
+
+/** Disable a button and show the spinner glyph until setButtonIdle. */
+function setButtonBusy(btn, label, title) {
+  if (!btn) return;
+  btn.disabled = true;
+  btn.classList.add('is-busy');
+  btn.setAttribute('aria-busy', 'true');
+  setButtonLabel(btn, ICONS.spinner, label);
+  if (title != null) btn.title = title;
+}
+
+/** Re-enable a button and restore its normal icon + label. */
+function setButtonIdle(btn, { svg, label, title } = {}) {
+  if (!btn) return;
+  btn.disabled = false;
+  btn.classList.remove('is-busy');
+  btn.removeAttribute('aria-busy');
+  if (svg != null || label != null) setButtonLabel(btn, svg, label);
+  if (title != null) btn.title = title;
 }
 
 /** @type {null | ((ok: boolean) => void)} */
@@ -168,9 +189,8 @@ async function confirmAndRun(opts, work) {
     cancelBtn.hidden = true;
     cancelBtn.disabled = true;
   }
-  confirmBtn.disabled = true;
   confirmBtn.className = 'modal-btn modal-btn--ok';
-  setButtonLabel(confirmBtn, opts.busyIcon || null, opts.busyLabel || 'Working…');
+  setButtonBusy(confirmBtn, opts.busyLabel || 'Working…');
   if (modal) modal.classList.toggle('modal--wide', Boolean(opts.wide));
   root.hidden = false;
 
@@ -179,7 +199,7 @@ async function confirmAndRun(opts, work) {
   } finally {
     root.hidden = true;
     if (modal) modal.classList.remove('modal--wide');
-    confirmBtn.disabled = false;
+    setButtonIdle(confirmBtn);
     if (cancelBtn) {
       cancelBtn.hidden = false;
       cancelBtn.disabled = false;
@@ -362,7 +382,6 @@ function localColumn(wts, local, branchName, project) {
     return cell;
   }
   if (!local.mapped) {
-    cell.appendChild(el('span', 'branch-local-empty', ''));
     cell.title = 'Local checkout not mapped';
     return cell;
   }
@@ -508,11 +527,7 @@ function appendPullButton(cell, { sync, project, branchName, repoPath, dirty }) 
   const btn = el('button', 'branch-pull-ff');
   btn.type = 'button';
   if (pending) {
-    btn.disabled = true;
-    btn.classList.add('is-busy');
-    btn.setAttribute('aria-busy', 'true');
-    setButtonLabel(btn, ICONS.pull, 'pulling…');
-    btn.title = `Pulling ${branchName} from origin…`;
+    setButtonBusy(btn, 'pulling…', `Pulling ${branchName} from origin…`);
   } else {
     setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
     btn.title = `Fast-forward local ${branchName} from origin (${sync.behind} behind)`;
@@ -524,6 +539,7 @@ function appendPullButton(cell, { sync, project, branchName, repoPath, dirty }) 
         branch: branchName,
         repo_path: repoPath,
         behind: sync.behind,
+        button: btn,
       });
     });
   }
@@ -678,7 +694,7 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
   const ci = ciMark(b.ci_status);
   if (ci) {
     if (failed && (b.run_id || project.ci?.run_id)) {
-      const triageBtn = el('button', 'branch-ci-slot branch-triage');
+      const triageBtn = el('button', 'branch-triage');
       triageBtn.type = 'button';
       triageBtn.title = 'Show failed jobs and AI triage';
       triageBtn.setAttribute('aria-label', triageBtn.title);
@@ -690,8 +706,6 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
     } else {
       actions.appendChild(ci);
     }
-  } else {
-    actions.appendChild(el('span', 'branch-ci-slot'));
   }
 
   const ciURL = safeHref(b.ci_url);
@@ -715,8 +729,6 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
     go.setAttribute('aria-label', go.title);
     go.insertAdjacentHTML('beforeend', ICONS.external);
     actions.appendChild(go);
-  } else {
-    actions.appendChild(el('span', 'branch-ci-slot'));
   }
 
   item.appendChild(actions);
@@ -1397,10 +1409,7 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
     danger: true,
   });
   if (!ok) return;
-  if (button) {
-    button.disabled = true;
-    setButtonLabel(button, ICONS.trash, 'removing…');
-  }
+  setButtonBusy(button, 'removing…');
   if (status) status.textContent = `Removing ${label}…`;
   try {
     const res = await fetch('/api/prune/safe', {
@@ -1417,14 +1426,14 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (status) status.textContent = `Remove failed: ${msg}`;
-    if (button) {
-      button.disabled = false;
-      setButtonLabel(button, ICONS.trash, 'safe to remove');
-    }
+    setButtonIdle(button, {
+      svg: ICONS.trash,
+      label: 'safe to remove',
+    });
   }
 }
 
-async function pullFFCheckout({ project_id, branch, repo_path }) {
+async function pullFFCheckout({ project_id, branch, repo_path, behind, button }) {
   const status = document.getElementById('status');
   if (!project_id || !branch || !repo_path) {
     if (status) status.textContent = 'Missing project, branch, or repo path';
@@ -1435,7 +1444,7 @@ async function pullFFCheckout({ project_id, branch, repo_path }) {
   if (pendingPulls.has(key)) return;
 
   pendingPulls.add(key);
-  applyBoard();
+  setButtonBusy(button, 'pulling…', `Pulling ${branch} from origin…`);
   if (status) status.textContent = pullStatusText();
 
   try {
@@ -1451,9 +1460,13 @@ async function pullFFCheckout({ project_id, branch, repo_path }) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     pullFailures.push({ label, path: repo_path, message: msg });
+    setButtonIdle(button, {
+      svg: ICONS.pull,
+      label: `pull ↓${behind}`,
+      title: `Fast-forward local ${branch} from origin (${behind} behind)`,
+    });
   } finally {
     pendingPulls.delete(key);
-    applyBoard();
     if (pendingPulls.size > 0) {
       if (status) status.textContent = pullStatusText();
     } else {
@@ -1464,7 +1477,7 @@ async function pullFFCheckout({ project_id, branch, repo_path }) {
 
 async function investigatePrune(body, btn) {
   const status = document.getElementById('status');
-  if (btn) btn.disabled = true;
+  setButtonBusy(btn, 'investigating…');
   if (status) status.textContent = `Investigating ${body.project_id} / ${body.branch}…`;
   try {
     const res = await fetch('/api/agents/prune/investigate', {
@@ -1506,7 +1519,11 @@ async function investigatePrune(body, btn) {
       body: msg,
     });
   } finally {
-    if (btn) btn.disabled = false;
+    setButtonIdle(btn, {
+      svg: ICONS.search,
+      label: 'Investigate',
+      title: 'Gather evidence into an agent session',
+    });
   }
 }
 
@@ -1541,8 +1558,11 @@ async function showFailures(project, branch) {
         row.appendChild(a);
       }
     }
-    const ai = el('button', '', 'AI triage');
-    ai.addEventListener('click', () => runTriage(project, job, runID));
+    const ai = el('button', '');
+    setButtonLabel(ai, ICONS.search, 'AI triage');
+    ai.addEventListener('click', () => {
+      void runTriage(project, job, runID, ai);
+    });
     row.appendChild(ai);
     jobsRoot.appendChild(row);
   }
@@ -1551,41 +1571,55 @@ async function showFailures(project, branch) {
   }
 }
 
-async function runTriage(project, job, runID) {
+async function runTriage(project, job, runID, button) {
   const triage = document.getElementById('triage');
   triage.hidden = false;
   triage.textContent = 'Running triage…';
-  const res = await fetch('/api/triage', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      project_id: project.id,
-      run_id: runID || project.ci?.run_id || '',
-      job_id: job.id,
-      job_name: job.name,
-    }),
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    triage.textContent = text;
-    return;
+  setButtonBusy(button, 'triaging…');
+  try {
+    const res = await fetch('/api/triage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: project.id,
+        run_id: runID || project.ci?.run_id || '',
+        job_id: job.id,
+        job_name: job.name,
+      }),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      triage.textContent = text;
+      return;
+    }
+    const data = JSON.parse(text);
+    if (data.unavailable) {
+      triage.textContent = data.unavailable;
+      return;
+    }
+    const lines = [
+      data.summary && `Summary: ${data.summary}`,
+      data.root_cause && `Root cause: ${data.root_cause}`,
+      data.fix_steps?.length && `Fix steps:\n${data.fix_steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+      data.confidence && `Confidence: ${data.confidence}`,
+      data.model && `Model: ${data.model}`,
+    ].filter(Boolean);
+    triage.textContent = lines.join('\n\n');
+  } finally {
+    setButtonIdle(button, { svg: ICONS.search, label: 'AI triage' });
   }
-  const data = JSON.parse(text);
-  if (data.unavailable) {
-    triage.textContent = data.unavailable;
-    return;
-  }
-  const lines = [
-    data.summary && `Summary: ${data.summary}`,
-    data.root_cause && `Root cause: ${data.root_cause}`,
-    data.fix_steps?.length && `Fix steps:\n${data.fix_steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
-    data.confidence && `Confidence: ${data.confidence}`,
-    data.model && `Model: ${data.model}`,
-  ].filter(Boolean);
-  triage.textContent = lines.join('\n\n');
 }
 
-document.getElementById('refresh').addEventListener('click', () => { void loadDashboard({ fresh: true }); });
+document.getElementById('refresh').addEventListener('click', () => {
+  const btn = document.getElementById('refresh');
+  setButtonBusy(btn, 'refreshing…', 'Bypass upstream cache and reload');
+  void loadDashboard({ fresh: true }).finally(() => {
+    setButtonIdle(btn, {
+      label: 'Refresh',
+      title: 'Bypass upstream cache and reload',
+    });
+  });
+});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void loadDashboard({ quiet: true });
 });

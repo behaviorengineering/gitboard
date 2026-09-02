@@ -110,6 +110,51 @@ func TestCollectWithFakeForge(t *testing.T) {
 	}
 }
 
+func TestCollectHideBranches(t *testing.T) {
+	fx := dualHostFake()
+	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	doc := config.File{
+		UI: config.UI{HideBranches: []string{"feat/*"}},
+		Projects: []config.Project{
+			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+		},
+	}
+	out := s.Collect(context.Background(), doc, true)
+	if len(out.Projects) != 1 {
+		t.Fatalf("projects: %d", len(out.Projects))
+	}
+	gh := out.Projects[0]
+	if gh.Error != "" {
+		t.Fatalf("gh-app: %+v", gh)
+	}
+	for _, b := range gh.Branches {
+		if b.Name == "feat/x" {
+			t.Fatalf("feat/x should be hidden from Branches: %+v", gh.Branches)
+		}
+	}
+	foundMain := false
+	for _, b := range gh.Branches {
+		if b.Name == "main" {
+			foundMain = true
+			break
+		}
+	}
+	if !foundMain {
+		t.Fatalf("main should remain: %+v", gh.Branches)
+	}
+	// Prune data must still see the remote head.
+	hasRemote := false
+	for _, name := range gh.RemoteNames {
+		if name == "feat/x" {
+			hasRemote = true
+			break
+		}
+	}
+	if !hasRemote {
+		t.Fatalf("RemoteNames should still include feat/x: %+v", gh.RemoteNames)
+	}
+}
+
 func TestCollectNilClients(t *testing.T) {
 	s := &Service{}
 	doc := config.File{
