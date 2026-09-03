@@ -10,7 +10,8 @@ import (
 // RemoveSafeCheckout drops a local branch checkout that the board marked safe to remove.
 //
 // Linked worktree: remove the worktree path, then delete the branch from the main tree.
-// Main worktree on the branch: switch to defaultBranch, then delete the branch.
+// Main worktree on the branch: fast-forward defaultBranch from origin (when behind),
+// switch to defaultBranch, then delete the branch.
 //
 // Uses `git branch -D` because squash-merged branches are often not ancestors of default.
 // Callers must re-check forge prune safety first. Branch names are validated; dirty trees refuse.
@@ -100,6 +101,10 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 		}
 		if got := strings.TrimSpace(string(cur)); got != "" && got != branch {
 			return fmt.Errorf("checkout is on %q, not %q", got, branch)
+		}
+		// Land on an up-to-date default instead of a stale tip after switch.
+		if err := in.ensureBranchFFFromOrigin(ctx, abs, defaultBranch); err != nil {
+			return fmt.Errorf("update default branch %s before remove: %w", defaultBranch, err)
 		}
 		if _, err := in.git(ctx, abs, "switch", defaultBranch); err != nil {
 			return fmt.Errorf("switch to %s: %w", defaultBranch, err)

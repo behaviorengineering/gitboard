@@ -455,6 +455,7 @@ function localColumn(wts, local, branchName, project) {
       branchName,
       repoPath,
       dirty: Boolean(preferred?.dirty),
+      whyDirty: preferred?.dirty ? `Pull blocked: ${preferred?.appearance_label || preferred?.path || 'worktree'} is dirty` : '',
     });
   }
   return cell;
@@ -488,6 +489,10 @@ async function flushPullBatch() {
   if (pendingPulls.size > 0) return;
   const failures = pullFailures.splice(0, pullFailures.length);
   const status = document.getElementById('status');
+  // Wait out an in-flight Refresh so this reload is not dropped by `if (loading) return`.
+  for (let i = 0; i < 60 && loading; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
   try {
     await loadDashboard({ quiet: true, fresh: true });
   } catch {
@@ -518,16 +523,20 @@ function pullActionKey(projectID, branch, repoPath) {
   return `${projectID}\0${branch}\0${repoPath}`;
 }
 
-function appendPullButton(cell, { sync, project, branchName, repoPath, dirty }) {
+function appendPullButton(cell, { sync, project, branchName, repoPath, dirty, whyDirty }) {
   if (!sync?.behind || sync.ahead) return;
   if (!project?.id || !branchName || !repoPath) return;
-  if (dirty) return;
   const key = pullActionKey(project.id, branchName, repoPath);
   const pending = pendingPulls.has(key);
   const btn = el('button', 'branch-pull-ff');
   btn.type = 'button';
   if (pending) {
     setButtonBusy(btn, 'pulling…', `Pulling ${branchName} from origin…`);
+  } else if (dirty) {
+    setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
+    btn.disabled = true;
+    btn.title = whyDirty || `Pull blocked: working tree has local changes`;
+    btn.classList.add('is-blocked');
   } else {
     setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
     btn.title = `Fast-forward local ${branchName} from origin (${sync.behind} behind)`;
@@ -544,6 +553,29 @@ function appendPullButton(cell, { sync, project, branchName, repoPath, dirty }) 
     });
   }
   cell.appendChild(btn);
+}
+
+/** Appearances list used for project title (same shape as renderAppearances). */
+function localAppearances(local) {
+  if (!local?.mapped) return [];
+  if (Array.isArray(local.appearances) && local.appearances.length) {
+    return local.appearances;
+  }
+  if (!local.path) return [];
+  return [{
+    path: local.path,
+    display_id: local.path,
+    primary: true,
+    branch: local.branch,
+    tag: local.tag,
+    dirty: local.dirty,
+    ahead: local.ahead,
+    behind: local.behind,
+    detached: local.detached,
+    error: local.error,
+    origin_sync: local.origin_sync,
+    worktrees: local.worktrees,
+  }];
 }
 
 function branchesCell(branches, host, project) {
@@ -851,23 +883,7 @@ function renderAppearanceDetail(app) {
 }
 
 function renderAppearances(local, project) {
-  if (!local?.mapped) return null;
-  const apps = Array.isArray(local.appearances) && local.appearances.length
-    ? local.appearances
-    : (local.path ? [{
-      path: local.path,
-      display_id: local.path,
-      primary: true,
-      branch: local.branch,
-      tag: local.tag,
-      dirty: local.dirty,
-      ahead: local.ahead,
-      behind: local.behind,
-      detached: local.detached,
-      error: local.error,
-      origin_sync: local.origin_sync,
-      worktrees: local.worktrees,
-    }] : []);
+  const apps = localAppearances(local);
   if (!apps.length) return null;
 
   const wrap = el('div', 'project-appearances');
@@ -901,6 +917,7 @@ function renderAppearances(local, project) {
       branchName,
       repoPath: app.path,
       dirty: appearancePullDirty(app, branchName),
+      whyDirty: app.dirty ? `Pull blocked: ${app.display_id || app.path || 'checkout'} is dirty` : '',
     });
     row.appendChild(line);
     row.appendChild(detail);
@@ -1457,6 +1474,12 @@ async function pullFFCheckout({ project_id, branch, repo_path, behind, button })
     if (!res.ok) {
       throw new Error(text.trim() || `HTTP ${res.status}`);
     }
+    setButtonIdle(button, {
+      svg: ICONS.pull,
+      label: 'pulled',
+      title: `Fast-forwarded ${branch} from origin`,
+    });
+    if (button) button.disabled = true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     pullFailures.push({ label, path: repo_path, message: msg });

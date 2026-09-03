@@ -104,7 +104,10 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 		defaultBranch = "main"
 	}
 	if err := s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch); err != nil {
-		if errors.Is(err, localgit.ErrInvalidBranch) || errors.Is(err, localgit.ErrDirtyTree) {
+		if errors.Is(err, localgit.ErrInvalidBranch) ||
+			errors.Is(err, localgit.ErrDirtyTree) ||
+			errors.Is(err, localgit.ErrDiverged) ||
+			errors.Is(err, localgit.ErrMissingBranch) {
 			return badRequest(err.Error())
 		}
 		return fmt.Errorf("remove checkout: %w", err)

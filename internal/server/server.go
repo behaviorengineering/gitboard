@@ -44,7 +44,7 @@ type Options struct {
 	// (so gitboard sync and ui edits update a running board).
 	ConfigPath string
 	// Doc is the initial full config snapshot (from config.Load).
-	Doc config.File
+	Doc         config.File
 	Dash        *dashboard.Service
 	Commands    *dashboard.Commands
 	Triage      *triage.Analyzer
