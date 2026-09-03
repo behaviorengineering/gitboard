@@ -185,9 +185,7 @@ func runServe(args []string) error {
 	handler := server.NewMux(server.Options{
 		Addr:        *addr,
 		ConfigPath:  path,
-		Projects:    doc.Projects,
-		Local:       doc.Local,
-		Upstream:    doc.Upstream,
+		Doc:         doc,
 		Dash:        dash,
 		Commands:    cmds,
 		Triage:      &triage.Analyzer{LLM: llmClient},

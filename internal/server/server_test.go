@@ -84,12 +84,69 @@ func testMux(t *testing.T, fx *fakeExec, triageA *triage.Analyzer) http.Handler 
 	}
 	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
 	return server.NewMux(server.Options{
-		Projects:    projects,
+		Doc:         config.File{Projects: projects},
 		Dash:        dash,
 		Commands:    dashboard.NewCommands(dash),
 		Triage:      triageA,
 		PollSeconds: 42,
 	})
+}
+
+func TestDashboardHidesBranchesFromInitialDoc(t *testing.T) {
+	fx := &fakeExec{
+		responses: map[string][]byte{
+			"auth status":         []byte(""),
+			"repos/acme/app --jq": []byte(`{"default":"main"}`),
+			"repos/acme/app/branches": []byte(`[
+				{"name":"main","commit":{"commit":{"committer":{"date":"2026-01-01T00:00:00Z"}}}},
+				{"name":"majordomo-context/gitboard","commit":{"commit":{"committer":{"date":"2026-01-02T00:00:00Z"}}}}
+			]`),
+			"run list":       []byte(`[]`),
+			"--state open":   []byte(`[]`),
+			"--state merged": []byte(`[]`),
+		},
+	}
+	projects := []config.Project{
+		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	}
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	mux := server.NewMux(server.Options{
+		Doc: config.File{
+			Projects: projects,
+			UI:       config.UI{HideBranches: []string{"majordomo-context/*"}},
+		},
+		Dash:        dash,
+		Commands:    dashboard.NewCommands(dash),
+		PollSeconds: 30,
+	})
+	res := httptest.NewRequest(http.MethodGet, "/api/dashboard?fresh=1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	}
+	var payload board.Dashboard
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Projects) != 1 {
+		t.Fatalf("projects: %d", len(payload.Projects))
+	}
+	for _, b := range payload.Projects[0].Branches {
+		if strings.HasPrefix(b.Name, "majordomo-context/") {
+			t.Fatalf("hidden branch still present: %+v", payload.Projects[0].Branches)
+		}
+	}
+	foundMain := false
+	for _, b := range payload.Projects[0].Branches {
+		if b.Name == "main" {
+			foundMain = true
+			break
+		}
+	}
+	if !foundMain {
+		t.Fatalf("main missing: %+v", payload.Projects[0].Branches)
+	}
 }
 
 func TestHealthAndMeta(t *testing.T) {
@@ -193,7 +250,7 @@ func TestPruneSafeValidation(t *testing.T) {
 	}
 	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
-		Projects:    projects,
+		Doc:         config.File{Projects: projects},
 		Dash:        dash,
 		Commands:    dashboard.NewCommands(dash),
 		PollSeconds: 42,
@@ -305,7 +362,7 @@ func TestPruneInvestigateLLM(t *testing.T) {
 	}
 	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
-		Projects: projects,
+		Doc:      config.File{Projects: projects},
 		Dash:     dash,
 		Commands: dashboard.NewCommands(dash),
 		Prune:    prune,
@@ -356,7 +413,7 @@ func TestPruneInvestigateLLMFallback(t *testing.T) {
 	}
 	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
-		Projects: projects,
+		Doc:      config.File{Projects: projects},
 		Dash:     dash,
 		Commands: dashboard.NewCommands(dash),
 		Prune:    prune,

@@ -40,12 +40,11 @@ const (
 // Options configures the HTTP server.
 type Options struct {
 	Addr string
-	// ConfigPath, when set, reloads projects/local/upstream/poll from disk
-	// when the file mtime advances (so gitboard sync updates a running board).
-	ConfigPath  string
-	Projects    []config.Project
-	Local       config.Local
-	Upstream    config.Upstream
+	// ConfigPath, when set, reloads the full config file when mtime advances
+	// (so gitboard sync and ui edits update a running board).
+	ConfigPath string
+	// Doc is the initial full config snapshot (from config.Load).
+	Doc         config.File
 	Dash        *dashboard.Service
 	Commands    *dashboard.Commands
 	Triage      *triage.Analyzer
@@ -67,11 +66,11 @@ func NewMux(opts Options) http.Handler {
 			opts.Dash.ClearCaches()
 		}
 	}
-	live := newConfigLive(opts.ConfigPath, config.File{
-		Projects: opts.Projects,
-		Local:    opts.Local,
-		Upstream: opts.Upstream,
-	}, opts.PollSeconds, clearCaches)
+	poll := opts.PollSeconds
+	if poll == 0 {
+		poll = opts.Doc.EffectivePollSeconds()
+	}
+	live := newConfigLive(opts.ConfigPath, opts.Doc, poll, clearCaches)
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {

@@ -54,10 +54,25 @@ User config lives at `~/.config/gitboard/config.yaml` (or `$XDG_CONFIG_HOME/gitb
 | Section | Purpose |
 |---------|---------|
 | `llm` | Optional AI triage (`base_url`, `model`, `api_key`) |
-| `ui` | Dashboard settings (`poll_seconds`, default 30; `0` disables) |
+| `ui` | Dashboard settings (see below) |
 | `local` | Disk roots to scan for checkouts / worktrees (`roots`) |
 | `sync` | GitHub orgs and GitLab groups to discover |
 | `projects` | Curated tracked repos (written by `sync`; optional `local_path`) |
+
+`ui` fields:
+
+| Key | Purpose |
+|-----|---------|
+| `poll_seconds` | Browser auto-refresh interval (default 30; `0` disables) |
+| `hide_branches` | Optional `path.Match` patterns; matching branch names are omitted from the Branches column only (prune / forge data unchanged). Empty or omitted shows all. |
+
+```yaml
+ui:
+  poll_seconds: 30
+  hide_branches:
+    - majordomo-context/*
+    - dependabot/*
+```
 
 Override path with `GITBOARD_CONFIG`. LLM fields also accept env overrides: `GITBOARD_LLM_BASE_URL`, `GITBOARD_LLM_MODEL`, `GITBOARD_LLM_API_KEY`, `POLYPUS_BASE_URL`, `OPENAI_API_KEY`. Poll interval: `GITBOARD_POLL_SECONDS`.
 

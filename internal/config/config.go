@@ -84,6 +84,9 @@ type UI struct {
 	// PollSeconds is the browser auto-refresh interval in seconds.
 	// nil / omitted → default 30; 0 disables polling.
 	PollSeconds *int `yaml:"poll_seconds"`
+	// HideBranches are path.Match patterns for branch names omitted from the
+	// dashboard Branches column. Empty / omitted → show all (default off).
+	HideBranches []string `yaml:"hide_branches,omitempty" json:"hide_branches,omitempty"`
 }
 
 // Upstream holds server-side TTL seconds for forge CLI slices.
@@ -125,6 +128,11 @@ openinference:
 
 ui:
   poll_seconds: 30
+  # Optional path.Match patterns; empty / omitted = show all.
+  # Hides matching names from the Branches column only (prune data unchanged).
+  # hide_branches:
+  #   - majordomo-context/*
+  #   - dependabot/*
 
 # Server-side forge cache TTLs (0 = always refetch that slice).
 upstream:

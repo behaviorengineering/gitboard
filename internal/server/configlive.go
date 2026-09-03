@@ -37,8 +37,8 @@ func newConfigLive(path string, doc config.File, poll int, clearCaches func()) *
 }
 
 // snapshot returns the current config. When ConfigPath is set and the file
-// mtime is newer, it reloads from disk. On reload failure it keeps the last
-// good snapshot. Project-set changes clear the forge cache.
+// mtime is newer, it reloads the full File from disk. On reload failure it
+// keeps the last good snapshot. Project-set changes clear the forge cache.
 func (c *configLive) snapshot() (config.File, int) {
 	if c == nil {
 		return config.File{}, config.DefaultPollSeconds

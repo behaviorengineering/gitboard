@@ -125,6 +125,16 @@ func (in *Inspector) PullFFOnly(ctx context.Context, repoPath, branch string) er
 	return nil
 }
 
+// ensureBranchFFFromOrigin fast-forwards branch from origin when behind-only.
+// Already up to date is success. Diverged or dirty trees fail.
+func (in *Inspector) ensureBranchFFFromOrigin(ctx context.Context, repoPath, branch string) error {
+	err := in.PullFFOnly(ctx, repoPath, branch)
+	if err == nil || errors.Is(err, ErrUpToDate) {
+		return nil
+	}
+	return err
+}
+
 func (in *Inspector) worktreeOnBranch(ctx context.Context, dir, branch string) (path string, ok bool) {
 	trees, err := in.listWorktrees(ctx, dir)
 	if err != nil {
