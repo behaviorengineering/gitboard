@@ -1,0 +1,134 @@
+id: majordomo-typology-4239514440
+scope:
+    modules:
+        - .
+slices:
+    - id: board
+      objective: Core domain logic for board state management.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/board/overview.md
+            - kind: components
+              path: docs/develop/board/components.md
+    - id: config
+      objective: Centralized configuration management for the repository.
+      owns:
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/config/overview.md
+            - kind: components
+              path: docs/develop/config/components.md
+    - id: dashboard
+      objective: Visual representation and monitoring of gitboard state.
+      owns:
+        - id: internal-dashboard
+          path: ./internal/dashboard
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/dashboard/overview.md
+            - kind: components
+              path: docs/develop/dashboard/components.md
+    - id: gitboard
+      objective: Main application entry point and orchestrator.
+      owns:
+        - id: internal-server
+          path: ./internal/server
+          layer: domain
+        - id: internal-syncproj
+          path: ./internal/syncproj
+          layer: domain
+        - id: internal-observability
+          path: ./internal/observability
+          layer: domain
+        - id: gitboard-pruner
+          path: ./internal/pruneagent
+          layer: domain
+        - id: gitboard-triage
+          path: ./internal/triage
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/gitboard/overview.md
+            - kind: components
+              path: docs/develop/gitboard/components.md
+            - kind: cli
+              path: docs/develop/gitboard/cli.md
+    - id: git-engine
+      objective: Unified handling of local and remote git operations.
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/localgit/overview.md
+            - kind: components
+              path: docs/develop/localgit/components.md
+    - id: gitboard-llm-gateway
+      objective: Capability provider for LLM-based operations.
+      owns:
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/llm/overview.md
+            - kind: components
+              path: docs/develop/llm/components.md
+sliceBindings:
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: gitboard-llm-gateway
+      kind: reads
+    - from: gitboard
+      to: git-engine
+      kind: reads
+    - from: gitboard
+      to: git-engine
+      kind: reads
+    - from: gitboard-llm-gateway
+      to: config
+      kind: reads
+    - from: dashboard
+      to: board
+      kind: reads
+    - from: dashboard
+      to: config
+      kind: reads
+    - from: dashboard
+      to: git-engine
+      kind: reads
+    - from: git-engine
+      to: board
+      kind: reads
+    - from: git-engine
+      to: config
+      kind: reads

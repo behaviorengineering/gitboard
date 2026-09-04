@@ -1,0 +1,263 @@
+id: majordomo-typology-4239514440
+scope:
+    modules:
+        - .
+slices:
+    - id: board
+      objective: ""
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/board/overview.md
+            - kind: components
+              path: docs/develop/board/components.md
+    - id: cliexec
+      objective: ""
+      surfaces:
+        - id: cliexec-cli
+          kind: cli
+          components:
+            - id: internal-cliexec
+              path: ./internal/cliexec
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/cliexec/overview.md
+            - kind: components
+              path: docs/develop/cliexec/components.md
+            - kind: cli
+              path: docs/develop/cliexec/cli.md
+    - id: config
+      objective: ""
+      owns:
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/config/overview.md
+            - kind: components
+              path: docs/develop/config/components.md
+    - id: dashboard
+      objective: ""
+      owns:
+        - id: internal-dashboard
+          path: ./internal/dashboard
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/dashboard/overview.md
+            - kind: components
+              path: docs/develop/dashboard/components.md
+    - id: gitboard
+      objective: ""
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/gitboard/overview.md
+            - kind: components
+              path: docs/develop/gitboard/components.md
+            - kind: cli
+              path: docs/develop/gitboard/cli.md
+    - id: llm
+      objective: ""
+      owns:
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/llm/overview.md
+            - kind: components
+              path: docs/develop/llm/components.md
+    - id: localgit
+      objective: ""
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/localgit/overview.md
+            - kind: components
+              path: docs/develop/localgit/components.md
+    - id: observability
+      objective: ""
+      owns:
+        - id: internal-observability
+          path: ./internal/observability
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/observability/overview.md
+            - kind: components
+              path: docs/develop/observability/components.md
+    - id: pruneagent
+      objective: ""
+      owns:
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/pruneagent/overview.md
+            - kind: components
+              path: docs/develop/pruneagent/components.md
+    - id: remotegit
+      objective: ""
+      owns:
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/remotegit/overview.md
+            - kind: components
+              path: docs/develop/remotegit/components.md
+    - id: server
+      objective: ""
+      owns:
+        - id: internal-server
+          path: ./internal/server
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/server/overview.md
+            - kind: components
+              path: docs/develop/server/components.md
+    - id: syncproj
+      objective: ""
+      owns:
+        - id: internal-syncproj
+          path: ./internal/syncproj
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/syncproj/overview.md
+            - kind: components
+              path: docs/develop/syncproj/components.md
+    - id: triage
+      objective: ""
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/triage/overview.md
+            - kind: components
+              path: docs/develop/triage/components.md
+sliceBindings:
+    - from: triage
+      to: config
+      kind: reads
+    - from: triage
+      to: llm
+      kind: reads
+    - from: gitboard
+      to: cliexec
+      kind: reads
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: llm
+      kind: reads
+    - from: gitboard
+      to: localgit
+      kind: reads
+    - from: gitboard
+      to: observability
+      kind: reads
+    - from: gitboard
+      to: pruneagent
+      kind: reads
+    - from: gitboard
+      to: remotegit
+      kind: reads
+    - from: gitboard
+      to: server
+      kind: reads
+    - from: gitboard
+      to: syncproj
+      kind: reads
+    - from: gitboard
+      to: triage
+      kind: reads
+    - from: llm
+      to: config
+      kind: reads
+    - from: syncproj
+      to: config
+      kind: reads
+    - from: syncproj
+      to: remotegit
+      kind: reads
+    - from: dashboard
+      to: board
+      kind: reads
+    - from: dashboard
+      to: config
+      kind: reads
+    - from: dashboard
+      to: localgit
+      kind: reads
+    - from: dashboard
+      to: remotegit
+      kind: reads
+    - from: localgit
+      to: cliexec
+      kind: reads
+    - from: pruneagent
+      to: cliexec
+      kind: reads
+    - from: pruneagent
+      to: llm
+      kind: reads
+    - from: pruneagent
+      to: localgit
+      kind: reads
+    - from: remotegit
+      to: board
+      kind: reads
+    - from: remotegit
+      to: cliexec
+      kind: reads
+    - from: remotegit
+      to: config
+      kind: reads
+    - from: server
+      to: config
+      kind: reads
+    - from: server
+      to: dashboard
+      kind: reads
+    - from: server
+      to: pruneagent
+      kind: reads
+    - from: server
+      to: triage
+      kind: reads
