@@ -1,3 +1,3 @@
 # Chronology
 
-Newest first.
+  - **2026-09-04**: Context branch seeded from source SHA `5fca41ab298d424396b33e6790543f78220565a7`.
