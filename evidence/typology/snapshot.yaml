@@ -1,0 +1,47 @@
+id: majordomo-typology-1096111529
+scope:
+    modules:
+        - .
+slices:
+    - id: gitboard
+      objective: Primary application entry point and orchestrator for gitboard operations.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+        - id: internal-git-local
+          path: ./internal/git/local
+          layer: domain
+        - id: internal-git-remote
+          path: ./internal/git/remote
+          layer: domain
+        - id: internal-ai
+          path: ./internal/ai
+          layer: domain
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+        - id: gitboard-server
+          kind: api
+          components:
+            - id: internal-server
+              path: ./internal/server
+        - id: gitboard-ui
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/dashboard
+    - id: config
+      objective: Centralized configuration management for the gitboard ecosystem.
