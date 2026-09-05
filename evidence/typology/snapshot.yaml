@@ -1,0 +1,136 @@
+id: majordomo-typology-777262492
+scope:
+    modules:
+        - .
+slices:
+    - id: board
+      objective: Provide board functionality
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+    - id: cliexec
+      objective: Provide command-line execution capabilities
+      surfaces:
+        - id: cliexec-cli
+          kind: cli
+          components:
+            - id: internal-cliexec
+              path: ./internal/cliexec
+    - id: config
+      objective: Provide configuration management
+      owns:
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+    - id: dashboard
+      objective: Provide dashboard functionality
+      surfaces:
+        - id: dashboard-ui
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/dashboard
+    - id: gitboard
+      objective: Provide gitboard command-line tool and related services
+      owns:
+        - id: internal-observability
+          path: ./internal/observability
+          layer: domain
+        - id: internal-server
+          path: ./internal/server
+          layer: domain
+        - id: internal-syncproj
+          path: ./internal/syncproj
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+    - id: llm
+      objective: Provide LLM integration capabilities
+      owns:
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+    - id: git
+      objective: Provide git infrastructure services
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+    - id: pruneagent
+      objective: Provide prune agent functionality
+      owns:
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
+    - id: triage
+      objective: Provide triage functionality
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+sliceBindings:
+    - from: dashboard
+      to: board
+      kind: reads
+    - from: dashboard
+      to: config
+      kind: reads
+    - from: dashboard
+      to: git
+      kind: reads
+    - from: git
+      to: cliexec
+      kind: reads
+    - from: git
+      to: board
+      kind: reads
+    - from: git
+      to: config
+      kind: reads
+    - from: llm
+      to: config
+      kind: reads
+    - from: pruneagent
+      to: cliexec
+      kind: reads
+    - from: pruneagent
+      to: llm
+      kind: reads
+    - from: pruneagent
+      to: git
+      kind: reads
+    - from: triage
+      to: config
+      kind: reads
+    - from: triage
+      to: llm
+      kind: reads
+    - from: gitboard
+      to: cliexec
+      kind: reads
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: llm
+      kind: reads
+    - from: gitboard
+      to: git
+      kind: reads
+    - from: gitboard
+      to: pruneagent
+      kind: reads
+    - from: gitboard
+      to: triage
+      kind: reads
