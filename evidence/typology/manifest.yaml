@@ -1,0 +1,13 @@
+repo_id: gitboard
+source_sha: 5fca41ab298d424396b33e6790543f78220565a7
+generated_at: "2026-09-05T00:20:13Z"
+typology_version: typology dev
+mode: discover
+module_scope: .
+snapshot_path: snapshot.yaml
+architecture_path: architecture.md
+refine_status: complete
+graph_path: graph.txt
+cluster_proposal_path: cluster_proposal.md
+refined_snapshot_path: refined_snapshot.yaml
+journey_path: journey.md

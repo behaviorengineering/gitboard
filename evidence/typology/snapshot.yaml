@@ -1,0 +1,83 @@
+id: majordomo-typology-refined
+scope:
+    modules:
+        - .
+slices:
+    - id: gitboard
+      objective: Core domain managing gitboard operations, orchestration, and primary interfaces.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+        - id: internal-observability
+          path: ./internal/observability
+          layer: domain
+        - id: internal-server
+          path: ./internal/server
+          layer: domain
+        - id: internal-syncproj
+          path: ./internal/syncproj
+          layer: domain
+        - id: gitboard-prune-worker
+          path: ./internal/pruneagent
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+        - id: gitboard-ui
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/dashboard
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/gitboard/overview.md
+            - kind: components
+              path: docs/develop/gitboard/components.md
+    - id: git-engine
+      objective: Low-level git primitives for local and remote repository manipulation.
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/git-engine/overview.md
+            - kind: components
+              path: docs/develop/git-engine/components.md
+    - id: triage
+      objective: Automated workflow for analyzing and categorizing repository changes.
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+      docs:
+        pages:
+            - kind: overview
+              path: docs/develop/triage/overview.md
+            - kind: components
+              path: docs/develop/triage/components.md
+sliceBindings:
+    - from: git-engine
+      to: gitboard
+      kind: reads
+    - from: gitboard
+      to: git-engine
+      kind: reads
+    - from: triage
+      to: gitboard
+      kind: reads
