@@ -1,0 +1,55 @@
+id: majordomo-typology-refined
+scope:
+    modules:
+        - .
+slices:
+    - id: gitboard
+      objective: Core domain for managing git-based boards and orchestration.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+        - id: internal-observability
+          path: ./internal/observability
+          layer: domain
+        - id: internal-server
+          path: ./internal/server
+          layer: domain
+        - id: internal-syncproj
+          path: ./internal/syncproj
+          layer: domain
+        - id: internal-git
+          path: ./internal/git
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+    - id: ui
+      objective: User interface projections and dashboards.
+      surfaces:
+        - id: dashboard
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/ui/dashboard
+    - id: triage
+      objective: Automated triage of repository changes.
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+    - id: pruneagent
+      objective: Automated pruning of stale resources.
+      owns:
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
