@@ -1,0 +1,124 @@
+id: gitboard
+scope:
+    modules:
+        - .
+slices:
+    - id: board
+      objective: Manages the high-level project state and visual representation of repository health.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+    - id: config
+      objective: Provides centralized configuration management for repository and tool settings.
+      owns:
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+    - id: dashboard
+      objective: Serves as the web-based interface for monitoring project status and git activity.
+      surfaces:
+        - id: dashboard-ui
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/dashboard
+    - id: gitboard
+      objective: Orchestrates the primary command-line interface and delivery of git management tasks.
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+            - id: internal-observability
+              path: ./internal/observability
+            - id: internal-server
+              path: ./internal/server
+            - id: internal-syncproj
+              path: ./internal/syncproj
+    - id: localgit
+      objective: Handles local filesystem git operations and worktree inspections.
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+    - id: llm
+      objective: Provides generative AI capabilities for repository analysis and triage assistance.
+      owns:
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+    - id: pruneagent
+      objective: Automates the decision-making process for cleaning up stale branches and resources.
+      owns:
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
+    - id: remotegit
+      objective: Manages interactions with remote git hosting providers like GitHub and GitLab.
+      owns:
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+    - id: triage
+      objective: Analyzes repository state to prioritize maintenance and cleanup actions.
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+sliceBindings:
+    - from: triage
+      to: config
+      kind: reads
+    - from: triage
+      to: llm
+      kind: reads
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: llm
+      kind: reads
+    - from: gitboard
+      to: localgit
+      kind: reads
+    - from: gitboard
+      to: pruneagent
+      kind: reads
+    - from: gitboard
+      to: remotegit
+      kind: reads
+    - from: gitboard
+      to: triage
+      kind: reads
+    - from: llm
+      to: config
+      kind: reads
+    - from: pruneagent
+      to: llm
+      kind: reads
+    - from: pruneagent
+      to: localgit
+      kind: reads
+    - from: remotegit
+      to: board
+      kind: reads
+    - from: remotegit
+      to: config
+      kind: reads
+    - from: dashboard
+      to: board
+      kind: reads
+    - from: dashboard
+      to: config
+      kind: reads
+    - from: dashboard
+      to: localgit
+      kind: reads
+    - from: dashboard
+      to: remotegit
+      kind: reads
