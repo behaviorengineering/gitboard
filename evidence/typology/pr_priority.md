@@ -1,0 +1,4 @@
+- **Formalize Config Access**: Resolve missing bindings for `dashboard`, `git`, and `triage` $\rightarrow$ `config`.
+  - **Audit Git Dependencies**: Address unexpected imports from `git` (local/remote) to `board` and `cliexec`.
+  - **Declare Capability Bindings**: Formalize `llm` usage by `triage` and `pruneagent`.
+  - **Validate CLI Execution Path**: Confirm `gitboard` $\rightarrow$ `cliexec` binding.

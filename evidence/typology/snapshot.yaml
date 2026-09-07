@@ -1,0 +1,95 @@
+id: gitboard-typology
+scope:
+    modules:
+        - .
+slices:
+    - id: gitboard
+      objective: Orchestrates the gitboard ecosystem by providing a unified CLI for repository management and automation.
+      owns:
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+            - id: internal-observability
+              path: ./internal/observability
+            - id: internal-server
+              path: ./internal/server
+            - id: internal-syncproj
+              path: ./internal/syncproj
+    - id: board
+      objective: Manages the visual representation and state of project boards for user review.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+    - id: config
+      objective: Provides centralized configuration management for all gitboard components and environments.
+      owns:
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+    - id: dashboard
+      objective: Serves as the primary web-based interface for monitoring and interacting with gitboard data.
+      surfaces:
+        - id: dashboard-ui
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/dashboard
+    - id: git
+      objective: Handles all low-level git operations for both local and remote repository interactions.
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+    - id: cliexec
+      objective: Provides a reusable execution adapter for running external processes within the CLI context.
+      owns:
+        - id: internal-cliexec
+          path: ./internal/cliexec
+          layer: domain
+    - id: pruneagent
+      objective: Automates the identification and cleanup of stale repository branches and artifacts.
+      owns:
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
+    - id: triage
+      objective: Analyzes repository changes to assist users in decision-making for branch maintenance.
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+sliceBindings:
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: git
+      kind: reads
+    - from: gitboard
+      to: pruneagent
+      kind: reads
+    - from: gitboard
+      to: triage
+      kind: reads
+    - from: dashboard
+      to: board
+      kind: reads
+    - from: dashboard
+      to: git
+      kind: reads
+    - from: pruneagent
+      to: cliexec
+      kind: reads
