@@ -17,6 +17,7 @@ type LocalGit interface {
 	OriginRemote(ctx context.Context, dir string) (string, error)
 	PullFFOnly(ctx context.Context, repoPath, branch string) error
 	RemoveSafeCheckout(ctx context.Context, worktreePath, branch, defaultBranch string) error
+	ContentOnDefault(ctx context.Context, repoPath, branch, defaultBranch string) (ok bool, reason string, err error)
 }
 
 // Ensure *localgit.Inspector satisfies LocalGit.

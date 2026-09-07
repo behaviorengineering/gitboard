@@ -53,6 +53,147 @@ func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
 	}
 }
 
+func TestEnrichPruneHintsContentOnDefaultSafe(t *testing.T) {
+	summary := &board.ProjectSummary{
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		MergedOK:      true,
+		Branches: []board.BranchRef{
+			{Name: "main", Default: true},
+		},
+		Local: &board.LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []board.LocalWorktree{
+				{Path: "/repo", Branch: "main", Main: true},
+				{Path: "/repo-squash", Branch: "feat/squash", ContentOnDefault: true},
+				{Path: "/repo-likely", Branch: "feat/gone"},
+			},
+		},
+	}
+
+	EnrichPruneHints(summary)
+
+	byBranch := map[string]board.LocalWorktree{}
+	for _, wt := range summary.Local.Worktrees {
+		byBranch[wt.Branch] = wt
+	}
+	if got := byBranch["feat/squash"]; got.PruneHint != board.PruneSafe || got.MergedID != 0 {
+		t.Fatalf("content safe: %+v", got)
+	}
+	if got := byBranch["feat/gone"]; got.PruneHint != board.PruneLikely {
+		t.Fatalf("likely: %+v", got)
+	}
+}
+
+func TestEnrichPruneHintsContentOnDefaultSafeWithoutMergedOK(t *testing.T) {
+	summary := &board.ProjectSummary{
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		MergedOK:      false,
+		Branches: []board.BranchRef{
+			{Name: "main", Default: true},
+		},
+		Local: &board.LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []board.LocalWorktree{
+				{Path: "/repo-squash", Branch: "feat/squash", ContentOnDefault: true},
+				{Path: "/repo-gone", Branch: "feat/gone"},
+			},
+		},
+	}
+
+	EnrichPruneHints(summary)
+
+	byBranch := map[string]board.LocalWorktree{}
+	for _, wt := range summary.Local.Worktrees {
+		byBranch[wt.Branch] = wt
+	}
+	if got := byBranch["feat/squash"]; got.PruneHint != board.PruneSafe {
+		t.Fatalf("content safe without MergedOK: %+v", got)
+	}
+	if got := byBranch["feat/gone"]; got.PruneHint != "" {
+		t.Fatalf("gone without MergedOK should have no hint: %+v", got)
+	}
+}
+
+func TestEnrichPruneHintsOpenReviewBlocksContentSafe(t *testing.T) {
+	// RemoteNames lagged (branch missing) while Branches still shows an open PR.
+	summary := &board.ProjectSummary{
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		MergedOK:      true,
+		Branches: []board.BranchRef{
+			{Name: "main", Default: true},
+			{Name: "feat/open", OpenReview: true},
+		},
+		Local: &board.LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []board.LocalWorktree{
+				{Path: "/repo-open", Branch: "feat/open", ContentOnDefault: true},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != "" {
+		t.Fatalf("open review must block content safe, got %q", got)
+	}
+}
+
+func TestEnrichPruneHintsBranchesRowBlocksSafeWhenRemoteNamesLag(t *testing.T) {
+	summary := &board.ProjectSummary{
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		MergedOK:      true,
+		Branches: []board.BranchRef{
+			{Name: "main", Default: true},
+			{Name: "feat/live", OpenReview: false},
+		},
+		Merged: []board.MergedReview{
+			{Branch: "feat/live", ID: 9, MergedAt: "2026-08-20T10:00:00Z"},
+		},
+		Local: &board.LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []board.LocalWorktree{
+				{Path: "/repo-live", Branch: "feat/live", ContentOnDefault: true},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != "" {
+		t.Fatalf("Branches row must block prune when RemoteNames lagged, got %q", got)
+	}
+}
+
+func TestEnrichPruneHintsOpenReviewBlocksMergedSafe(t *testing.T) {
+	summary := &board.ProjectSummary{
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		MergedOK:      true,
+		Branches: []board.BranchRef{
+			{Name: "main", Default: true},
+			{Name: "feat/merged-open", OpenReview: true},
+		},
+		Merged: []board.MergedReview{
+			{Branch: "feat/merged-open", ID: 3, MergedAt: "2026-08-20T10:00:00Z"},
+		},
+		Local: &board.LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []board.LocalWorktree{
+				{Path: "/repo", Branch: "feat/merged-open"},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != "" {
+		t.Fatalf("open review must block merged safe, got %q", got)
+	}
+}
+
 func TestEnrichPruneHintsUsesFullRemoteNames(t *testing.T) {
 	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main", "feat/hidden-remote"},

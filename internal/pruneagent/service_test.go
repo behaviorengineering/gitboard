@@ -20,6 +20,13 @@ func TestSynthesizeCard(t *testing.T) {
 	if keep.Verdict != "keep" {
 		t.Fatalf("keep: %+v", keep)
 	}
+	squash := synthesizeCard(Evidence{
+		Branch: "feat/x", DefaultBranch: "main", WorktreePath: "/tmp/wt",
+		RelatedHistories: true, UniqueCommitN: 2, ContentOnDefault: true,
+	})
+	if squash.Verdict != "drop" || squash.Command == "" {
+		t.Fatalf("content on default with unique SHAs: %+v", squash)
+	}
 	dirty := synthesizeCard(Evidence{Branch: "feat/x", Dirty: true, RelatedHistories: true})
 	if dirty.Verdict != "ask_user" {
 		t.Fatalf("dirty: %+v", dirty)
@@ -68,6 +75,14 @@ func TestClampCard(t *testing.T) {
 	got := clampCard(ev, Card{Verdict: "drop", Summary: "delete it", Command: "rm -rf /"})
 	if got.Verdict != "keep" || got.Command != "" {
 		t.Fatalf("unique commits clamp: %+v", got)
+	}
+
+	squash := clampCard(Evidence{
+		Branch: "feat/x", DefaultBranch: "main", WorktreePath: "/tmp/wt",
+		RelatedHistories: true, UniqueCommitN: 2, ContentOnDefault: true,
+	}, Card{Verdict: "keep", Summary: "unique SHAs"})
+	if squash.Verdict != "drop" || squash.Command == "" {
+		t.Fatalf("content on default must allow drop: %+v", squash)
 	}
 
 	dirty := clampCard(Evidence{Dirty: true}, Card{Verdict: "drop", Summary: "x", Command: "git branch -d x"})

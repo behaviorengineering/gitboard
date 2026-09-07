@@ -93,6 +93,7 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 	if !repoPathAllowed(row.Local, abs) {
 		return badRequest("worktree_path is not a mapped checkout for this project")
 	}
+	s.annotateContentOnDefault(ctx, &row)
 	remotegit.EnrichPruneHints(&row)
 
 	wt, ok := findSafeWorktree(row.Local, branch, abs)
