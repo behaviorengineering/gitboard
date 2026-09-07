@@ -489,10 +489,7 @@ async function flushPullBatch() {
   if (pendingPulls.size > 0) return;
   const failures = pullFailures.splice(0, pullFailures.length);
   const status = document.getElementById('status');
-  // Wait out an in-flight Refresh so this reload is not dropped by `if (loading) return`.
-  for (let i = 0; i < 60 && loading; i++) {
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  // loadDashboard bumps a generation token so this fresh fetch wins over an older in-flight poll.
   try {
     await loadDashboard({ quiet: true, fresh: true });
   } catch {
@@ -1357,6 +1354,8 @@ function renderRows(projects) {
 let pollSeconds = 30;
 let pollTimer = null;
 let loading = false;
+/** Monotonic id for in-flight dashboard fetches; only the latest may paint. */
+let dashboardGen = 0;
 
 function updatePollLabel() {
   const label = document.getElementById('poll-label');
@@ -1381,15 +1380,17 @@ function schedulePoll() {
 }
 
 async function loadDashboard({ quiet = false, fresh = false } = {}) {
-  if (loading) return;
+  const gen = ++dashboardGen;
   loading = true;
   const status = document.getElementById('status');
   if (!quiet) status.textContent = 'Refreshing…';
   try {
     const url = fresh ? '/api/dashboard?fresh=1' : '/api/dashboard';
     const res = await fetch(url, { cache: 'no-store' });
+    if (gen !== dashboardGen) return;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    if (gen !== dashboardGen) return;
     if (typeof data.poll_interval_seconds === 'number') {
       const next = data.poll_interval_seconds;
       if (next !== pollSeconds) {
@@ -1404,9 +1405,10 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
     applyBoard();
     status.textContent = `Updated ${data.generated_at || ''}`;
   } catch (err) {
+    if (gen !== dashboardGen) return;
     status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
-    loading = false;
+    if (gen === dashboardGen) loading = false;
   }
 }
 

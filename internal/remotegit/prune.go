@@ -7,8 +7,11 @@ import (
 )
 
 // EnrichPruneHints marks local worktrees that are candidates for removal.
-// Safe: remote head gone, clean tree, forge has a merged PR/MR for the branch.
-// Likely: remote head gone, clean tree, merged lookup succeeded, no merged match.
+// Safe: remote head gone, clean tree, no open PR/MR, and either forge has a
+// merged PR/MR for the branch or LocalWorktree.ContentOnDefault is true
+// (caller annotates via localgit).
+// Likely: remote head gone, clean tree, no open PR/MR, merged lookup succeeded,
+// no merged/content match.
 // Main is the primary worktree (first git worktree list entry), not "never prune";
 // only the default branch name is excluded.
 //
@@ -17,7 +20,10 @@ import (
 // default is known, Local.DefaultBranch is aligned to it for switch/prune callers.
 //
 // Fail closed: when RemoteNamesOK is false (heads unknown or incomplete), no hints
-// are set. Remote membership never falls back to the UI-capped Branches list.
+// are set. A branch still listed in Branches (UI remote rows) or with OpenReview
+// never gets a prune hint, even if ContentOnDefault or a merged record would
+// otherwise say safe. Remote membership for "still exists" uses RemoteNames plus
+// Branches names; it never uses Branches alone as the full remote set.
 func EnrichPruneHints(summary *board.ProjectSummary) {
 	if summary == nil || summary.Local == nil {
 		return
@@ -39,6 +45,9 @@ func EnrichPruneHints(summary *board.ProjectSummary) {
 		if name == "" {
 			continue
 		}
+		// Fail closed: a branch still shown as a remote row must not be prune-hinted,
+		// even if RemoteNames briefly lagged behind the Branches payload.
+		remote[name] = struct{}{}
 		if b.OpenReview {
 			open[name] = struct{}{}
 		}
@@ -118,6 +127,10 @@ func applyPruneHint(
 	if wt.Dirty {
 		return
 	}
+	// Open review blocks every prune hint (including content-on-default / merged).
+	if _, stillOpen := open[branch]; stillOpen {
+		return
+	}
 	if m, ok := mergedByBranch[branch]; ok {
 		wt.PruneHint = board.PruneSafe
 		wt.MergedID = m.ID
@@ -125,10 +138,11 @@ func applyPruneHint(
 		wt.MergedAt = m.MergedAt
 		return
 	}
-	if !mergedOK {
+	if wt.ContentOnDefault {
+		wt.PruneHint = board.PruneSafe
 		return
 	}
-	if _, stillOpen := open[branch]; stillOpen {
+	if !mergedOK {
 		return
 	}
 	wt.PruneHint = board.PruneLikely

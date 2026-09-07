@@ -28,8 +28,8 @@ const (
 const cardSystemPrompt = `You judge whether a local git branch is safe to delete.
 Use ONLY the evidence JSON in the user message. Do not invent commits, files, or dirty state.
 Verdict must be exactly one of: drop, keep, ask_user.
-- drop: clean tree, related histories, no unique commits vs default — safe to delete after switching away
-- keep: unique commits or other salvageable work remain
+- drop: clean tree, related histories, and either content_on_default is true (tip trees match default / branch is ancestor) or no unique commits vs default — safe to delete after switching away
+- keep: unique commits remain and content_on_default is false (salvageable work not on default)
 - ask_user: dirty tree, unrelated histories, or ambiguous
 
 Respond in plain text with sections:
@@ -54,6 +54,7 @@ type Evidence struct {
 	DefaultBranch    string   `json:"default_branch"`
 	Dirty            bool     `json:"dirty"`
 	RelatedHistories bool     `json:"related_histories"`
+	ContentOnDefault bool     `json:"content_on_default"`
 	UniqueCommits    []string `json:"unique_commits,omitempty"`
 	UniqueCommitN    int      `json:"unique_commit_count"`
 	UniqueFiles      []string `json:"unique_files,omitempty"`
@@ -319,7 +320,13 @@ func clampCard(ev Evidence, card Card) Card {
 			card.Summary = "Branch history is unrelated to the default branch; inspect before deleting."
 		}
 	}
-	if ev.UniqueCommitN > 0 && card.Verdict == VerdictDrop {
+	if ev.ContentOnDefault && card.Verdict != VerdictAskUser {
+		card.Verdict = VerdictDrop
+		if card.Summary == "" {
+			card.Summary = "Branch tip matches default (or is already merged); safe to delete the local branch after switching away."
+		}
+	}
+	if ev.UniqueCommitN > 0 && !ev.ContentOnDefault && card.Verdict == VerdictDrop {
 		card.Verdict = VerdictKeep
 		card.Command = ""
 		if card.Summary == "" {
@@ -391,6 +398,21 @@ func (s *Service) gather(ctx context.Context, dir, branch, def string) (Evidence
 			}
 		}
 	}
+
+	in := localgit.NewInspector(s.Run)
+	// Best-effort refresh so ContentOnDefault can prefer origin/<default>.
+	if err := in.FetchOrigin(ctx, dir); err != nil {
+		ev.Notes = append(ev.Notes, "fetch origin: "+err.Error())
+	}
+	ok, reason, err := in.ContentOnDefault(ctx, dir, branch, def)
+	if err != nil {
+		ev.Notes = append(ev.Notes, "content_on_default: "+err.Error())
+	} else {
+		ev.ContentOnDefault = ok
+		if reason != "" {
+			ev.Notes = append(ev.Notes, "content_on_default: "+reason)
+		}
+	}
 	return ev, nil
 }
 
@@ -412,6 +434,19 @@ func synthesizeCard(ev Evidence) Card {
 			Summary: "Branch history is unrelated to the default branch; inspect before deleting.",
 			Bullets: append(bullets, "unrelated histories"),
 			Command: "",
+		}
+	}
+	if ev.ContentOnDefault {
+		if ev.UniqueCommitN > 0 {
+			bullets = append(bullets, fmt.Sprintf("%d unique commit SHA(s) vs %s (content already on default)", ev.UniqueCommitN, ev.DefaultBranch))
+		} else {
+			bullets = append(bullets, "content already on "+ev.DefaultBranch)
+		}
+		return Card{
+			Verdict: VerdictDrop,
+			Summary: "Branch tip matches default (or is already merged); safe to delete the local branch after switching away.",
+			Bullets: bullets,
+			Command: dropCommand(ev),
 		}
 	}
 	if ev.UniqueCommitN > 0 {

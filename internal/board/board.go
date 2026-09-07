@@ -45,8 +45,8 @@ type MergedReview struct {
 
 // Prune hint values for local worktrees whose remote head is gone.
 const (
-	PruneSafe   = "safe"   // forge reports a merged PR/MR for this branch
-	PruneLikely = "likely" // remote gone, no open review, not dirty
+	PruneSafe   = "safe"   // forge merged PR/MR, or local content already on default
+	PruneLikely = "likely" // remote gone, no open review, not dirty, content not on default
 )
 
 // ProjectSummary is one row in the dashboard.
@@ -134,22 +134,23 @@ type BranchOriginSync struct {
 
 // LocalWorktree is one git worktree for a mapped project.
 type LocalWorktree struct {
-	Path            string `json:"path"`
-	Branch          string `json:"branch,omitempty"`
-	Tag             string `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
-	Detached        bool   `json:"detached,omitempty"`
-	Bare            bool   `json:"bare,omitempty"`
-	Main            bool   `json:"main,omitempty"`
-	Dirty           bool   `json:"dirty,omitempty"`
-	Ahead           int    `json:"ahead,omitempty"`
-	Behind          int    `json:"behind,omitempty"`
-	Upstream        string `json:"upstream,omitempty"`
-	PruneHint       string `json:"prune_hint,omitempty"` // safe | likely
-	MergedID        int    `json:"merged_id,omitempty"`
-	MergedURL       string `json:"merged_url,omitempty"`
-	MergedAt        string `json:"merged_at,omitempty"`
-	AppearancePath  string `json:"appearance_path,omitempty"`
-	AppearanceLabel string `json:"appearance_label,omitempty"`
+	Path             string `json:"path"`
+	Branch           string `json:"branch,omitempty"`
+	Tag              string `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
+	Detached         bool   `json:"detached,omitempty"`
+	Bare             bool   `json:"bare,omitempty"`
+	Main             bool   `json:"main,omitempty"`
+	Dirty            bool   `json:"dirty,omitempty"`
+	Ahead            int    `json:"ahead,omitempty"`
+	Behind           int    `json:"behind,omitempty"`
+	Upstream         string `json:"upstream,omitempty"`
+	PruneHint        string `json:"prune_hint,omitempty"` // safe | likely
+	ContentOnDefault bool   `json:"content_on_default,omitempty"`
+	MergedID         int    `json:"merged_id,omitempty"`
+	MergedURL        string `json:"merged_url,omitempty"`
+	MergedAt         string `json:"merged_at,omitempty"`
+	AppearancePath   string `json:"appearance_path,omitempty"`
+	AppearanceLabel  string `json:"appearance_label,omitempty"`
 }
 
 // FailedJob is a failed CI job suitable for triage.
