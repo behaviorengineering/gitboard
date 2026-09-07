@@ -1,0 +1,112 @@
+id: gitboard
+scope:
+    modules:
+        - .
+slices:
+    - id: board
+      objective: Manages the core state and visibility of project status and branch origins.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+    - id: config
+      objective: Provides centralized configuration management for all system components.
+      owns:
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+    - id: dashboard
+      objective: Serves as the visual interface for monitoring project and branch status.
+      surfaces:
+        - id: dashboard-ui
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/dashboard
+    - id: gitboard
+      objective: Orchestrates the primary gitboard CLI and integrates core system capabilities.
+      owns:
+        - id: internal-observability
+          path: ./internal/observability
+          layer: domain
+        - id: internal-syncproj
+          path: ./internal/syncproj
+          layer: domain
+        - id: internal-cliexec
+          path: ./internal/cliexec
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+            - id: internal-server
+              path: ./internal/server
+    - id: localgit
+      objective: Handles local filesystem git operations and worktree inspections.
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+    - id: remotegit
+      objective: Manages interactions with remote git hosting providers like GitHub and GitLab.
+      owns:
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+    - id: pruneagent
+      objective: Automates the decision-making process for cleaning up stale branches.
+      owns:
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+    - id: triage
+      objective: Analyzes project state to identify candidates for maintenance or pruning.
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+sliceBindings:
+    - from: remotegit
+      to: board
+      kind: reads
+    - from: remotegit
+      to: config
+      kind: reads
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: localgit
+      kind: reads
+    - from: gitboard
+      to: remotegit
+      kind: reads
+    - from: gitboard
+      to: triage
+      kind: reads
+    - from: dashboard
+      to: board
+      kind: reads
+    - from: dashboard
+      to: config
+      kind: reads
+    - from: dashboard
+      to: localgit
+      kind: reads
+    - from: dashboard
+      to: remotegit
+      kind: reads
+    - from: pruneagent
+      to: localgit
+      kind: reads
+    - from: triage
+      to: config
+      kind: reads
