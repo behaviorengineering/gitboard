@@ -1,0 +1,83 @@
+id: gitboard-typology
+scope:
+    modules:
+        - .
+slices:
+    - id: gitboard
+      objective: Orchestrates the complete gitboard lifecycle from local discovery to remote synchronization and dashboarding.
+      owns:
+        - id: internal-board
+          path: ./internal/board
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: ./cmd/gitboard
+            - id: internal-observability
+              path: ./internal/observability
+            - id: internal-server
+              path: ./internal/server
+            - id: internal-syncproj
+              path: ./internal/syncproj
+    - id: config
+      objective: Provides a centralized configuration management system for all gitboard components and host settings.
+      owns:
+        - id: internal-config
+          path: ./internal/config
+          layer: domain
+    - id: dashboard
+      objective: Serves as the visual management interface for monitoring project status and performing remote actions.
+      surfaces:
+        - id: dashboard-ui
+          kind: ui
+          components:
+            - id: internal-dashboard
+              path: ./internal/dashboard
+    - id: localgit
+      objective: Manages local filesystem interactions and git worktree inspections.
+      owns:
+        - id: internal-localgit
+          path: ./internal/localgit
+          layer: domain
+    - id: remotegit
+      objective: Facilitates interaction with remote git providers like GitHub and GitLab to synchronize state.
+      owns:
+        - id: internal-remotegit
+          path: ./internal/remotegit
+          layer: domain
+        - id: internal-cliexec
+          path: ./internal/cliexec
+          layer: domain
+    - id: triage
+      objective: Automates the analysis and pruning of git repositories using agentic workflows and LLM capabilities.
+      owns:
+        - id: internal-triage
+          path: ./internal/triage
+          layer: domain
+        - id: internal-pruneagent
+          path: ./internal/pruneagent
+          layer: domain
+        - id: internal-llm
+          path: ./internal/llm
+          layer: domain
+sliceBindings:
+    - from: triage
+      to: config
+      kind: reads
+    - from: localgit
+      to: remotegit
+      kind: reads
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: triage
+      kind: reads
+    - from: dashboard
+      to: localgit
+      kind: reads

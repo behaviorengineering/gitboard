@@ -1,10 +1,23 @@
-# Context branch
+# Gitboard
 
-This orphan branch holds project understanding for the served repo.
-Never merge these files into the default branch.
-Context updates are PRs whose base is this branch.
+![Gitboard dashboard](docs/banner.webp)
 
-## Story vs Typology evidence
+Local code-change board for GitLab and GitHub: CI status, open MRs/PRs, failed job triage, and local checkout / worktree state. Uses `gh`, `glab`, and `git` on your machine.
 
-- Root markdown (`mission.md`, `architecture.md`, …) is the **teaching story**.
-- `evidence/typology/` holds Typology **seed evidence** for this digest proposal (for example `architecture_brief.md`). That brief is not the teaching story and not the confirmed `.typology/` catalog.
+## Context Branch
+This branch serves as the project understanding digest for the `gitboard` repository. It contains the synthesized teaching story and architectural intent derived from the current typology discovery.
+
+## Quick Start
+
+1. **Install Forge CLIs**: `brew install glab`, `glab auth login`, `gh auth login`.
+2. **Install Gitboard**: Download the latest release, unpack, and add to `PATH`.
+3. **Initialize**:
+   ```bash
+   gitboard init
+   gitboard sync
+   gitboard serve
+   ```
+4. **Access Dashboard**: Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/).
+
+## Configuration
+User config is located at `~/.config/gitboard/config.yaml`. Key sections include `llm` (AI triage), `ui` (dashboard settings), `local` (disk roots), `sync` (remote discovery), and `projects` (tracked repositories).
