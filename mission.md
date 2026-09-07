@@ -1,3 +1,3 @@
 # Mission
 
-Describe what this repo exists to do.
+  Gitboard provides a local, high-visibility dashboard for developers to monitor their active work across multiple Git forges (GitHub and GitLab). It centralizes CI status, open Merge Requests/Pull Requests, and failed job triage, while simultaneously tracking local checkout and worktree states. The goal is to reduce context-switching by providing a unified view of both remote repository activity and local development progress.
