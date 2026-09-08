@@ -1,0 +1,104 @@
+id: gitboard
+scope:
+    modules:
+        - .
+slices:
+    - id: gitboard
+      objective: Manages the end-to-end lifecycle of git repository discovery, synchronization, and triage.
+      owns:
+        - id: syncproj
+          path: internal/syncproj
+          layer: domain
+        - id: triage
+          path: internal/triage
+          layer: domain
+        - id: internal-cliexec
+          path: internal/cliexec
+          layer: domain
+        - id: internal-llm
+          path: internal/llm
+          layer: domain
+        - id: internal-observability
+          path: internal/observability
+          layer: domain
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: cmd/gitboard
+    - id: dashboard
+      objective: Provides a visual interface and data model for monitoring git state and project status.
+      owns:
+        - id: board-dto
+          path: internal/board
+          layer: domain
+      surfaces:
+        - id: dashboard-server
+          kind: api
+          components:
+            - id: internal-server
+              path: internal/server
+        - id: dashboard-ui
+          kind: ui
+          components:
+            - id: dashboard-domain
+              path: internal/dashboard
+    - id: localgit
+      objective: Manages local filesystem git state and worktree inspections.
+      owns:
+        - id: internal-localgit
+          path: internal/localgit
+          layer: domain
+    - id: remotegit
+      objective: Interfaces with GitHub and GitLab APIs to fetch remote repository metadata.
+      owns:
+        - id: internal-remotegit
+          path: internal/remotegit
+          layer: domain
+    - id: pruneagent
+      objective: Investigates local branches to identify likely removable or stale worktrees.
+      owns:
+        - id: internal-pruneagent
+          path: internal/pruneagent
+          layer: domain
+libraries:
+    - id: config
+      purpose: Shared technical package for application configuration.
+      owns:
+        - id: internal-config
+          path: internal/config
+sliceBindings:
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: remotegit
+      kind: reads
+    - from: dashboard
+      to: config
+      kind: reads
+    - from: dashboard
+      to: localgit
+      kind: reads
+    - from: dashboard
+      to: remotegit
+      kind: reads
+    - from: pruneagent
+      to: localgit
+      kind: reads
+    - from: remotegit
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: localgit
+      kind: reads
+    - from: gitboard
+      to: pruneagent
+      kind: reads
+    - from: gitboard
+      to: remotegit
+      kind: reads

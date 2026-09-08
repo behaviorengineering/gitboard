@@ -1,10 +1,11 @@
-# Context branch
+# Gitboard (Context Branch)
 
-This orphan branch holds project understanding for the served repo.
-Never merge these files into the default branch.
-Context updates are PRs whose base is this branch.
+This branch contains the current project understanding and architectural digest for the `gitboard` repository. 
 
-## Story vs Typology evidence
+## Context
+This is a context-branch README. It serves as the foundation for ongoing project discovery and architectural refinement. It is seeded from the current repository state and the Typology discovery process.
 
-- Root markdown (`mission.md`, `architecture.md`, …) is the **teaching story**.
-- `evidence/typology/` holds Typology **seed evidence** for this digest proposal (for example `architecture_brief.md`). That brief is not the teaching story and not the confirmed `.typology/` catalog.
+## Purpose
+The purpose of this branch is to hold the "teaching story" (mission, architecture, conventions) that guides development and provides a grounding for automated agents.
+
+**Note:** Never merge these files into the default branch. Context updates should be submitted as PRs targeting this branch.
