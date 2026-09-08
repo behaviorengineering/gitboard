@@ -1,0 +1,210 @@
+packages:
+    - path: cmd/gitboard
+      role: entrypoint
+      confidence: 0.9
+      evidence:
+        - has_main
+      inspected_stage: 1
+      candidate_role: ""
+    - path: internal/board
+      role: dto
+      confidence: 0.9
+      evidence:
+        - json_tags
+        - no_exported_funcs
+        - no_exported_methods
+        - shared_dto_multi_importer
+      inspected_stage: 1
+      candidate_role: ""
+    - path: internal/cliexec
+      role: exec_runner
+      confidence: 0.8
+      evidence:
+        - imports_os_exec
+        - exports_run_surface
+      inspected_stage: 2
+      candidate_role: ""
+    - path: internal/config
+      role: config
+      confidence: 0.8
+      evidence:
+        - load_save_exports
+      inspected_stage: 2
+      candidate_role: ""
+    - path: internal/dashboard
+      role: aggregator
+      confidence: 0.8
+      evidence:
+        - orchestration_export
+        - internal_imports_ge_2
+      inspected_stage: 2
+      candidate_role: ""
+    - path: internal/llm
+      role: adapter
+      confidence: 0.8
+      evidence:
+        - imports_net_http
+        - exports_client_surface
+        - not_http_surface
+      inspected_stage: 2
+      candidate_role: ""
+    - path: internal/localgit
+      role: adapter
+      confidence: 0.75
+      evidence:
+        - llm_inspect:"Inspector.FetchOrigin", "Inspector.PullFFOnly", "git", "git fetch --prune origin", "git branch -D"
+      inspected_stage: 3
+      candidate_role: ""
+    - path: internal/observability
+      role: config
+      confidence: 0.8
+      evidence:
+        - load_save_exports
+      inspected_stage: 2
+      candidate_role: ""
+    - path: internal/pruneagent
+      role: exec_runner
+      confidence: 0.75
+      evidence:
+        - |-
+          llm_inspect:"type Service struct",
+            "func (s *Service) Investigate(ctx context.Context, req Request) (*Result, error)",
+            "s.Run.Run(ctx, \"git\", argv...)",
+            "type SessionStore interface"
+      inspected_stage: 3
+      candidate_role: ""
+    - path: internal/remotegit
+      role: adapter
+      confidence: 0.75
+      evidence:
+        - |-
+          llm_inspect:"type GitHub struct { Run cliexec.Exec }",
+            "g.Run.Run(ctx, \"gh\", \"auth\", \"status\")",
+            "type GitLab struct { Run cliexec.Exec }",
+            "g.Run.Run(ctx, \"glab\", \"auth\", \"status\")"
+      inspected_stage: 3
+      candidate_role: ""
+    - path: internal/server
+      role: http_surface
+      confidence: 0.9
+      evidence:
+        - go_embed
+        - embeds_static
+        - imports_net_http
+        - http_surface_ident
+      inspected_stage: 1
+      candidate_role: ""
+    - path: internal/syncproj
+      role: aggregator
+      confidence: 0.75
+      evidence:
+        - |-
+          llm_inspect:"type Lister interface",
+            "func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter string) ([]Candidate, error)",
+            "func ApplySelection(cands []Candidate, selected []int, existing []config.Project) ([]config.Project, error)",
+            "func AddProject(projects []config.Project, host config.Host, path string) ([]config.Project, error)"
+      inspected_stage: 3
+      candidate_role: ""
+    - path: internal/triage
+      role: dto
+      confidence: 0.75
+      evidence:
+        - |-
+          llm_inspect:type Request struct { `json:"project_id"` }
+            type Response struct { `json:"summary"` }
+      inspected_stage: 3
+      candidate_role: ""
+edges:
+    - from: cmd/gitboard
+      to: internal/cliexec
+      kind: uses_runner
+    - from: cmd/gitboard
+      to: internal/config
+      kind: reads_config
+    - from: cmd/gitboard
+      to: internal/dashboard
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/llm
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/localgit
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/observability
+      kind: reads_config
+    - from: cmd/gitboard
+      to: internal/pruneagent
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/remotegit
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/server
+      kind: serves_http
+    - from: cmd/gitboard
+      to: internal/syncproj
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/triage
+      kind: imports
+    - from: internal/dashboard
+      to: internal/board
+      kind: fills_dto
+    - from: internal/dashboard
+      to: internal/config
+      kind: reads_config
+    - from: internal/dashboard
+      to: internal/localgit
+      kind: composes
+    - from: internal/dashboard
+      to: internal/remotegit
+      kind: composes
+    - from: internal/llm
+      to: internal/config
+      kind: reads_config
+    - from: internal/localgit
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/pruneagent
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/pruneagent
+      to: internal/llm
+      kind: imports
+    - from: internal/pruneagent
+      to: internal/localgit
+      kind: imports
+    - from: internal/remotegit
+      to: internal/board
+      kind: fills_dto
+    - from: internal/remotegit
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/remotegit
+      to: internal/config
+      kind: reads_config
+    - from: internal/server
+      to: internal/config
+      kind: reads_config
+    - from: internal/server
+      to: internal/dashboard
+      kind: serves_http
+    - from: internal/server
+      to: internal/pruneagent
+      kind: imports
+    - from: internal/server
+      to: internal/triage
+      kind: imports
+    - from: internal/syncproj
+      to: internal/config
+      kind: reads_config
+    - from: internal/syncproj
+      to: internal/remotegit
+      kind: imports
+    - from: internal/triage
+      to: internal/config
+      kind: reads_config
+    - from: internal/triage
+      to: internal/llm
+      kind: imports
