@@ -1,0 +1,188 @@
+packages:
+    - path: cmd/gitboard
+      role: entrypoint
+      confidence: 0.9
+      evidence:
+        - has_main
+      inspected_stage: 1
+    - path: internal/board
+      role: dto
+      confidence: 0.9
+      evidence:
+        - json_tags
+        - no_exported_funcs
+        - no_exported_methods
+        - shared_dto_multi_importer
+      inspected_stage: 1
+    - path: internal/cliexec
+      role: exec_runner
+      confidence: 0.8
+      evidence:
+        - imports_os_exec
+      inspected_stage: 2
+    - path: internal/config
+      role: config
+      confidence: 0.8
+      evidence:
+        - imports_yaml
+        - yaml_tags
+        - json_tags
+      inspected_stage: 2
+    - path: internal/dashboard
+      role: aggregator
+      confidence: 0.8
+      evidence:
+        - exported_logic
+        - domain_imports_ge_1
+      inspected_stage: 2
+    - path: internal/llm
+      role: adapter
+      confidence: 0.8
+      evidence:
+        - imports_net_http
+        - not_http_surface
+        - domain_imports_eq_0
+      inspected_stage: 2
+    - path: internal/localgit
+      role: adapter
+      confidence: 0.8
+      evidence:
+        - imports_exec_runner
+        - domain_imports_eq_0
+      inspected_stage: 2
+    - path: internal/observability
+      role: observability
+      confidence: 0.9
+      evidence:
+        - imports_otel
+      inspected_stage: 1
+    - path: internal/pruneagent
+      role: aggregator
+      confidence: 0.8
+      evidence:
+        - exported_logic
+        - domain_imports_ge_1
+      inspected_stage: 2
+    - path: internal/remotegit
+      role: adapter
+      confidence: 0.8
+      evidence:
+        - imports_exec_runner
+        - domain_imports_eq_0
+      inspected_stage: 2
+    - path: internal/server
+      role: http_surface
+      confidence: 0.9
+      evidence:
+        - go_embed
+        - embeds_static
+        - imports_net_http
+      inspected_stage: 1
+    - path: internal/syncproj
+      role: aggregator
+      confidence: 0.8
+      evidence:
+        - exported_logic
+        - domain_imports_ge_1
+      inspected_stage: 2
+    - path: internal/triage
+      role: aggregator
+      confidence: 0.8
+      evidence:
+        - exported_logic
+        - domain_imports_ge_1
+      inspected_stage: 2
+edges:
+    - from: cmd/gitboard
+      to: internal/cliexec
+      kind: uses_runner
+    - from: cmd/gitboard
+      to: internal/config
+      kind: reads_config
+    - from: cmd/gitboard
+      to: internal/dashboard
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/llm
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/localgit
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/observability
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/pruneagent
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/remotegit
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/server
+      kind: serves_http
+    - from: cmd/gitboard
+      to: internal/syncproj
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/triage
+      kind: imports
+    - from: internal/dashboard
+      to: internal/board
+      kind: fills_dto
+    - from: internal/dashboard
+      to: internal/config
+      kind: reads_config
+    - from: internal/dashboard
+      to: internal/localgit
+      kind: composes
+    - from: internal/dashboard
+      to: internal/remotegit
+      kind: composes
+    - from: internal/llm
+      to: internal/config
+      kind: reads_config
+    - from: internal/localgit
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/pruneagent
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/pruneagent
+      to: internal/llm
+      kind: composes
+    - from: internal/pruneagent
+      to: internal/localgit
+      kind: composes
+    - from: internal/remotegit
+      to: internal/board
+      kind: fills_dto
+    - from: internal/remotegit
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/remotegit
+      to: internal/config
+      kind: reads_config
+    - from: internal/server
+      to: internal/config
+      kind: reads_config
+    - from: internal/server
+      to: internal/dashboard
+      kind: serves_http
+    - from: internal/server
+      to: internal/pruneagent
+      kind: serves_http
+    - from: internal/server
+      to: internal/triage
+      kind: serves_http
+    - from: internal/syncproj
+      to: internal/config
+      kind: reads_config
+    - from: internal/syncproj
+      to: internal/remotegit
+      kind: composes
+    - from: internal/triage
+      to: internal/config
+      kind: reads_config
+    - from: internal/triage
+      to: internal/llm
+      kind: composes

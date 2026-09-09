@@ -1,3 +1,3 @@
 # Chronology
 
-Newest first.
+  * **Seed**: Project understanding and structural typology established for `gitboard`.
