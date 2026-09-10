@@ -91,6 +91,158 @@ func TestPullFFOnlyRefusesDirty(t *testing.T) {
 	}
 }
 
+func TestPullFFOnlyUpdatesSubmodules(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	run := gitRunner(t)
+
+	subOrigin := filepath.Join(root, "sub-origin")
+	if err := os.MkdirAll(subOrigin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(subOrigin, "init", "-b", "main")
+	run(subOrigin, "config", "user.email", "t@example.com")
+	run(subOrigin, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(subOrigin, "pack.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(subOrigin, "add", "pack.txt")
+	run(subOrigin, "commit", "-m", "pack-v1")
+
+	origin := filepath.Join(root, "origin")
+	if err := os.MkdirAll(origin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(origin, "init", "-b", "main")
+	run(origin, "config", "user.email", "t@example.com")
+	run(origin, "config", "user.name", "t")
+	run(origin, "config", "protocol.file.allow", "always")
+	run(origin, "-c", "protocol.file.allow=always", "submodule", "add", subOrigin, "packs")
+	run(origin, "commit", "-m", "add-packs")
+
+	local := filepath.Join(root, "local")
+	run(root, "-c", "protocol.file.allow=always", "clone", "--recurse-submodules", origin, local)
+	run(local, "config", "user.email", "t@example.com")
+	run(local, "config", "user.name", "t")
+	run(local, "config", "protocol.file.allow", "always")
+
+	if err := os.WriteFile(filepath.Join(subOrigin, "pack.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(subOrigin, "add", "pack.txt")
+	run(subOrigin, "commit", "-m", "pack-v2")
+	run(filepath.Join(origin, "packs"), "fetch", "origin")
+	run(filepath.Join(origin, "packs"), "checkout", "main")
+	run(filepath.Join(origin, "packs"), "pull", "--ff-only", "origin", "main")
+	run(origin, "add", "packs")
+	run(origin, "commit", "-m", "bump-packs")
+
+	wantSHA, err := exec.Command("git", "-C", subOrigin, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimSpace(string(wantSHA))
+
+	run(local, "fetch", "origin")
+	in := localgit.NewInspector(cliexec.New())
+	if err := in.PullFFOnly(context.Background(), local, "main"); err != nil {
+		t.Fatalf("PullFFOnly: %v", err)
+	}
+
+	gotSHA, err := exec.Command("git", "-C", filepath.Join(local, "packs"), "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(string(gotSHA))
+	if got != want {
+		t.Fatalf("submodule HEAD=%s want %s", got, want)
+	}
+	status, err := exec.Command("git", "-C", local, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(status)) != "" {
+		t.Fatalf("want clean tree after pull, got %q", string(status))
+	}
+}
+
+func TestPullFFOnlyClearsStaleSubmoduleDirtBeforePull(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	run := gitRunner(t)
+
+	subOrigin := filepath.Join(root, "sub-origin")
+	if err := os.MkdirAll(subOrigin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(subOrigin, "init", "-b", "main")
+	run(subOrigin, "config", "user.email", "t@example.com")
+	run(subOrigin, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(subOrigin, "pack.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(subOrigin, "add", "pack.txt")
+	run(subOrigin, "commit", "-m", "pack-v1")
+
+	origin := filepath.Join(root, "origin")
+	if err := os.MkdirAll(origin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(origin, "init", "-b", "main")
+	run(origin, "config", "user.email", "t@example.com")
+	run(origin, "config", "user.name", "t")
+	run(origin, "config", "protocol.file.allow", "always")
+	run(origin, "-c", "protocol.file.allow=always", "submodule", "add", subOrigin, "packs")
+	run(origin, "commit", "-m", "add-packs")
+
+	local := filepath.Join(root, "local")
+	run(root, "-c", "protocol.file.allow=always", "clone", "--recurse-submodules", origin, local)
+	run(local, "config", "user.email", "t@example.com")
+	run(local, "config", "user.name", "t")
+	run(local, "config", "protocol.file.allow", "always")
+
+	if err := os.WriteFile(filepath.Join(subOrigin, "pack.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(subOrigin, "add", "pack.txt")
+	run(subOrigin, "commit", "-m", "pack-v2")
+	run(filepath.Join(origin, "packs"), "fetch", "origin")
+	run(filepath.Join(origin, "packs"), "checkout", "main")
+	run(filepath.Join(origin, "packs"), "pull", "--ff-only", "origin", "main")
+	run(origin, "add", "packs")
+	run(origin, "commit", "-m", "bump-packs")
+
+	// Fast-forward the parent without updating the nested checkout: dirty submodule.
+	run(local, "fetch", "origin")
+	run(local, "merge", "--ff-only", "origin/main")
+	status, err := exec.Command("git", "-C", local, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(status), "packs") {
+		t.Fatalf("setup want dirty submodule, got %q", string(status))
+	}
+
+	run(origin, "commit", "--allow-empty", "-m", "origin-ahead-again")
+	run(local, "fetch", "origin")
+
+	in := localgit.NewInspector(cliexec.New())
+	if err := in.PullFFOnly(context.Background(), local, "main"); err != nil {
+		t.Fatalf("PullFFOnly: %v", err)
+	}
+	status, err = exec.Command("git", "-C", local, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(status)) != "" {
+		t.Fatalf("want clean tree after pull, got %q", string(status))
+	}
+}
+
 func TestPullFFOnlyRefusesDiverged(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
