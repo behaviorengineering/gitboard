@@ -1,5 +1,9 @@
 # Typology Architecture Brief
 
+<!-- majordomo-reading-nav:start -->
+**Reading path:** [Prev: README.md](README.md) · [Next: cluster_proposal.md](cluster_proposal.md) · [TOC](README.md)
+<!-- majordomo-reading-nav:end -->
+
 > **Typology seed evidence.** Post-survey/refine architecture brief for this context digest proposal. Not the teaching-story root `architecture.md`, and not the confirmed `.typology/` catalog.
 
 <!-- typology:generated -->

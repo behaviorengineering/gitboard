@@ -1,5 +1,9 @@
 # Context: Proposed Architecture Grounding for gitboard
 
+<!-- majordomo-reading-nav:start -->
+**Reading path:** [Prev: human_intervention.md](human_intervention.md) · [Next: README.md](../../README.md) · [TOC](README.md)
+<!-- majordomo-reading-nav:end -->
+
 Majordomo's Typology digest is proposing a new structural model for the `gitboard` repository on this context branch. This proposal aims to transition the repository from a loose collection of packages into a structured, functional catalog. 
 
 The primary focus of this change is to consolidate technical "leaf" packages—utilities that serve only one caller—into the main `gitboard` orchestration slice. This includes moving observability and sync logic into the `cmd/gitboard` entrypoint. We are also proposing to group the `internal/server` package under a dedicated `gitboard-http` slice to separate the HTTP delivery surface from the CLI interface.

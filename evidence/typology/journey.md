@@ -1,5 +1,9 @@
 # Journey: gitboard Typology Refinement
 
+<!-- majordomo-reading-nav:start -->
+**Reading path:** [Prev: cluster_proposal.md](cluster_proposal.md) · [Next: human_intervention.md](human_intervention.md) · [TOC](README.md)
+<!-- majordomo-reading-nav:end -->
+
 **Status**: Open
 
 ## Decisions Taken

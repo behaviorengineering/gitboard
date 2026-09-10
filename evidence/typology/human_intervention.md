@@ -1,5 +1,9 @@
 # Operator Briefing: Catalog Synchronization
 
+<!-- majordomo-reading-nav:start -->
+**Reading path:** [Prev: journey.md](journey.md) · [Next: pr_priority.md](pr_priority.md) · [TOC](README.md)
+<!-- majordomo-reading-nav:end -->
+
 The Typology digest has identified a mismatch between the observed Go imports and the proposed `refined_catalog_yaml`. Specifically, the `gitboard-http` slice (the HTTP delivery surface) is performing significant orchestration by importing several domain slices, but these relationships are not yet formalized in the catalog.
 
 ### Priority Decision: Formalize HTTP Orchestration

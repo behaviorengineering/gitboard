@@ -1,5 +1,22 @@
 # Gitboard
 
+<!-- majordomo-reading-nav:start -->
+**Reading path:** [Next: mission.md](mission.md) · [TOC](README.md)
+<!-- majordomo-reading-nav:end -->
+
+<!-- majordomo-reading-toc:start -->
+## Reading order
+
+1. [README.md](README.md) (this file)
+2. [mission.md](mission.md)
+3. [architecture.md](architecture.md)
+4. [conventions.md](conventions.md)
+5. [weaknesses.md](weaknesses.md)
+6. [chronology.md](chronology.md)
+7. [evidence/typology/README.md](evidence/typology/README.md) — Typology seed briefing
+
+<!-- majordomo-reading-toc:end -->
+
   ![Gitboard dashboard](docs/banner.webp)
 
   Local code-change board for GitLab and GitHub: CI status, open MRs/PRs, failed job triage, and local checkout / worktree state. Uses `gh`, `glab`, and `git` on your machine.

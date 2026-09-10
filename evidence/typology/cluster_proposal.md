@@ -1,5 +1,9 @@
 # Typology Cluster Proposal: gitboard
 
+<!-- majordomo-reading-nav:start -->
+**Reading path:** [Prev: architecture_brief.md](architecture_brief.md) · [Next: journey.md](journey.md) · [TOC](README.md)
+<!-- majordomo-reading-nav:end -->
+
 ## Proposed merges
 
 Majordomo proposes the following merges to consolidate technical leaves and reduce surface area. These are architecture-grounding proposals for the context branch.
