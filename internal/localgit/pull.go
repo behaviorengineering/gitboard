@@ -50,6 +50,11 @@ func ValidateBranchName(branch string) error {
 // Fetches origin/<branch> first, then:
 //   - checked out + clean: git merge --ff-only origin/<branch>
 //   - not checked out: git fetch origin <branch>:<branch> (ff-only)
+//
+// When the branch is checked out, stale nested submodule checkouts are synced
+// with `git submodule update --init --recursive` before refusing a dirty tree
+// and again after a successful fast-forward, so pins like .cursor/packs/shared
+// match the parent tip.
 func (in *Inspector) PullFFOnly(ctx context.Context, repoPath, branch string) error {
 	if in == nil {
 		return fmt.Errorf("inspector missing")
@@ -81,6 +86,15 @@ func (in *Inspector) PullFFOnly(ctx context.Context, repoPath, branch string) er
 		detail, err := in.inspectWorktree(ctx, checkout, false)
 		if err != nil {
 			return fmt.Errorf("inspect checkout: %w", err)
+		}
+		if detail.Dirty {
+			// Submodule working trees often look dirty when they lag the parent tip.
+			if syncErr := in.updateSubmodules(ctx, checkout); syncErr == nil {
+				detail, err = in.inspectWorktree(ctx, checkout, false)
+				if err != nil {
+					return fmt.Errorf("inspect checkout: %w", err)
+				}
+			}
 		}
 		if detail.Dirty {
 			return fmt.Errorf("%w at %s; commit or stash before pull", ErrDirtyTree, checkout)
@@ -115,12 +129,23 @@ func (in *Inspector) PullFFOnly(ctx context.Context, repoPath, branch string) er
 		if _, err := in.git(ctx, checkout, "merge", "--ff-only", "origin/"+branch); err != nil {
 			return fmt.Errorf("ff-only merge origin/%s: %w", branch, err)
 		}
+		if err := in.updateSubmodules(ctx, checkout); err != nil {
+			return fmt.Errorf("after fast-forward: %w", err)
+		}
 		return nil
 	}
 
 	spec := branch + ":" + branch
 	if _, err := in.git(ctx, abs, "fetch", "origin", spec); err != nil {
 		return fmt.Errorf("fetch origin %s: %w", spec, err)
+	}
+	return nil
+}
+
+// updateSubmodules checks nested submodules out to the commits recorded by dir's tip.
+func (in *Inspector) updateSubmodules(ctx context.Context, dir string) error {
+	if _, err := in.git(ctx, dir, "submodule", "update", "--init", "--recursive"); err != nil {
+		return fmt.Errorf("submodule update --init --recursive: %w", err)
 	}
 	return nil
 }
