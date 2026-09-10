@@ -2,6 +2,7 @@ package localgit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,8 +11,9 @@ import (
 // RemoveSafeCheckout drops a local branch checkout that the board marked safe to remove.
 //
 // Linked worktree: remove the worktree path, then delete the branch from the main tree.
-// Main worktree on the branch: fast-forward defaultBranch from origin (when behind),
-// switch to defaultBranch, then delete the branch.
+// Main worktree on the branch: bring defaultBranch in line with origin (ff-only when
+// possible; if default is not checked out and has diverged, move the local tip to
+// origin/<default>), switch to defaultBranch, then delete the branch.
 //
 // Uses `git branch -D` because squash-merged branches are often not ancestors of default.
 // Callers must re-check forge prune safety first. Branch names are validated; dirty trees refuse.
@@ -103,7 +105,7 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 			return fmt.Errorf("checkout is on %q, not %q", got, branch)
 		}
 		// Land on an up-to-date default instead of a stale tip after switch.
-		if err := in.ensureBranchFFFromOrigin(ctx, abs, defaultBranch); err != nil {
+		if err := in.ensureDefaultReadyForSafePrune(ctx, abs, defaultBranch); err != nil {
 			return fmt.Errorf("update default branch %s before remove: %w", defaultBranch, err)
 		}
 		if _, err := in.git(ctx, abs, "switch", defaultBranch); err != nil {
@@ -123,6 +125,45 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 	}
 	if _, err := in.git(ctx, main.Path, "branch", "-D", branch); err != nil {
 		return fmt.Errorf("worktree removed at %s; delete branch %s: %w", abs, branch, err)
+	}
+	return nil
+}
+
+// ensureDefaultReadyForSafePrune brings defaultBranch to origin before a main-worktree prune.
+// Prefers ff-only. If the branch is not checked out and has diverged, moves the local tip
+// to origin/<branch> so prune can land cleanly (discards local-only commits on that tip).
+func (in *Inspector) ensureDefaultReadyForSafePrune(ctx context.Context, repoPath, branch string) error {
+	err := in.ensureBranchFFFromOrigin(ctx, repoPath, branch)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, ErrDiverged) {
+		return err
+	}
+	if _, checkedOut := in.worktreeOnBranch(ctx, repoPath, branch); checkedOut {
+		return err
+	}
+	return in.resetUnusedBranchToOrigin(ctx, repoPath, branch)
+}
+
+// resetUnusedBranchToOrigin force-updates a non-checked-out local branch to origin/<branch>.
+func (in *Inspector) resetUnusedBranchToOrigin(ctx context.Context, repoPath, branch string) error {
+	branch = strings.TrimSpace(branch)
+	if err := ValidateBranchName(branch); err != nil {
+		return err
+	}
+	if _, checkedOut := in.worktreeOnBranch(ctx, repoPath, branch); checkedOut {
+		return fmt.Errorf("%w: %q is checked out; cannot reset for safe prune", ErrDiverged, branch)
+	}
+	if _, err := in.git(ctx, repoPath, "fetch", "origin", branch); err != nil {
+		return fmt.Errorf("fetch origin %s: %w", branch, err)
+	}
+	remoteRef := "origin/" + branch
+	if _, err := in.git(ctx, repoPath, "rev-parse", "--verify", remoteRef); err != nil {
+		return fmt.Errorf("missing %s after fetch", remoteRef)
+	}
+	if _, err := in.git(ctx, repoPath, "branch", "-f", branch, remoteRef); err != nil {
+		return fmt.Errorf("reset local %s to %s: %w", branch, remoteRef, err)
 	}
 	return nil
 }

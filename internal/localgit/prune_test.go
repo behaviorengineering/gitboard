@@ -106,3 +106,70 @@ func TestRemoveSafeCheckoutMainWorktree(t *testing.T) {
 		t.Fatalf("main vs origin after remove: %q (want 0 0)", string(count))
 	}
 }
+
+func TestRemoveSafeCheckoutMainWorktreeDivergedDefault(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	origin, local := setupPullRepos(t)
+	run := gitRunner(t)
+
+	run(local, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(local, "feat"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(local, "add", "feat")
+	run(local, "commit", "-m", "feat")
+
+	// Local main gains a unique commit while we sit on feature (diverged tip).
+	run(local, "branch", "tmp-main-edit", "main")
+	run(local, "checkout", "tmp-main-edit")
+	run(local, "commit", "--allow-empty", "-m", "local-main-only")
+	run(local, "branch", "-f", "main", "tmp-main-edit")
+	run(local, "checkout", "feature")
+	run(local, "branch", "-D", "tmp-main-edit")
+
+	// Origin main also advances so local main is ahead and behind.
+	run(origin, "commit", "--allow-empty", "-m", "origin-ahead-1")
+	run(origin, "commit", "--allow-empty", "-m", "origin-ahead-2")
+
+	countBefore, err := exec.Command("git", "-C", local, "fetch", "origin", "main").CombinedOutput()
+	if err != nil {
+		t.Fatalf("fetch: %v\n%s", err, countBefore)
+	}
+	count, err := exec.Command("git", "-C", local, "rev-list", "--left-right", "--count", "main...origin/main").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Fields(strings.TrimSpace(string(count)))
+	if len(parts) != 2 || parts[0] == "0" || parts[1] == "0" {
+		t.Fatalf("setup want diverged main, got %q (ahead behind vs origin)", string(count))
+	}
+
+	in := localgit.NewInspector(cliexec.New())
+	if err := in.RemoveSafeCheckout(context.Background(), local, "feature", "main"); err != nil {
+		t.Fatalf("RemoveSafeCheckout: %v", err)
+	}
+	cur, err := exec.Command("git", "-C", local, "branch", "--show-current").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(cur)); got != "main" {
+		t.Fatalf("current branch=%q want main", got)
+	}
+	after, err := exec.Command("git", "-C", local, "rev-list", "--left-right", "--count", "origin/main...main").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterParts := strings.Fields(strings.TrimSpace(string(after)))
+	if len(afterParts) != 2 || afterParts[0] != "0" || afterParts[1] != "0" {
+		t.Fatalf("main vs origin after remove: %q (want 0 0)", string(after))
+	}
+	list, err := exec.Command("git", "-C", local, "branch", "--list", "feature").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("feature branch still listed: %q", list)
+	}
+}

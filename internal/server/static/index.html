@@ -58,17 +58,12 @@
       <tbody id="rows"></tbody>
     </table>
   </main>
-  <section id="detail" class="detail" hidden>
-    <h2 id="detail-title">Failure detail</h2>
-    <div id="jobs"></div>
-    <pre id="triage" class="triage" hidden></pre>
-  </section>
   <div id="modal-root" class="modal-root" hidden>
     <div class="modal-backdrop" data-modal-dismiss></div>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <h2 id="modal-title" class="modal-title"></h2>
-      <p id="modal-body" class="modal-body"></p>
-      <p id="modal-detail" class="modal-detail" hidden></p>
+      <div id="modal-body" class="modal-body"></div>
+      <pre id="modal-detail" class="modal-detail" hidden></pre>
       <div class="modal-actions">
         <button type="button" id="modal-cancel" class="modal-btn modal-btn--ghost"></button>
         <button type="button" id="modal-confirm" class="modal-btn modal-btn--danger"></button>

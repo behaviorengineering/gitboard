@@ -245,6 +245,34 @@ func NewMux(opts Options) http.Handler {
 		writeJSON(w, result)
 	})
 
+	mux.HandleFunc("/api/local/sync/investigate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
+			return
+		}
+		if opts.Commands == nil {
+			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
+			return
+		}
+		var body dashboard.SyncInvestigationRequest
+		if err := decodeJSONBody(w, r, &body); err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		doc, _ := live.snapshot()
+		result, err := opts.Commands.InvestigateSync(ctx, doc, body)
+		if err != nil {
+			code := http.StatusInternalServerError
+			if dashboard.IsBadRequest(err) {
+				code = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), code)
+			return
+		}
+		writeJSON(w, result)
+	})
+
 	mux.HandleFunc("/api/agents/prune/investigate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
