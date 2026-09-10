@@ -1348,6 +1348,16 @@ a { color: var(--link); }
   margin: 0;
 }
 
+.sync-action.is-blocked {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.sync-action.is-blocked:hover {
+  background: rgba(62, 207, 142, 0.16);
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

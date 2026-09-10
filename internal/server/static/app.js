@@ -1634,6 +1634,9 @@ function syncRelationLabel(relation) {
 
 function syncRelationMessage(result) {
   if (result.dirty) {
+    if (result.relation === 'behind_only') {
+      return 'Origin is ahead, but the working tree is dirty. Clean or stash local changes before fast-forward.';
+    }
     return 'The working tree has local changes. Gitboard will not change this checkout automatically.';
   }
   switch (result.relation) {
@@ -1685,23 +1688,32 @@ function syncInspectionNode(result, request, project) {
   appendSyncCommitGroup(root, 'Local-only commits', result.ahead_count || 0, result.ahead);
   appendSyncCommitGroup(root, 'Origin-only commits', result.behind_count || 0, result.behind);
 
-  if (result.can_fast_forward && !result.dirty) {
+  const behindOnly = result.relation === 'behind_only' && (result.behind_count || 0) > 0;
+  if (behindOnly) {
     const actions = el('div', 'sync-actions');
     const pull = el('button', 'modal-btn modal-btn--ok sync-action');
     pull.type = 'button';
     setButtonLabel(pull, ICONS.pull, `Fast-forward ↓${result.behind_count}`);
-    pull.title = `Fast-forward local ${request.branch} from origin`;
-    pull.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      void pullFFCheckout({
-        project_id: project.id,
-        branch: request.branch,
-        repo_path: request.repo_path,
-        behind: result.behind_count,
-        button: pull,
+    if (result.dirty || !result.can_fast_forward) {
+      pull.disabled = true;
+      pull.classList.add('is-blocked');
+      pull.title = result.dirty
+        ? 'Pull blocked: working tree has local changes'
+        : 'Pull blocked: fast-forward is not available';
+    } else {
+      pull.title = `Fast-forward local ${request.branch} from origin`;
+      pull.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        void pullFFCheckout({
+          project_id: project.id,
+          branch: request.branch,
+          repo_path: request.repo_path,
+          behind: result.behind_count,
+          button: pull,
+        });
       });
-    });
+    }
     actions.appendChild(pull);
     root.appendChild(actions);
   }
