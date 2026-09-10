@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
@@ -23,6 +24,48 @@ import (
 
 type fakeExec struct {
 	responses map[string][]byte
+}
+
+type syncLocalFake struct {
+	result localgit.SyncInspection
+}
+
+func (f *syncLocalFake) ScanRoots(context.Context, []string) localgit.Discovery {
+	return localgit.Discovery{}
+}
+
+func (f *syncLocalFake) InspectPath(_ context.Context, path string) localgit.Status {
+	return localgit.Status{Mapped: true, Path: path, Branch: "main"}
+}
+
+func (f *syncLocalFake) EnrichOriginSync(context.Context, *localgit.Status) {}
+
+func (f *syncLocalFake) CommonGitDir(_ context.Context, path string) (string, error) {
+	return path, nil
+}
+
+func (f *syncLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) error {
+	return nil
+}
+
+func (f *syncLocalFake) OriginRemote(context.Context, string) (string, error) {
+	return "https://example.test/acme/app.git", nil
+}
+
+func (f *syncLocalFake) PullFFOnly(context.Context, string, string) error {
+	return nil
+}
+
+func (f *syncLocalFake) RemoveSafeCheckout(context.Context, string, string, string) error {
+	return nil
+}
+
+func (f *syncLocalFake) ContentOnDefault(context.Context, string, string, string) (bool, string, error) {
+	return false, "", nil
+}
+
+func (f *syncLocalFake) InspectSync(context.Context, string, string) (localgit.SyncInspection, error) {
+	return f.result, nil
 }
 
 func (f *fakeExec) LookPath(name string) (string, error) {
@@ -261,6 +304,47 @@ func TestPruneSafeValidation(t *testing.T) {
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 validation, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLocalSyncInvestigate(t *testing.T) {
+	path := t.TempDir()
+	local := &syncLocalFake{
+		result: localgit.SyncInspection{
+			Path:        path,
+			Branch:      "main",
+			Relation:    "diverged",
+			AheadCount:  1,
+			BehindCount: 6,
+		},
+	}
+	projects := []config.Project{{
+		ID:        "gh-app",
+		Label:     "App",
+		Host:      config.HostGitHub,
+		Path:      "acme/app",
+		LocalPath: path,
+	}}
+	fx := testFake()
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), local)
+	mux := server.NewMux(server.Options{
+		Doc:      config.File{Projects: projects},
+		Dash:     dash,
+		Commands: dashboard.NewCommands(dash),
+	})
+	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"main","repo_path":%q}`, path)
+	res := httptest.NewRequest(http.MethodPost, "/api/local/sync/investigate", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	}
+	var got dashboard.SyncInvestigation
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ProjectID != "gh-app" || got.Result.Relation != "diverged" || got.Result.BehindCount != 6 {
+		t.Fatalf("result: %+v", got)
 	}
 }
 

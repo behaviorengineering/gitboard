@@ -17,7 +17,7 @@ body {
   color: var(--text);
 }
 
-.top, main, .detail {
+.top, main {
   max-width: 1280px;
   margin: 0 auto;
   padding: 1rem 1.25rem;
@@ -941,6 +941,42 @@ button.branch-pull-ff.is-busy {
   background: color-mix(in srgb, var(--muted) 10%, transparent);
 }
 
+.branch-sync-inspect {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.25rem;
+  font: inherit;
+  font-size: 0.7rem;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  line-height: 1.2;
+  white-space: nowrap;
+  border-radius: 3px;
+  padding: 0.12rem 0.4rem;
+  color: var(--link);
+  border: 1px solid color-mix(in srgb, var(--link) 45%, transparent);
+  background: color-mix(in srgb, var(--link) 10%, transparent);
+}
+
+.branch-sync-inspect .mark-icon {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 auto;
+}
+
+.branch-sync-inspect:hover {
+  background: color-mix(in srgb, var(--link) 20%, transparent);
+}
+
+.branch-sync-inspect.is-busy {
+  opacity: 0.85;
+  cursor: wait;
+}
+
 .branch-chip--warn {
   color: var(--warn);
   border-color: rgba(240, 193, 75, 0.4);
@@ -1136,20 +1172,45 @@ button {
 .error { color: var(--bad); font-size: 0.85rem; }
 a { color: var(--link); }
 
+.modal-body .jobs {
+  white-space: normal;
+}
+
 .job-row {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+  flex-wrap: wrap;
   padding: 0.5rem 0;
   border-bottom: 1px solid #243041;
 }
 
-.triage {
-  white-space: pre-wrap;
-  background: var(--panel);
-  border-radius: 8px;
-  padding: 1rem;
-  overflow: auto;
+.job-row:last-child {
+  border-bottom: 0;
+}
+
+.job-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  border-radius: 3px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  border: 1px solid #3a4a5c;
+  background: rgba(231, 236, 243, 0.06);
+  color: var(--text);
+}
+
+.job-row button:hover {
+  background: rgba(231, 236, 243, 0.12);
+}
+
+.job-row a {
+  font-size: 0.82rem;
 }
 
 .modal-root {
@@ -1215,6 +1276,76 @@ a { color: var(--link); }
   line-height: 1.35;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.sync-investigation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sync-summary {
+  margin: 0;
+}
+
+.sync-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.sync-count {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid #2d3a49;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sync-commit-group {
+  margin: 0;
+}
+
+.sync-commit-heading {
+  margin: 0 0 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.sync-commit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sync-commit {
+  display: flex;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.sync-commit-sha {
+  flex: 0 0 auto;
+  color: var(--link);
+}
+
+.sync-commit-more {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.sync-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.1rem;
+}
+
+.sync-action {
+  margin: 0;
 }
 
 .modal-actions {

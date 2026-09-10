@@ -98,9 +98,39 @@ function safeHref(url) {
   return '';
 }
 
+function modalIsOpen() {
+  const root = document.getElementById('modal-root');
+  return Boolean(root && !root.hidden);
+}
+
+function setModalBodyContent(content) {
+  const body = document.getElementById('modal-body');
+  if (!body) return;
+  body.replaceChildren();
+  if (content == null) return;
+  if (typeof content === 'string') {
+    body.textContent = content;
+    return;
+  }
+  if (content instanceof Node) body.appendChild(content);
+}
+
+function setModalDetailText(text) {
+  const detail = document.getElementById('modal-detail');
+  if (!detail) return;
+  const detailText = String(text || '').trim();
+  if (detailText) {
+    detail.hidden = false;
+    detail.textContent = detailText;
+  } else {
+    detail.hidden = true;
+    detail.textContent = '';
+  }
+}
+
 /**
  * Theme confirm dialog. Resolves true when confirmed.
- * @param {{ title: string, body: string, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, info?: boolean }} opts
+ * @param {{ title: string, body?: string, bodyNode?: Node, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, info?: boolean, wide?: boolean }} opts
  */
 function confirmDialog(opts) {
   const root = document.getElementById('modal-root');
@@ -117,15 +147,12 @@ function confirmDialog(opts) {
 
   const info = Boolean(opts.info);
   title.textContent = opts.title || (info ? 'Details' : 'Confirm');
-  body.textContent = opts.body || '';
-  const detailText = String(opts.detail || '').trim();
-  if (detailText) {
-    detail.hidden = false;
-    detail.textContent = detailText;
+  if (opts.bodyNode instanceof Node) {
+    setModalBodyContent(opts.bodyNode);
   } else {
-    detail.hidden = true;
-    detail.textContent = '';
+    setModalBodyContent(opts.body || '');
   }
+  setModalDetailText(opts.detail || '');
 
   cancelBtn.hidden = info;
   if (modal) modal.classList.toggle('modal--wide', info || Boolean(opts.wide));
@@ -170,7 +197,6 @@ async function confirmAndRun(opts, work) {
   const modal = root?.querySelector('.modal');
   const title = document.getElementById('modal-title');
   const body = document.getElementById('modal-body');
-  const detail = document.getElementById('modal-detail');
   const cancelBtn = document.getElementById('modal-cancel');
   const confirmBtn = document.getElementById('modal-confirm');
   if (!root || !confirmBtn) {
@@ -179,12 +205,8 @@ async function confirmAndRun(opts, work) {
   }
 
   if (title) title.textContent = opts.busyTitle || opts.title || 'Working…';
-  if (body) body.textContent = opts.busyBody || 'Please wait…';
-  if (detail) {
-    const detailText = String(opts.detail || '').trim();
-    detail.hidden = !detailText;
-    detail.textContent = detailText;
-  }
+  if (body) setModalBodyContent(opts.busyBody || 'Please wait…');
+  setModalDetailText(opts.detail || '');
   if (cancelBtn) {
     cancelBtn.hidden = true;
     cancelBtn.disabled = true;
@@ -401,6 +423,11 @@ function localColumn(wts, local, branchName, project) {
       const span = el('span', 'branch-local-sync is-divergent', syncBits.join(' '));
       span.title = `${originSyncTitle(sync)} (local branch not checked out)`;
       cell.appendChild(span);
+      appendSyncInvestigateButton(cell, {
+        project,
+        branchName,
+        repoPath,
+      });
       appendPullButton(cell, {
         sync,
         project,
@@ -447,6 +474,15 @@ function localColumn(wts, local, branchName, project) {
     const span = el('span', 'branch-local-sync is-divergent', syncBits.join(' '));
     span.title = originSyncTitle(sync);
     cell.appendChild(span);
+  }
+  const syncIssue = Boolean(sync?.ahead || sync?.behind);
+  const dirtyWorktree = list.some((wt) => wt.dirty);
+  if (!local.error && (syncIssue || dirtyWorktree)) {
+    appendSyncInvestigateButton(cell, {
+      project,
+      branchName,
+      repoPath,
+    });
   }
   if (!local.error) {
     appendPullButton(cell, {
@@ -549,6 +585,24 @@ function appendPullButton(cell, { sync, project, branchName, repoPath, dirty, wh
       });
     });
   }
+  cell.appendChild(btn);
+}
+
+function appendSyncInvestigateButton(cell, { project, branchName, repoPath }) {
+  if (!project?.id || !branchName || !repoPath) return;
+  const btn = el('button', 'branch-sync-inspect');
+  btn.type = 'button';
+  setButtonLabel(btn, ICONS.search, 'inspect');
+  btn.title = `Investigate local ${branchName} versus origin`;
+  btn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    void investigateSync({
+      project_id: project.id,
+      branch: branchName,
+      repo_path: repoPath,
+    }, btn);
+  });
   cell.appendChild(btn);
 }
 
@@ -1108,26 +1162,72 @@ function projectPrune(row) {
   return trees.some((wt) => wt.prune_hint === 'safe' || wt.prune_hint === 'likely');
 }
 
+function projectCIFailed(row) {
+  return (row.branches || []).some((b) => CI_FAILED.has(String(b.ci_status || '').toLowerCase()));
+}
+
+function projectOpenReview(row) {
+  const openCount = (row.open_items?.pull_requests || 0) + (row.open_items?.merge_requests || 0);
+  return openCount > 0 || (row.branches || []).some((b) => b.open_review);
+}
+
+function projectConflicts(row) {
+  return (row.branches || []).some((b) => b.conflict);
+}
+
+/** True when any mapped checkout is behind-only vs origin (ff pull candidate). */
+function projectBehind(row) {
+  const local = row.local;
+  if (!local?.mapped) return false;
+  const syncBehind = (sync) => Boolean(sync?.behind) && !sync?.ahead;
+  for (const sync of local.origin_sync || []) {
+    if (syncBehind(sync)) return true;
+  }
+  if (syncBehind({ ahead: local.ahead, behind: local.behind })) return true;
+  for (const app of local.appearances || []) {
+    if (syncBehind({ ahead: app.ahead, behind: app.behind })) return true;
+    for (const sync of app.origin_sync || []) {
+      if (syncBehind(sync)) return true;
+    }
+    for (const wt of app.worktrees || []) {
+      if (syncBehind({ ahead: wt.ahead, behind: wt.behind })) return true;
+    }
+  }
+  for (const wt of local.worktrees || []) {
+    if (syncBehind({ ahead: wt.ahead, behind: wt.behind })) return true;
+  }
+  return false;
+}
+
+/**
+ * Higher means more board attention. Weights mirror filter chips:
+ * failed CI > conflicts > open review > dirty > prune > behind.
+ */
+function attentionRank(row) {
+  let score = 0;
+  if (projectCIFailed(row)) score += 1000;
+  if (projectConflicts(row)) score += 500;
+  if (projectOpenReview(row)) score += 200;
+  if (projectDirty(row)) score += 100;
+  if (projectPrune(row)) score += 50;
+  if (projectBehind(row)) score += 25;
+  return score;
+}
+
+function projectSortName(row) {
+  return String(row.label || row.id || row.path || '').toLowerCase();
+}
+
 function projectMatches(row, state) {
   if (state.scopes.size) {
     const key = scopeKey(row.host, row.org);
     if (!state.scopes.has(key)) return false;
   }
-  if (state.chips.ci_failed) {
-    const hit = (row.branches || []).some((b) => CI_FAILED.has(String(b.ci_status || '').toLowerCase()));
-    if (!hit) return false;
-  }
-  if (state.chips.open_review) {
-    const openCount = (row.open_items?.pull_requests || 0) + (row.open_items?.merge_requests || 0);
-    const hit = openCount > 0 || (row.branches || []).some((b) => b.open_review);
-    if (!hit) return false;
-  }
+  if (state.chips.ci_failed && !projectCIFailed(row)) return false;
+  if (state.chips.open_review && !projectOpenReview(row)) return false;
   if (state.chips.dirty && !projectDirty(row)) return false;
   if (state.chips.prune && !projectPrune(row)) return false;
-  if (state.chips.conflicts) {
-    const hit = (row.branches || []).some((b) => b.conflict);
-    if (!hit) return false;
-  }
+  if (state.chips.conflicts && !projectConflicts(row)) return false;
   if (state.q) {
     if (searchScore(row, state.q) < 0) return false;
   }
@@ -1141,10 +1241,20 @@ function filtersActive(state) {
 
 function filteredProjects() {
   const matched = (allProjects || []).filter((row) => projectMatches(row, filters));
-  if (!filters.q) return matched;
   return matched
-    .map((row, index) => ({ row, index, score: searchScore(row, filters.q) }))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((row, index) => ({
+      row,
+      index,
+      search: filters.q ? searchScore(row, filters.q) : 0,
+      attention: attentionRank(row),
+      name: projectSortName(row),
+    }))
+    .sort((a, b) => {
+      if (filters.q && b.search !== a.search) return b.search - a.search;
+      if (b.attention !== a.attention) return b.attention - a.attention;
+      if (a.name !== b.name) return a.name < b.name ? -1 : 1;
+      return a.index - b.index;
+    })
     .map((item) => item.row);
 }
 
@@ -1444,10 +1554,15 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
     await loadDashboard({ quiet: true, fresh: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (status) status.textContent = `Remove failed: ${msg}`;
+    if (status) status.textContent = '';
     setButtonIdle(button, {
       svg: ICONS.trash,
       label: 'safe to remove',
+    });
+    await infoDialog({
+      title: `${label}: remove failed`,
+      body: msg,
+      detail: worktree_path,
     });
   }
 }
@@ -1498,6 +1613,156 @@ async function pullFFCheckout({ project_id, branch, repo_path, behind, button })
       schedulePullFlush();
     }
   }
+}
+
+function syncRelationLabel(relation) {
+  switch (relation) {
+    case 'up_to_date':
+      return 'Up to date';
+    case 'behind_only':
+      return 'Behind only';
+    case 'ahead_only':
+      return 'Ahead only';
+    case 'diverged':
+      return 'Diverged';
+    case 'unrelated':
+      return 'Unrelated histories';
+    default:
+      return relation || 'Unknown';
+  }
+}
+
+function syncRelationMessage(result) {
+  if (result.dirty) {
+    return 'The working tree has local changes. Gitboard will not change this checkout automatically.';
+  }
+  switch (result.relation) {
+    case 'up_to_date':
+      return 'The local branch and origin point to the same history.';
+    case 'behind_only':
+      return 'Origin has commits that the local branch does not have. A fast-forward is safe.';
+    case 'ahead_only':
+      return 'The local branch has commits that are not on origin. Review them before publishing or discarding them.';
+    case 'diverged':
+      return 'Both sides have unique commits. Choose whether to preserve, rebase, merge, or discard local work before changing this checkout.';
+    case 'unrelated':
+      return 'The local branch and origin do not share a history. Automatic resolution is blocked.';
+    default:
+      return 'Git could not classify this branch safely.';
+  }
+}
+
+function appendSyncCommitGroup(root, label, count, commits) {
+  if (!count && (!commits || !commits.length)) return;
+  const group = el('section', 'sync-commit-group');
+  const heading = el('h3', 'sync-commit-heading', `${label} (${count})`);
+  group.appendChild(heading);
+  const list = el('ul', 'sync-commit-list');
+  for (const commit of commits || []) {
+    const item = el('li', 'sync-commit');
+    item.appendChild(el('code', 'sync-commit-sha', commit.sha || ''));
+    item.appendChild(el('span', '', commit.subject || '(no subject)'));
+    list.appendChild(item);
+  }
+  if (count > (commits || []).length) {
+    list.appendChild(el('li', 'sync-commit-more', `${count - commits.length} more not shown`));
+  }
+  group.appendChild(list);
+  root.appendChild(group);
+}
+
+function syncInspectionNode(result, request, project) {
+  const root = el('div', 'sync-investigation');
+  const summary = el('p', 'sync-summary', syncRelationMessage(result));
+  root.appendChild(summary);
+
+  const counts = el('div', 'sync-counts');
+  counts.appendChild(el('span', 'sync-count', `State: ${syncRelationLabel(result.relation)}`));
+  counts.appendChild(el('span', 'sync-count', `Ahead ↑${result.ahead_count || 0}`));
+  counts.appendChild(el('span', 'sync-count', `Behind ↓${result.behind_count || 0}`));
+  root.appendChild(counts);
+
+  appendSyncCommitGroup(root, 'Local-only commits', result.ahead_count || 0, result.ahead);
+  appendSyncCommitGroup(root, 'Origin-only commits', result.behind_count || 0, result.behind);
+
+  if (result.can_fast_forward && !result.dirty) {
+    const actions = el('div', 'sync-actions');
+    const pull = el('button', 'modal-btn modal-btn--ok sync-action');
+    pull.type = 'button';
+    setButtonLabel(pull, ICONS.pull, `Fast-forward ↓${result.behind_count}`);
+    pull.title = `Fast-forward local ${request.branch} from origin`;
+    pull.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void pullFFCheckout({
+        project_id: project.id,
+        branch: request.branch,
+        repo_path: request.repo_path,
+        behind: result.behind_count,
+        button: pull,
+      });
+    });
+    actions.appendChild(pull);
+    root.appendChild(actions);
+  }
+  return root;
+}
+
+async function investigateSync(request, btn) {
+  const status = document.getElementById('status');
+  setButtonBusy(btn, 'loading…', `Investigating local ${request.branch} versus origin`);
+  if (status) status.textContent = `Investigating ${request.project_id} / ${request.branch}…`;
+  const closed = infoDialog({
+    title: `${request.project_id} / ${request.branch}: local sync`,
+    body: 'Refreshing origin and comparing commits…',
+    wide: true,
+  });
+  try {
+    const res = await fetch('/api/local/sync/investigate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    const text = await res.text();
+    if (!modalIsOpen()) {
+      await closed;
+      return;
+    }
+    if (!res.ok) {
+      setModalBodyContent(text.trim() || `HTTP ${res.status}`);
+      setModalDetailText(request.repo_path);
+      await closed;
+      return;
+    }
+    const data = JSON.parse(text);
+    const result = data.result || {};
+    setModalBodyContent(syncInspectionNode(result, request, { id: request.project_id }));
+    const detailLines = [
+      result.path && `Path: ${result.path}`,
+      result.current_branch && `Checked out: ${result.current_branch}`,
+      result.upstream && `Upstream: ${result.upstream}`,
+      result.local_sha && `Local: ${result.local_sha}`,
+      result.remote_sha && `Origin: ${result.remote_sha}`,
+      result.merge_base && `Merge base: ${result.merge_base}`,
+      result.dirty_files?.length && `Changed files:\n${result.dirty_files.join('\n')}`,
+    ].filter(Boolean);
+    setModalDetailText(detailLines.join('\n\n'));
+    if (status) status.textContent = '';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (modalIsOpen()) {
+      setModalBodyContent(msg);
+      setModalDetailText(request.repo_path);
+    }
+    if (status) status.textContent = '';
+  } finally {
+    setButtonIdle(btn, {
+      svg: ICONS.search,
+      label: 'inspect',
+      title: `Investigate local ${request.branch} versus origin`,
+    });
+  }
+  await closed;
 }
 
 async function investigatePrune(body, btn) {
@@ -1553,53 +1818,70 @@ async function investigatePrune(body, btn) {
 }
 
 async function showFailures(project, branch) {
-  const detail = document.getElementById('detail');
-  const jobsRoot = document.getElementById('jobs');
-  const triage = document.getElementById('triage');
-  detail.hidden = false;
-  triage.hidden = true;
   const branchName = branch?.name ? ` / ${branch.name}` : '';
-  document.getElementById('detail-title').textContent = `${project.label}${branchName}: failed jobs`;
-  jobsRoot.innerHTML = 'Loading jobs…';
+  const title = `${project.label}${branchName}: failed jobs`;
   const runID = branch?.run_id || project.ci?.run_id || '';
-  const params = new URLSearchParams({ project: project.id, run_id: runID });
-  const res = await fetch(`/api/failures?${params}`);
-  if (!res.ok) {
-    jobsRoot.textContent = await res.text();
-    return;
-  }
-  const data = await res.json();
-  jobsRoot.innerHTML = '';
-  for (const job of data.jobs || []) {
-    const row = el('div', 'job-row');
-    row.appendChild(el('span', '', job.name || job.id));
-    if (job.web_url) {
-      const href = safeHref(job.web_url);
-      if (href) {
-        const a = el('a', '', 'log');
-        a.href = href;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        row.appendChild(a);
-      }
+  const closed = infoDialog({ title, body: 'Loading jobs…' });
+
+  try {
+    const params = new URLSearchParams({ project: project.id, run_id: runID });
+    const res = await fetch(`/api/failures?${params}`);
+    if (!modalIsOpen()) {
+      await closed;
+      return;
     }
-    const ai = el('button', '');
-    setButtonLabel(ai, ICONS.search, 'AI triage');
-    ai.addEventListener('click', () => {
-      void runTriage(project, job, runID, ai);
-    });
-    row.appendChild(ai);
-    jobsRoot.appendChild(row);
+    if (!res.ok) {
+      setModalBodyContent(await res.text());
+      await closed;
+      return;
+    }
+    const data = await res.json();
+    if (!modalIsOpen()) {
+      await closed;
+      return;
+    }
+    const jobs = data.jobs || [];
+    if (!jobs.length) {
+      setModalBodyContent('No failed jobs returned. Try opening the pipeline link.');
+      await closed;
+      return;
+    }
+    const jobsRoot = el('div', 'jobs');
+    for (const job of jobs) {
+      const row = el('div', 'job-row');
+      row.appendChild(el('span', '', job.name || job.id));
+      if (job.web_url) {
+        const href = safeHref(job.web_url);
+        if (href) {
+          const a = el('a', '', 'log');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          row.appendChild(a);
+        }
+      }
+      const ai = el('button', '');
+      ai.type = 'button';
+      setButtonLabel(ai, ICONS.search, 'AI triage');
+      ai.addEventListener('click', () => {
+        void runTriage(project, job, runID, ai);
+      });
+      row.appendChild(ai);
+      jobsRoot.appendChild(row);
+    }
+    setModalBodyContent(jobsRoot);
+  } catch (err) {
+    if (modalIsOpen()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setModalBodyContent(msg);
+    }
   }
-  if (!(data.jobs || []).length) {
-    jobsRoot.textContent = 'No failed jobs returned. Try opening the pipeline link.';
-  }
+  await closed;
 }
 
 async function runTriage(project, job, runID, button) {
-  const triage = document.getElementById('triage');
-  triage.hidden = false;
-  triage.textContent = 'Running triage…';
+  if (!modalIsOpen()) return;
+  setModalDetailText('Running triage…');
   setButtonBusy(button, 'triaging…');
   try {
     const res = await fetch('/api/triage', {
@@ -1613,13 +1895,14 @@ async function runTriage(project, job, runID, button) {
       }),
     });
     const text = await res.text();
+    if (!modalIsOpen()) return;
     if (!res.ok) {
-      triage.textContent = text;
+      setModalDetailText(text);
       return;
     }
     const data = JSON.parse(text);
     if (data.unavailable) {
-      triage.textContent = data.unavailable;
+      setModalDetailText(data.unavailable);
       return;
     }
     const lines = [
@@ -1629,7 +1912,12 @@ async function runTriage(project, job, runID, button) {
       data.confidence && `Confidence: ${data.confidence}`,
       data.model && `Model: ${data.model}`,
     ].filter(Boolean);
-    triage.textContent = lines.join('\n\n');
+    setModalDetailText(lines.join('\n\n'));
+  } catch (err) {
+    if (modalIsOpen()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setModalDetailText(msg);
+    }
   } finally {
     setButtonIdle(button, { svg: ICONS.search, label: 'AI triage' });
   }
