@@ -1,8 +1,19 @@
+import { Idiomorph } from './idiomorph.esm.js';
+
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text != null) node.textContent = text;
   return node;
+}
+
+/** Stable HTML id for Idiomorph matching (must be unique in the document). */
+function morphId(...parts) {
+  const body = parts
+    .map((p) => String(p ?? '').replace(/[^a-zA-Z0-9_-]+/g, '_'))
+    .filter(Boolean)
+    .join('-');
+  return `gb-${body || 'x'}`;
 }
 
 const ICONS = {
@@ -388,12 +399,9 @@ function copyPathButton(fullPath) {
   btn.type = 'button';
   btn.title = `Copy path: ${path}`;
   btn.setAttribute('aria-label', btn.title);
+  btn.dataset.action = 'copy-path';
+  btn.dataset.path = path;
   btn.insertAdjacentHTML('beforeend', ICONS.clipboard);
-  btn.addEventListener('click', (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    void copyText(path, btn);
-  });
   return btn;
 }
 
@@ -500,6 +508,10 @@ function localColumn(wts, local, branchName, project) {
 /** @type {Set<string>} */
 const pendingPulls = new Set();
 
+/** Keys that just finished pull successfully; cleared after a successful board paint or failed flush retry. */
+/** @type {Set<string>} */
+const recentPulled = new Set();
+
 /** @type {{ label: string, path: string, message: string }[]} */
 const pullFailures = [];
 
@@ -526,10 +538,14 @@ async function flushPullBatch() {
   const failures = pullFailures.splice(0, pullFailures.length);
   const status = document.getElementById('status');
   // loadDashboard bumps a generation token so this fresh fetch wins over an older in-flight poll.
-  try {
-    await loadDashboard({ quiet: true, fresh: true });
-  } catch {
-    // loadDashboard already writes status on error
+  let ok = await loadDashboard({ quiet: true, fresh: true });
+  if (!ok) {
+    ok = await loadDashboard({ quiet: true, fresh: true });
+  }
+  if (!ok) {
+    // Do not leave ephemeral "pulled" labels forever when the refresh fails.
+    recentPulled.clear();
+    applyBoard();
   }
   if (failures.length === 0) {
     if (status && !String(status.textContent || '').startsWith('Error:')) {
@@ -561,10 +577,21 @@ function appendPullButton(cell, { sync, project, branchName, repoPath, dirty, wh
   if (!project?.id || !branchName || !repoPath) return;
   const key = pullActionKey(project.id, branchName, repoPath);
   const pending = pendingPulls.has(key);
+  const justPulled = recentPulled.has(key);
   const btn = el('button', 'branch-pull-ff');
   btn.type = 'button';
+  btn.id = morphId('pull', project.id, branchName, repoPath);
+  btn.dataset.action = 'pull';
+  btn.dataset.projectId = project.id;
+  btn.dataset.branch = branchName;
+  btn.dataset.repoPath = repoPath;
+  btn.dataset.behind = String(sync.behind);
   if (pending) {
     setButtonBusy(btn, 'pulling…', `Pulling ${branchName} from origin…`);
+  } else if (justPulled) {
+    setButtonLabel(btn, ICONS.pull, 'pulled');
+    btn.disabled = true;
+    btn.title = `Fast-forwarded ${branchName} from origin`;
   } else if (dirty) {
     setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
     btn.disabled = true;
@@ -573,17 +600,6 @@ function appendPullButton(cell, { sync, project, branchName, repoPath, dirty, wh
   } else {
     setButtonLabel(btn, ICONS.pull, `pull ↓${sync.behind}`);
     btn.title = `Fast-forward local ${branchName} from origin (${sync.behind} behind)`;
-    btn.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      void pullFFCheckout({
-        project_id: project.id,
-        branch: branchName,
-        repo_path: repoPath,
-        behind: sync.behind,
-        button: btn,
-      });
-    });
   }
   cell.appendChild(btn);
 }
@@ -592,17 +608,13 @@ function appendSyncInvestigateButton(cell, { project, branchName, repoPath }) {
   if (!project?.id || !branchName || !repoPath) return;
   const btn = el('button', 'branch-sync-inspect');
   btn.type = 'button';
+  btn.id = morphId('inspect', project.id, branchName, repoPath);
+  btn.dataset.action = 'inspect-sync';
+  btn.dataset.projectId = project.id;
+  btn.dataset.branch = branchName;
+  btn.dataset.repoPath = repoPath;
   setButtonLabel(btn, ICONS.search, 'inspect');
   btn.title = `Investigate local ${branchName} versus origin`;
-  btn.addEventListener('click', (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    void investigateSync({
-      project_id: project.id,
-      branch: branchName,
-      repo_path: repoPath,
-    }, btn);
-  });
   cell.appendChild(btn);
 }
 
@@ -694,6 +706,11 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
     pruneHint === 'likely' ? 'branch-item--prune-likely' : '',
   ].filter(Boolean).join(' ');
   const item = el('li', itemClass);
+  if (project?.id && b.name) {
+    item.id = morphId('br', project.id, b.name);
+    item.dataset.projectId = project.id;
+    item.dataset.branch = b.name;
+  }
 
   const marks = el('span', 'branch-marks');
   if (b.open_review) marks.appendChild(iconMark(ICONS.pr, 'mark--review', `open ${reviewKind}`));
@@ -724,6 +741,11 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
   if (pruneHint === 'safe') {
     const btn = el('button', 'branch-chip branch-chip--ok branch-prune-safe');
     btn.type = 'button';
+    btn.id = morphId('prune', project.id, b.name, localWt?.path || local?.path || '');
+    btn.dataset.action = 'prune-safe';
+    btn.dataset.projectId = project.id;
+    btn.dataset.branch = b.name;
+    btn.dataset.worktreePath = localWt?.path || local?.path || '';
     setButtonLabel(btn, ICONS.trash, 'safe to remove');
     const bits = [];
     if (localWt.merged_id) bits.push(`merged ${reviewKind} #${localWt.merged_id}`);
@@ -731,14 +753,6 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
     if (mergedWhen) bits.push(mergedWhen);
     bits.push('Click to remove local branch');
     btn.title = bits.join(' · ');
-    btn.addEventListener('click', () => {
-      void pruneSafeCheckout({
-        project_id: project.id,
-        branch: b.name,
-        worktree_path: localWt?.path || local?.path || '',
-        button: btn,
-      });
-    });
     meta.appendChild(btn);
   } else if (pruneHint === 'likely') {
     const chip = el('span', 'branch-chip branch-chip--warn', 'likely removable');
@@ -748,16 +762,14 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
     meta.appendChild(chip);
     const inv = el('button', 'branch-investigate');
     inv.type = 'button';
+    inv.id = morphId('inv-prune', project.id, b.name, localWt?.path || local?.path || '');
+    inv.dataset.action = 'investigate-prune';
+    inv.dataset.projectId = project.id;
+    inv.dataset.branch = b.name;
+    inv.dataset.worktreePath = localWt?.path || local?.path || '';
+    inv.dataset.defaultBranch = local?.default_branch || 'main';
     setButtonLabel(inv, ICONS.search, 'Investigate');
     inv.title = 'Gather evidence into an agent session';
-    inv.addEventListener('click', () => {
-      void investigatePrune({
-        project_id: project.id,
-        branch: b.name,
-        worktree_path: localWt?.path || local?.path || '',
-        default_branch: local?.default_branch || 'main',
-      }, inv);
-    });
     meta.appendChild(inv);
   }
   if (b.open_review) {
@@ -779,12 +791,14 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
     if (failed && (b.run_id || project.ci?.run_id)) {
       const triageBtn = el('button', 'branch-triage');
       triageBtn.type = 'button';
+      triageBtn.id = morphId('triage', project.id, b.name || '', b.run_id || project.ci?.run_id || '');
+      triageBtn.dataset.action = 'triage';
+      triageBtn.dataset.projectId = project.id;
+      triageBtn.dataset.branch = b.name || '';
+      triageBtn.dataset.runId = b.run_id || project.ci?.run_id || '';
       triageBtn.title = 'Show failed jobs and AI triage';
       triageBtn.setAttribute('aria-label', triageBtn.title);
       triageBtn.appendChild(ci);
-      triageBtn.addEventListener('click', () => {
-        void showFailures(project, b);
-      });
       actions.appendChild(triageBtn);
     } else {
       actions.appendChild(ci);
@@ -940,25 +954,23 @@ function renderAppearances(local, project) {
   const wrap = el('div', 'project-appearances');
   for (const app of apps) {
     const row = el('div', 'appearance-row' + (app.primary ? ' appearance-row--primary' : ''));
+    if (project?.id) {
+      row.id = morphId('app', project.id, app.path || app.display_id || '');
+      row.dataset.projectId = project.id;
+    }
     const line = el('div', 'appearance-line');
     const copyBtn = copyPathButton(app.path);
     if (copyBtn) line.appendChild(copyBtn);
     const head = el('button', 'appearance-head');
     head.type = 'button';
     head.setAttribute('aria-expanded', 'false');
+    head.dataset.action = 'toggle-appearance';
     const id = el('span', 'project-local-path appearance-id', app.display_id || app.path || '');
     id.title = app.path || '';
     head.appendChild(id);
     head.appendChild(appearanceStatusMarks(app));
     const detail = renderAppearanceDetail(app);
     detail.hidden = true;
-    head.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      const open = head.getAttribute('aria-expanded') === 'true';
-      head.setAttribute('aria-expanded', open ? 'false' : 'true');
-      detail.hidden = open;
-      row.classList.toggle('is-open', !open);
-    });
     line.appendChild(head);
     const sync = appearanceBranchSync(app);
     const branchName = String(app.branch || '').trim();
@@ -1414,9 +1426,14 @@ function bindFilters() {
 
 function renderRows(projects) {
   const tbody = document.getElementById('rows');
-  tbody.innerHTML = '';
+  const next = document.createElement('tbody');
+  next.id = 'rows';
   for (const row of projects || []) {
     const tr = el('tr');
+    if (row.id) {
+      tr.id = morphId('proj', row.id);
+      tr.dataset.projectId = row.id;
+    }
     const titleCell = el('td', 'project-cell');
     if (row.org) {
       const orgLine = el('div', 'project-org');
@@ -1457,8 +1474,22 @@ function renderRows(projects) {
     }
     tr.appendChild(titleCell);
     tr.appendChild(branchesCell(row.branches, row.host, row));
-    tbody.appendChild(tr);
+    next.appendChild(tr);
   }
+  Idiomorph.morph(tbody, next, {
+    morphStyle: 'innerHTML',
+    callbacks: {
+      beforeNodeMorphed(oldNode, newNode) {
+        if (!(oldNode instanceof HTMLElement) || !(newNode instanceof HTMLElement)) return;
+        if (!oldNode.classList.contains('appearance-row') || !oldNode.classList.contains('is-open')) return;
+        newNode.classList.add('is-open');
+        const head = newNode.querySelector(':scope > .appearance-line > .appearance-head');
+        const detail = newNode.querySelector(':scope > .appearance-detail');
+        if (head) head.setAttribute('aria-expanded', 'true');
+        if (detail) detail.hidden = false;
+      },
+    },
+  });
 }
 
 let pollSeconds = 30;
@@ -1466,6 +1497,8 @@ let pollTimer = null;
 let loading = false;
 /** Monotonic id for in-flight dashboard fetches; only the latest may paint. */
 let dashboardGen = 0;
+/** @type {AbortController | null} */
+let dashboardAbort = null;
 
 function updatePollLabel() {
   const label = document.getElementById('poll-label');
@@ -1489,18 +1522,27 @@ function schedulePoll() {
   }, pollSeconds * 1000);
 }
 
+/**
+ * Fetch and paint the board. Returns true when this generation painted successfully.
+ * @param {{ quiet?: boolean, fresh?: boolean }} [opts]
+ */
 async function loadDashboard({ quiet = false, fresh = false } = {}) {
   const gen = ++dashboardGen;
+  if (dashboardAbort) {
+    dashboardAbort.abort();
+  }
+  const ac = new AbortController();
+  dashboardAbort = ac;
   loading = true;
   const status = document.getElementById('status');
   if (!quiet) status.textContent = 'Refreshing…';
   try {
     const url = fresh ? '/api/dashboard?fresh=1' : '/api/dashboard';
-    const res = await fetch(url, { cache: 'no-store' });
-    if (gen !== dashboardGen) return;
+    const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
+    if (gen !== dashboardGen) return false;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (gen !== dashboardGen) return;
+    if (gen !== dashboardGen) return false;
     if (typeof data.poll_interval_seconds === 'number') {
       const next = data.poll_interval_seconds;
       if (next !== pollSeconds) {
@@ -1509,16 +1551,26 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
         schedulePoll();
       }
     }
+    // Successful paint replaces ephemeral pull labels with server state.
+    recentPulled.clear();
     renderTooling(data.tooling);
     allProjects = Array.isArray(data.projects) ? data.projects : [];
     rebuildScopeMenu();
     applyBoard();
     status.textContent = `Updated ${data.generated_at || ''}`;
+    return true;
   } catch (err) {
-    if (gen !== dashboardGen) return;
+    if (gen !== dashboardGen) return false;
+    if (err && typeof err === 'object' && /** @type {{ name?: string }} */ (err).name === 'AbortError') {
+      return false;
+    }
     status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    return false;
   } finally {
-    if (gen === dashboardGen) loading = false;
+    if (gen === dashboardGen) {
+      loading = false;
+      if (dashboardAbort === ac) dashboardAbort = null;
+    }
   }
 }
 
@@ -1591,6 +1643,7 @@ async function pullFFCheckout({ project_id, branch, repo_path, behind, button })
     if (!res.ok) {
       throw new Error(text.trim() || `HTTP ${res.status}`);
     }
+    recentPulled.add(key);
     setButtonIdle(button, {
       svg: ICONS.pull,
       label: 'pulled',
@@ -1948,8 +2001,121 @@ document.getElementById('refresh').addEventListener('click', () => {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void loadDashboard({ quiet: true });
 });
+
+function findProjectById(id) {
+  const want = String(id || '');
+  if (!want) return null;
+  return allProjects.find((p) => p.id === want) || null;
+}
+
+function findBranchOnProject(project, branchName) {
+  const name = String(branchName || '');
+  if (!project || !name) return null;
+  const list = Array.isArray(project.branches) ? project.branches : [];
+  return list.find((b) => b.name === name) || { name, run_id: '', ci_status: 'failed' };
+}
+
+function bindBoardActions() {
+  const tbody = document.getElementById('rows');
+  if (!tbody || tbody.dataset.boundActions === '1') return;
+  tbody.dataset.boundActions = '1';
+  tbody.addEventListener('click', (ev) => {
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    const btn = target.closest('[data-action]');
+    if (!btn || !tbody.contains(btn)) return;
+    const action = btn.getAttribute('data-action');
+    if (!action) return;
+
+    if (action === 'copy-path') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void copyText(btn.getAttribute('data-path') || '', btn);
+      return;
+    }
+
+    if (action === 'toggle-appearance') {
+      ev.preventDefault();
+      const row = btn.closest('.appearance-row');
+      if (!row) return;
+      const detail = row.querySelector(':scope > .appearance-detail');
+      const open = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      if (detail) detail.hidden = open;
+      row.classList.toggle('is-open', !open);
+      return;
+    }
+
+    if (action === 'pull') {
+      if (btn.disabled || btn.classList.contains('is-busy') || btn.classList.contains('is-blocked')) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const behind = Number(btn.getAttribute('data-behind') || '0');
+      void pullFFCheckout({
+        project_id: btn.getAttribute('data-project-id') || '',
+        branch: btn.getAttribute('data-branch') || '',
+        repo_path: btn.getAttribute('data-repo-path') || '',
+        behind,
+        button: btn,
+      });
+      return;
+    }
+
+    if (action === 'inspect-sync') {
+      if (btn.disabled || btn.classList.contains('is-busy')) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      void investigateSync({
+        project_id: btn.getAttribute('data-project-id') || '',
+        branch: btn.getAttribute('data-branch') || '',
+        repo_path: btn.getAttribute('data-repo-path') || '',
+      }, btn);
+      return;
+    }
+
+    if (action === 'prune-safe') {
+      if (btn.disabled || btn.classList.contains('is-busy')) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      void pruneSafeCheckout({
+        project_id: btn.getAttribute('data-project-id') || '',
+        branch: btn.getAttribute('data-branch') || '',
+        worktree_path: btn.getAttribute('data-worktree-path') || '',
+        button: btn,
+      });
+      return;
+    }
+
+    if (action === 'investigate-prune') {
+      if (btn.disabled || btn.classList.contains('is-busy')) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      void investigatePrune({
+        project_id: btn.getAttribute('data-project-id') || '',
+        branch: btn.getAttribute('data-branch') || '',
+        worktree_path: btn.getAttribute('data-worktree-path') || '',
+        default_branch: btn.getAttribute('data-default-branch') || 'main',
+      }, btn);
+      return;
+    }
+
+    if (action === 'triage') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const project = findProjectById(btn.getAttribute('data-project-id') || '');
+      if (!project) return;
+      const branch = findBranchOnProject(project, btn.getAttribute('data-branch') || '');
+      if (branch && btn.getAttribute('data-run-id')) {
+        branch.run_id = btn.getAttribute('data-run-id');
+      }
+      void showFailures(project, branch);
+    }
+  });
+}
+
 bindFilters();
 bindModal();
+bindBoardActions();
 updatePollLabel();
 schedulePoll();
 void loadDashboard();
