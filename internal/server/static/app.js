@@ -1426,8 +1426,10 @@ function bindFilters() {
 
 function renderRows(projects) {
   const tbody = document.getElementById('rows');
-  const next = document.createElement('tbody');
-  next.id = 'rows';
+  // Build rows under a detached tbody, then morph its *children* into #rows.
+  // Morphing a second tbody (especially with id="rows") makes Idiomorph try to
+  // insert that element under the live #rows and throws HierarchyRequestError.
+  const scratch = document.createElement('tbody');
   for (const row of projects || []) {
     const tr = el('tr');
     if (row.id) {
@@ -1474,9 +1476,9 @@ function renderRows(projects) {
     }
     tr.appendChild(titleCell);
     tr.appendChild(branchesCell(row.branches, row.host, row));
-    next.appendChild(tr);
+    scratch.appendChild(tr);
   }
-  Idiomorph.morph(tbody, next, {
+  Idiomorph.morph(tbody, Array.from(scratch.children), {
     morphStyle: 'innerHTML',
     callbacks: {
       beforeNodeMorphed(oldNode, newNode) {
