@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -198,12 +199,19 @@ func runServe(args []string) error {
 	log.Printf("gitboard: uses gh and glab; local roots=%d; AI triage via llm in config; agents %s",
 		len(doc.Local.Roots), config.AgentsDir())
 
+	// Cancel in-flight handlers (they derive from r.Context()) when shutting down.
+	baseCtx, baseCancel := context.WithCancel(context.Background())
+	defer baseCancel()
+
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		BaseContext: func(net.Listener) context.Context {
+			return baseCtx
+		},
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -212,6 +220,8 @@ func runServe(args []string) error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
 	select {
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -220,10 +230,24 @@ func runServe(args []string) error {
 		return err
 	case sig := <-sigCh:
 		log.Printf("gitboard: shutting down (%s)", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		baseCancel()
+		// Stay under process-compose shutdown.timeout_seconds (10) so the port is freed
+		// before a watch restart binds again.
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
+			log.Printf("gitboard: graceful shutdown: %v", err)
+			if closeErr := srv.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+				log.Printf("gitboard: force close: %v", closeErr)
+			}
+		}
+		select {
+		case err := <-errCh:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return err
+			}
+		case <-time.After(2 * time.Second):
+			log.Printf("gitboard: listener exit still pending; continuing shutdown")
 		}
 		return nil
 	}
