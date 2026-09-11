@@ -1,0 +1,20 @@
+repo_id: gitboard
+source_sha: 0323fc3060cb23579ce4bd805b4f2109cf50494e
+generated_at: "2026-09-11T07:45:37Z"
+typology_version: typology dev
+mode: discover
+module_scope: .
+snapshot_path: snapshot.yaml
+architecture_path: architecture_brief.md
+refine_status: complete
+graph_path: graph.txt
+package_contracts_path: package_contracts.md
+package_roles_path: package_roles.yaml
+package_rlm_context_path: package_rlm_context.md
+package_capability_constraints_path: package_capability_constraints.yaml
+slice_objective_claims_path: slice_objective_claims.yaml
+slice_objective_ledger_path: slice_objective_ledger.yaml
+cluster_proposal_path: cluster_proposal.md
+refined_snapshot_path: refined_snapshot.yaml
+journey_path: journey.md
+human_intervention_path: human_intervention.md

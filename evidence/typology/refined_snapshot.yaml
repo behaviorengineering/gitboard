@@ -1,0 +1,182 @@
+id: gitboard-typology-refined
+scope:
+    modules:
+        - .
+slices:
+    - id: board
+      objective: internal/board defines the JSON data shapes shared across the dashboard UI and forge adapters.
+      owns:
+        - id: internal-board
+          path: internal/board
+          layer: domain
+    - id: cliexec
+      objective: The package provides a runner interface for executing external processes.
+      owns:
+        - id: internal-cliexec
+          path: internal/cliexec
+          layer: domain
+    - id: dashboard
+      objective: The package provides mechanisms to collect and investigate synchronization and pull request data.
+      owns:
+        - id: internal-dashboard
+          path: internal/dashboard
+          layer: domain
+    - id: gitboard
+      objective: The package serves as a command-line entrypoint for the gitboard application.
+      surfaces:
+        - id: gitboard-cli
+          kind: cli
+          components:
+            - id: cmd-gitboard
+              path: cmd/gitboard
+    - id: llm
+      objective: The package provides an OpenAI-compatible chat completions client to interface with external LLM services.
+      owns:
+        - id: internal-llm
+          path: internal/llm
+          layer: domain
+    - id: localgit
+      objective: The package provides capabilities for inspecting local git worktrees and synchronizing branch states.
+      owns:
+        - id: internal-localgit
+          path: internal/localgit
+          layer: domain
+    - id: observability
+      objective: The package bootstraps OpenTelemetry and manages error-only inference dumps via a failure dump processor.
+      owns:
+        - id: internal-observability
+          path: internal/observability
+          layer: domain
+    - id: pruneagent
+      objective: The package investigates and decides the lifecycle status of local-only or removable branches.
+      owns:
+        - id: internal-pruneagent
+          path: internal/pruneagent
+          layer: domain
+    - id: remotegit
+      objective: The package adapts external Git provider data into internal board DTOs.
+      owns:
+        - id: internal-remotegit
+          path: internal/remotegit
+          layer: domain
+    - id: server
+      objective: The server package provides HTTP services and initializes request multiplexing.
+      surfaces:
+        - id: server-ui
+          kind: ui
+          components:
+            - id: internal-server
+              path: internal/server
+    - id: syncproj
+      objective: The package aggregates project information from external forges like GitHub and GitLab.
+      owns:
+        - id: internal-syncproj
+          path: internal/syncproj
+          layer: domain
+    - id: triage
+      objective: The package provides an Analyzer to process job and log information via a Request/Response pattern.
+      owns:
+        - id: internal-triage
+          path: internal/triage
+          layer: domain
+libraries:
+    - id: config
+      purpose: Shared technical package without domain knowledge
+      owns:
+        - id: internal-config
+          path: internal/config
+          layer: domain
+sliceBindings:
+    - from: remotegit
+      to: board
+      kind: reads
+    - from: remotegit
+      to: cliexec
+      kind: reads
+    - from: remotegit
+      to: config
+      kind: reads
+    - from: server
+      to: config
+      kind: reads
+    - from: server
+      to: dashboard
+      kind: reads
+    - from: server
+      to: pruneagent
+      kind: reads
+    - from: server
+      to: triage
+      kind: reads
+    - from: gitboard
+      to: cliexec
+      kind: reads
+    - from: gitboard
+      to: config
+      kind: reads
+    - from: gitboard
+      to: dashboard
+      kind: reads
+    - from: gitboard
+      to: llm
+      kind: reads
+    - from: gitboard
+      to: localgit
+      kind: reads
+    - from: gitboard
+      to: observability
+      kind: reads
+    - from: gitboard
+      to: pruneagent
+      kind: reads
+    - from: gitboard
+      to: remotegit
+      kind: reads
+    - from: gitboard
+      to: server
+      kind: reads
+    - from: gitboard
+      to: syncproj
+      kind: reads
+    - from: gitboard
+      to: triage
+      kind: reads
+    - from: dashboard
+      to: board
+      kind: reads
+    - from: dashboard
+      to: config
+      kind: reads
+    - from: dashboard
+      to: localgit
+      kind: reads
+    - from: dashboard
+      to: remotegit
+      kind: reads
+    - from: llm
+      to: config
+      kind: reads
+    - from: pruneagent
+      to: cliexec
+      kind: reads
+    - from: pruneagent
+      to: llm
+      kind: reads
+    - from: pruneagent
+      to: localgit
+      kind: reads
+    - from: syncproj
+      to: config
+      kind: reads
+    - from: syncproj
+      to: remotegit
+      kind: reads
+    - from: triage
+      to: config
+      kind: reads
+    - from: triage
+      to: llm
+      kind: reads
+    - from: localgit
+      to: cliexec
+      kind: reads

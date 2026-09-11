@@ -1,0 +1,41 @@
+slices:
+    - id: board
+      claims:
+        - data_shape
+    - id: cliexec
+      claims:
+        - exec_process
+    - id: dashboard
+      claims:
+        - aggregate_views
+    - id: gitboard
+      claims:
+        - run_cli
+    - id: llm
+      claims:
+        - adapt_external
+        - fill_dto
+    - id: localgit
+      claims:
+        - synchronize_state
+        - fill_dto
+    - id: observability
+      claims:
+        - observability
+    - id: pruneagent
+      claims:
+        - orchestrate
+    - id: remotegit
+      claims:
+        - adapt_external
+        - fill_dto
+    - id: server
+      claims:
+        - serve_http
+        - wire_handlers
+    - id: syncproj
+      claims:
+        - aggregate_views
+    - id: triage
+      claims:
+        - own_domain_rules

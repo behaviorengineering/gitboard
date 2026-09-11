@@ -1,0 +1,93 @@
+packages:
+    - path: cmd/gitboard
+      is:
+        - run_cli
+      must_not:
+        - own_domain_rules
+        - serve_http
+      source: role_rlm
+      role: entrypoint
+    - path: internal/board
+      is:
+        - data_shape
+      must_not:
+        - synchronize_state
+        - merge_adapters
+        - serve_http
+        - orchestrate
+        - own_domain_rules
+        - run_cli
+        - wire_handlers
+      filled_by:
+        - internal/dashboard
+        - internal/remotegit
+      source: role_rlm
+      role: dto
+    - path: internal/cliexec
+      is:
+        - exec_process
+      must_not:
+        - run_cli
+        - own_domain_rules
+      source: role_table
+      role: exec_runner
+    - path: internal/config
+      is:
+        - config
+      must_not:
+        - own_domain_rules
+      source: role_rlm
+      role: config
+    - path: internal/dashboard
+      is:
+        - aggregate_views
+      must_not:
+        - serve_http
+        - run_cli
+      source: role_rlm
+      role: aggregator
+    - path: internal/llm
+      is:
+        - adapt_external
+        - fill_dto
+      source: role_rlm
+      role: adapter
+    - path: internal/localgit
+      source: role_table
+      role: unknown
+    - path: internal/observability
+      is:
+        - observability
+      must_not:
+        - config
+        - own_domain_rules
+      source: role_table
+      role: observability
+    - path: internal/pruneagent
+      source: role_table
+      role: unknown
+    - path: internal/remotegit
+      is:
+        - adapt_external
+        - fill_dto
+      source: role_rlm
+      role: adapter
+    - path: internal/server
+      is:
+        - serve_http
+        - wire_handlers
+      must_not:
+        - own_domain_rules
+      source: role_table
+      role: server
+    - path: internal/syncproj
+      is:
+        - aggregate_views
+      must_not:
+        - serve_http
+        - run_cli
+      source: role_rlm
+      role: aggregator
+    - path: internal/triage
+      source: role_table
+      role: unknown

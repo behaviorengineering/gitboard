@@ -1,0 +1,171 @@
+slices:
+    - id: board
+      owned_paths:
+        - internal/board
+      evidence:
+        - filled_by=[internal/dashboard
+        - internal/remotegit]
+        - role=dto
+        - data_shape
+      claims:
+        - data_shape
+      objective: internal/board defines the JSON data shapes shared across the dashboard UI and forge adapters.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: cliexec
+      owned_paths:
+        - internal/cliexec
+      evidence:
+        - 'importsOsExec: true'
+        - 'mechanicalEvidence: imports_os_exec'
+        - exports_run_surface
+        - Runner.Run
+        - Runner.RunJSON
+      claims:
+        - exec_process
+      objective: The package provides a runner interface for executing external processes.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: dashboard
+      owned_paths:
+        - internal/dashboard
+      evidence:
+        - orchestration_export
+        - internal_imports_ge_2
+        - Service.Collect
+      claims:
+        - aggregate_views
+      objective: The package provides mechanisms to collect and investigate synchronization and pull request data.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: gitboard
+      owned_paths:
+        - cmd/gitboard
+      evidence:
+        - 'deliveryHint: cli'
+        - 'mechanicalRole: entrypoint'
+        - runServe
+        - runSync
+      claims:
+        - run_cli
+      objective: The package serves as a command-line entrypoint for the gitboard application.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: llm
+      owned_paths:
+        - internal/llm
+      evidence:
+        - Package llm provides an OpenAI-compatible chat completions client.
+        - imports_net_http
+        - exports_client_surface
+        - not_server
+        - Client.Chat
+        - Client.Enabled
+      claims:
+        - adapt_external
+        - fill_dto
+      objective: The package provides an OpenAI-compatible chat completions client to interface with external LLM services.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: localgit
+      owned_paths:
+        - internal/localgit
+      evidence:
+        - Inspector
+        - FillCheckoutMeta
+        - BranchSync
+        - SyncInspection
+      claims:
+        - synchronize_state
+        - fill_dto
+      objective: The package provides capabilities for inspecting local git worktrees and synchronizing branch states.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: observability
+      owned_paths:
+        - internal/observability
+      evidence:
+        - 'importsOtel: true'
+        - 'mechanicalEvidence: imports_otel'
+        - Init
+        - Shutdown
+        - failureDumpProcessor.OnStart
+      claims:
+        - observability
+      objective: The package bootstraps OpenTelemetry and manages error-only inference dumps via a failure dump processor.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: pruneagent
+      owned_paths:
+        - internal/pruneagent
+      evidence:
+        - Package pruneagent investigates local-only / likely-removable branches
+        - Service.Investigate
+        - VerdictDrop
+        - VerdictKeep
+      claims:
+        - orchestrate
+      objective: The package investigates and decides the lifecycle status of local-only or removable branches.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: remotegit
+      owned_paths:
+        - internal/remotegit
+      evidence:
+        - board.FailedJob
+        - GitLab.JobLog
+        - GitHub
+        - adapt_external
+        - fill_dto
+      claims:
+        - adapt_external
+        - fill_dto
+      objective: The package adapts external Git provider data into internal board DTOs.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: server
+      owned_paths:
+        - internal/server
+      evidence:
+        - delivery:http
+        - imports_net_http
+        - NewMux
+        - go_embed
+        - embeds_static
+      claims:
+        - serve_http
+        - wire_handlers
+      objective: The server package provides HTTP services and initializes request multiplexing.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: syncproj
+      owned_paths:
+        - internal/syncproj
+      evidence:
+        - ListGitHub
+        - ListGitLab
+        - Discover
+        - 'importsNetHTTP: false'
+        - 'importsOsExec: false'
+      claims:
+        - aggregate_views
+      objective: The package aggregates project information from external forges like GitHub and GitLab.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: triage
+      owned_paths:
+        - internal/triage
+      evidence:
+        - Analyzer.Analyze
+        - Request.ProjectID
+        - Request.RunID
+        - Request.JobID
+        - Request.JobName
+        - Request.Log
+        - buildPrompt
+        - parseAnswer
+      claims:
+        - own_domain_rules
+      objective: The package provides an Analyzer to process job and log information via a Request/Response pattern.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
