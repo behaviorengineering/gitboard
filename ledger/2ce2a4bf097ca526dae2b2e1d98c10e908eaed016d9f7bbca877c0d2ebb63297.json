@@ -1,0 +1,21 @@
+{
+  "kind": "ledger",
+  "fingerprint": "2ce2a4bf097ca526dae2b2e1d98c10e908eaed016d9f7bbca877c0d2ebb63297",
+  "created_at": "2026-09-12T13:45:52Z",
+  "payload": {
+    "id": "triage",
+    "owned_paths": [
+      "internal/triage"
+    ],
+    "evidence": [
+      "Analyzer",
+      "Request",
+      "Response",
+      "New"
+    ],
+    "claims": null,
+    "objective": "Provides an analyzer for processing project job requests and generating summaries.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm_unclaimed"
+  }
+}
