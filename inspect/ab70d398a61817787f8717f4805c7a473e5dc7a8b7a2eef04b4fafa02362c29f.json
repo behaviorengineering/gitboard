@@ -1,0 +1,22 @@
+{
+  "kind": "inspect",
+  "fingerprint": "ab70d398a61817787f8717f4805c7a473e5dc7a8b7a2eef04b4fafa02362c29f",
+  "created_at": "2026-09-12T14:21:21Z",
+  "payload": {
+    "path": "cmd/gitboard",
+    "role": "entrypoint",
+    "confidence": 0.95,
+    "evidence": [
+      "has_main",
+      "rlm:\"main\", \"runInit\", \"runServe\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "entrypoint",
+    "llm_role": "entrypoint",
+    "agreement": "match",
+    "rlm_iterations": 3,
+    "prompt_tokens": 2826,
+    "completion_tokens": 498,
+    "total_tokens": 3324
+  }
+}
