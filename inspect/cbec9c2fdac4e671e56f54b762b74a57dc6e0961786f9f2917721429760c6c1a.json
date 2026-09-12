@@ -1,0 +1,18 @@
+{
+  "kind": "inspect",
+  "fingerprint": "cbec9c2fdac4e671e56f54b762b74a57dc6e0961786f9f2917721429760c6c1a",
+  "created_at": "2026-09-12T13:42:13Z",
+  "payload": {
+    "path": "internal/pruneagent",
+    "role": "adapter",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:\"Service.Investigate\", \"Service.gather\", \"Service.git\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "unknown",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 7
+  }
+}
