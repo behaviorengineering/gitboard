@@ -1,0 +1,26 @@
+{
+  "kind": "ledger",
+  "fingerprint": "16c11fd3118c9f113f44e2d663838aab7fee9d258c6cad6b21179fa0629a6729",
+  "created_at": "2026-09-12T14:01:08Z",
+  "payload": {
+    "id": "gitboard",
+    "owned_paths": [
+      "cmd/gitboard"
+    ],
+    "evidence": [
+      "hasMain: true",
+      "mechanicalRole: entrypoint",
+      "unexportedFuncs: main",
+      "runInit",
+      "runServe",
+      "runSync"
+    ],
+    "claims": [
+      "run_cli",
+      "orchestrate"
+    ],
+    "objective": "Provides the entrypoint for the local code-change board by running the CLI and orchestrating sub-processes.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
