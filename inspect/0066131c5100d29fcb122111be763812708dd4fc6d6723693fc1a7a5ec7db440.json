@@ -1,0 +1,18 @@
+{
+  "kind": "inspect",
+  "fingerprint": "0066131c5100d29fcb122111be763812708dd4fc6d6723693fc1a7a5ec7db440",
+  "created_at": "2026-09-12T13:40:48Z",
+  "payload": {
+    "path": "internal/remotegit",
+    "role": "adapter",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:\"GitHub\", \"GitLab\", \"JobLog\", \"ListGroupRepos\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "unknown",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 12
+  }
+}
