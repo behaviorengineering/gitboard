@@ -1,0 +1,21 @@
+{
+  "kind": "inspect",
+  "fingerprint": "543ccc9f75d2bf0b5b38c610b00fd55765c949a2e5d0be99d12b817ae97c70cd",
+  "created_at": "2026-09-12T13:59:54Z",
+  "payload": {
+    "path": "internal/llm",
+    "role": "adapter",
+    "confidence": 0.95,
+    "evidence": [
+      "imports_net_http",
+      "exports_client_surface",
+      "not_server",
+      "rlm:\"Client\", \"New\", \"Package llm provides an OpenAI-compatible chat completions client\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "adapter",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 2
+  }
+}
