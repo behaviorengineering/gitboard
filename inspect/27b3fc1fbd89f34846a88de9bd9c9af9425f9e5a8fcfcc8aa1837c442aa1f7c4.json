@@ -1,0 +1,18 @@
+{
+  "kind": "inspect",
+  "fingerprint": "27b3fc1fbd89f34846a88de9bd9c9af9425f9e5a8fcfcc8aa1837c442aa1f7c4",
+  "created_at": "2026-09-12T13:41:49Z",
+  "payload": {
+    "path": "internal/localgit",
+    "role": "adapter",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:\"Inspector.InspectSync\", \"BranchSync\", \"OriginFetchCache\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "unknown",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 11
+  }
+}
