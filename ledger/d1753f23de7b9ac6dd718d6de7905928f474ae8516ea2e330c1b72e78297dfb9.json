@@ -1,0 +1,22 @@
+{
+  "kind": "ledger",
+  "fingerprint": "d1753f23de7b9ac6dd718d6de7905928f474ae8516ea2e330c1b72e78297dfb9",
+  "created_at": "2026-09-12T13:43:50Z",
+  "payload": {
+    "id": "gitboard",
+    "owned_paths": [
+      "cmd/gitboard"
+    ],
+    "evidence": [
+      "hasMain: true",
+      "mechanicalRole: entrypoint"
+    ],
+    "claims": [
+      "run_cli",
+      "orchestrate"
+    ],
+    "objective": "A local code-change board for GitLab and GitHub.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
