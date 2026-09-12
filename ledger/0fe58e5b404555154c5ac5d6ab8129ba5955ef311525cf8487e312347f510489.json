@@ -1,0 +1,27 @@
+{
+  "kind": "ledger",
+  "fingerprint": "0fe58e5b404555154c5ac5d6ab8129ba5955ef311525cf8487e312347f510489",
+  "created_at": "2026-09-12T14:23:35Z",
+  "payload": {
+    "id": "dashboard",
+    "owned_paths": [
+      "internal/dashboard"
+    ],
+    "evidence": [
+      "mechanicalRole: aggregator",
+      "Commands.InvestigateSync",
+      "Commands.PruneSafe",
+      "Commands.PullFF",
+      "Service.Collect"
+    ],
+    "claims": [
+      "aggregate_views"
+    ],
+    "objective": "The dashboard package aggregates various views and investigation results for the system.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 8074,
+    "completion_tokens": 1203,
+    "total_tokens": 9277
+  }
+}
