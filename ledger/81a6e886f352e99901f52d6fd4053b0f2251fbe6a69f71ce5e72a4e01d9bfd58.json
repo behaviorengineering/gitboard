@@ -1,0 +1,24 @@
+{
+  "kind": "ledger",
+  "fingerprint": "81a6e886f352e99901f52d6fd4053b0f2251fbe6a69f71ce5e72a4e01d9bfd58",
+  "created_at": "2026-09-12T14:22:57Z",
+  "payload": {
+    "id": "observability",
+    "owned_paths": [
+      "internal/observability"
+    ],
+    "evidence": [
+      "Package observability bootstraps OTEL",
+      "imports_otel"
+    ],
+    "claims": [
+      "observability"
+    ],
+    "objective": "Bootstraps OTEL and manages error-only inference dumps.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 7575,
+    "completion_tokens": 775,
+    "total_tokens": 8350
+  }
+}
