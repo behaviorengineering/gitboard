@@ -1,0 +1,28 @@
+{
+  "kind": "ledger",
+  "fingerprint": "99812987fb03509e0ed9d9adf56e324b8c825b07f387195f74ea6f574c896f29",
+  "created_at": "2026-09-12T14:22:25Z",
+  "payload": {
+    "id": "cliexec",
+    "owned_paths": [
+      "internal/cliexec"
+    ],
+    "evidence": [
+      "imports_os_exec: true",
+      "mechanicalRole: exec_runner",
+      "mechanicalEvidence: imports_os_exec",
+      "exports_run_surface",
+      "Runner.Run",
+      "Runner.RunJSON"
+    ],
+    "claims": [
+      "exec_process"
+    ],
+    "objective": "Executes external processes via the os/exec package.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 5197,
+    "completion_tokens": 537,
+    "total_tokens": 5734
+  }
+}
