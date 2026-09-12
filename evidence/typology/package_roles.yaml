@@ -1,0 +1,262 @@
+packages:
+    - path: cmd/gitboard
+      role: entrypoint
+      confidence: 0.95
+      evidence:
+        - has_main
+        - rlm:"main", "runInit", "runServe"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: entrypoint
+      llm_role: entrypoint
+      agreement: match
+      rlm_iterations: 3
+    - path: internal/board
+      role: dto
+      confidence: 0.95
+      evidence:
+        - json_tags
+        - no_exported_funcs
+        - no_exported_methods
+        - shared_dto_multi_importer
+        - 'rlm:"json data types", "exportedFuncs: (none)", "exportedMethods: (none)"'
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: dto
+      llm_role: dto
+      agreement: match
+      rlm_iterations: 3
+    - path: internal/cliexec
+      role: exec_runner
+      confidence: 0.8
+      evidence:
+        - imports_os_exec
+        - exports_run_surface
+        - rlm:"Exec", "Runner.Run", "importsOsExec" contradiction_rejected
+      inspected_stage: 3
+      language: go
+      candidate_role: ""
+      mechanical_role: exec_runner
+      llm_role: unknown
+      agreement: abstain
+      rlm_iterations: 4
+    - path: internal/config
+      role: config
+      confidence: 0.95
+      evidence:
+        - load_save_exports
+        - rlm:"Load", "Save", "DefaultLLMModel", "File"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: config
+      llm_role: config
+      agreement: match
+      rlm_iterations: 3
+    - path: internal/dashboard
+      role: aggregator
+      confidence: 0.95
+      evidence:
+        - orchestration_export
+        - internal_imports_ge_2
+        - rlm:"Commands.InvestigateSync", "Commands.PruneSafe", "Commands.PullFF"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: aggregator
+      llm_role: aggregator
+      agreement: match
+      rlm_iterations: 12
+    - path: internal/llm
+      role: adapter
+      confidence: 0.95
+      evidence:
+        - imports_net_http
+        - exports_client_surface
+        - not_server
+        - rlm:"Client", "New", "HTTP *http.Client"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: adapter
+      llm_role: adapter
+      agreement: match
+      rlm_iterations: 2
+    - path: internal/localgit
+      role: adapter
+      confidence: 0.75
+      evidence:
+        - rlm:"Inspector.InspectSync", "BranchSync", "in.git(ctx, dir, ...)"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: unknown
+      llm_role: adapter
+      agreement: match
+      rlm_iterations: 4
+    - path: internal/observability
+      role: observability
+      confidence: 0.9
+      evidence:
+        - imports_otel
+        - rlm:"bootstraps OTEL", "Init", "Shutdown", "failureDumpProcessor" contradiction_rejected
+      inspected_stage: 3
+      language: go
+      candidate_role: ""
+      mechanical_role: observability
+      llm_role: unknown
+      agreement: abstain
+      rlm_iterations: 3
+    - path: internal/pruneagent
+      role: unknown
+      confidence: 0
+      evidence:
+        - rlm:"Service", "Investigate", "Run cliexec.Exec" contradiction_rejected
+      inspected_stage: 3
+      language: go
+      candidate_role: ""
+      mechanical_role: unknown
+      llm_role: unknown
+      agreement: abstain
+      rlm_iterations: 7
+    - path: internal/remotegit
+      role: adapter
+      confidence: 0.75
+      evidence:
+        - rlm:"GitHub", "GitLab"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: unknown
+      llm_role: adapter
+      agreement: match
+      rlm_iterations: 5
+    - path: internal/server
+      role: server
+      confidence: 0.9
+      evidence:
+        - delivery:http
+        - go_embed
+        - delivery:ui
+        - embeds_static
+        - imports_net_http
+        - http_surface_ident
+        - rlm:"NewMux", "staticFS" contradiction_rejected
+      inspected_stage: 3
+      language: go
+      candidate_role: ""
+      mechanical_role: server
+      llm_role: unknown
+      agreement: abstain
+      rlm_iterations: 12
+    - path: internal/syncproj
+      role: aggregator
+      confidence: 0.75
+      evidence:
+        - rlm:"Discover", "Lister", "AddProject"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: unknown
+      llm_role: aggregator
+      agreement: match
+      rlm_iterations: 4
+    - path: internal/triage
+      role: aggregator
+      confidence: 0.75
+      evidence:
+        - rlm:"Analyzer.Analyze", "Request", "Response"
+      inspected_stage: 3
+      candidate_role: ""
+      mechanical_role: unknown
+      llm_role: aggregator
+      agreement: match
+      rlm_iterations: 12
+edges:
+    - from: cmd/gitboard
+      to: internal/cliexec
+      kind: uses_runner
+    - from: cmd/gitboard
+      to: internal/config
+      kind: reads_config
+    - from: cmd/gitboard
+      to: internal/dashboard
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/llm
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/localgit
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/observability
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/pruneagent
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/remotegit
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/server
+      kind: serves_server
+    - from: cmd/gitboard
+      to: internal/syncproj
+      kind: imports
+    - from: cmd/gitboard
+      to: internal/triage
+      kind: imports
+    - from: internal/dashboard
+      to: internal/board
+      kind: fills_dto
+    - from: internal/dashboard
+      to: internal/config
+      kind: reads_config
+    - from: internal/dashboard
+      to: internal/localgit
+      kind: composes
+    - from: internal/dashboard
+      to: internal/remotegit
+      kind: composes
+    - from: internal/llm
+      to: internal/config
+      kind: reads_config
+    - from: internal/localgit
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/pruneagent
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/pruneagent
+      to: internal/llm
+      kind: imports
+    - from: internal/pruneagent
+      to: internal/localgit
+      kind: imports
+    - from: internal/remotegit
+      to: internal/board
+      kind: fills_dto
+    - from: internal/remotegit
+      to: internal/cliexec
+      kind: uses_runner
+    - from: internal/remotegit
+      to: internal/config
+      kind: reads_config
+    - from: internal/server
+      to: internal/config
+      kind: reads_config
+    - from: internal/server
+      to: internal/dashboard
+      kind: serves_server
+    - from: internal/server
+      to: internal/pruneagent
+      kind: imports
+    - from: internal/server
+      to: internal/triage
+      kind: imports
+    - from: internal/syncproj
+      to: internal/config
+      kind: reads_config
+    - from: internal/syncproj
+      to: internal/remotegit
+      kind: imports
+    - from: internal/triage
+      to: internal/config
+      kind: reads_config
+    - from: internal/triage
+      to: internal/llm
+      kind: imports

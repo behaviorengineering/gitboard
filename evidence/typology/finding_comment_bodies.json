@@ -1,0 +1,14 @@
+{
+  "comments": [
+    {
+      "finding": "`analysis`: SliceBinding analysis -\u003e git missing but cross-slice import exists (internal-pruneagent -\u003e internal-localgit)",
+      "fingerprint": "cea0f445242eaf34",
+      "body": "### Missing SliceBinding: `analysis` $\\rightarrow$ `git`\n\n  The `analysis` slice (specifically `internal/pruneagent`) currently imports `internal/localgit` from the `git` slice, but this relationship is not declared in the `refined_catalog_yaml`.\n\n  **Smell/Risk**\n  This creates \"dark matter\" in the topology—an unmapped dependency that makes the architecture harder to reason about and allows for silent drift in the `analysis` slice's scope.\n\n  **Approaches**\n  - **Formalize the binding (Strict)**: Update the catalog to include the `analysis` $\\rightarrow$ `git` slice binding.\n    - *Cost*: Low (minimal YAML update).\n  - **Accept as boundary debt (Debt)**: Leave the import unmapped in the catalog and resolve it in a future refinement cycle.\n    - *Cost*: Low (immediate), but increases topological uncertainty.\n\n  **Recommended Lean**\n  **Formalize the binding**. Since the import from `internal/pruneagent` to `internal/localgit` is evidenced and stable, Majordomo proposes updating the `refined_catalog_yaml` now to ensure the catalog accurately reflects the observed topology."
+    },
+    {
+      "finding": "`analysis`: SliceBinding analysis -\u003e runner missing but cross-slice import exists (internal-pruneagent -\u003e internal-cliexec)",
+      "fingerprint": "93cf779be9a704b2",
+      "body": "### Missing SliceBinding: `analysis` $\\rightarrow$ `runner`\n\n  The `analysis` slice (specifically `internal/pruneagent`) currently imports `internal/cliexec` from the `runner` slice, but this relationship is not yet formalized in the `refined_catalog_yaml`.\n\n  **The Smell**\n  This represents a mismatch between the observed topology and the intended architecture. Without a declared binding, the `analysis` slice's dependency on the `runner` infrastructure is \"dark matter\"—it exists in the code but is invisible to the architectural governance provided by Typology.\n\n  **Approaches**\n  * **Option A: Formalize the Binding (Strict)**\n    Update the `refined_catalog_yaml` to include a `sliceBinding` from `analysis` to `runner`.\n    *Cost: Low (one line of YAML).*\n  * **Option B: Accept as Boundary Debt (Lean)**\n    Leave the catalog as-is and acknowledge this as a temporary violation to be addressed in a future refinement cycle.\n    *Cost: Low (immediate), but increases architectural drift.*\n\n  **Recommended Lean**\n  **Option A**. Since `runner` is a stable technical slice, declaring this dependency now provides immediate clarity regarding the `analysis` slice's scope and prevents future drift."
+    }
+  ]
+}

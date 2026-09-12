@@ -1,0 +1,150 @@
+slices:
+    - id: analysis
+      owned_paths:
+        - internal/pruneagent
+        - internal/triage
+      evidence:
+        - Package pruneagent investigates local-only / likely-removable branches.
+        - Service.Investigate
+        - Analyzer.Analyze
+        - Request
+        - Response
+      claims:
+        - aggregate_views
+      objective: Analyzes project and job data to produce triage responses.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: dashboard
+      owned_paths:
+        - internal/dashboard
+      evidence:
+        - 'mechanicalRole: aggregator'
+        - Commands.InvestigateSync
+        - Commands.PruneSafe
+        - Commands.PullFF
+        - Service.Collect
+      claims:
+        - aggregate_views
+      objective: The dashboard package aggregates various views and investigation results for the system.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: dto/board
+      owned_paths:
+        - internal/board
+      evidence:
+        - role=dto
+        - is=[data_shape]
+        - 'packageDoc: "Package board contains the JSON data types shared across the dashboard UI'
+        - forge adapters
+        - and server handlers.
+        - 'mechanicalEvidence: json_tags'
+        - no_exported_funcs
+        - no_exported_methods
+        - shared_dto_multi_importer
+      claims:
+        - data_shape
+      objective: Provide JSON data types shared across the dashboard UI, forge adapters, and server handlers.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: git
+      owned_paths:
+        - internal/localgit
+        - internal/remotegit
+      evidence:
+        - adapt_external
+        - fill_dto
+        - FillCheckoutMeta
+        - GitHub
+        - GitLab
+        - NewGitHub
+        - NewGitLab
+      claims:
+        - adapt_external
+        - fill_dto
+      objective: Provides clients for interacting with remote Git forge APIs like GitHub and GitLab.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: gitboard
+      owned_paths:
+        - cmd/gitboard
+      evidence:
+        - 'package: `main'
+        - 'hasMain: true'
+        - 'deliveryHint: cli'
+        - 'mechanicalRole: entrypoint'
+      claims:
+        - run_cli
+        - orchestrate
+      objective: Acts as the command-line entrypoint to orchestrate the gitboard application.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: llm
+      owned_paths:
+        - internal/llm
+      evidence:
+        - 'mechanicalRole: adapter'
+        - 'mechanicalEvidence: imports_net_http'
+        - exports_client_surface
+        - Client.Chat
+        - Client.Enabled
+      claims:
+        - adapt_external
+        - fill_dto
+      objective: Provides an OpenAI-compatible chat completions client.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: observability
+      owned_paths:
+        - internal/observability
+      evidence:
+        - Package observability bootstraps OTEL
+        - imports_otel
+      claims:
+        - observability
+      objective: Bootstraps OTEL and manages error-only inference dumps.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: runner
+      owned_paths:
+        - internal/cliexec
+      evidence:
+        - 'imports_os_exec: true'
+        - 'mechanicalRole: exec_runner'
+        - 'mechanicalEvidence: imports_os_exec'
+        - exports_run_surface
+        - Runner.Run
+        - Runner.RunJSON
+      claims:
+        - exec_process
+      objective: Executes external processes via the os/exec package.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: server
+      owned_paths:
+        - internal/server
+      evidence:
+        - imports_net_http
+        - delivery:http
+        - delivery:ui
+        - go_embed
+        - embeds_static
+        - NewMux
+      claims:
+        - serve_http
+        - wire_handlers
+      objective: Provides an HTTP server interface and mux routing for the application.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: syncproj
+      owned_paths:
+        - internal/syncproj
+      evidence:
+        - is=[aggregate_views]
+        - 'exportedFuncs: Discover'
+        - FormatCandidates
+        - ParseSelection
+      claims:
+        - aggregate_views
+      objective: Aggregates views for project discovery and selection.
+      verdict: grounded
+      source: slice_objective_rlm_aligned

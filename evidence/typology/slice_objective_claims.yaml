@@ -1,0 +1,35 @@
+slices:
+    - id: analysis
+      claims:
+        - aggregate_views
+    - id: dashboard
+      claims:
+        - aggregate_views
+    - id: dto/board
+      claims:
+        - data_shape
+    - id: git
+      claims:
+        - adapt_external
+        - fill_dto
+    - id: gitboard
+      claims:
+        - run_cli
+        - orchestrate
+    - id: llm
+      claims:
+        - adapt_external
+        - fill_dto
+    - id: observability
+      claims:
+        - observability
+    - id: runner
+      claims:
+        - exec_process
+    - id: server
+      claims:
+        - serve_http
+        - wire_handlers
+    - id: syncproj
+      claims:
+        - aggregate_views
