@@ -1,0 +1,26 @@
+{
+  "kind": "ledger",
+  "fingerprint": "977b03153e3ecd9cff5ed4cb7bc8e39277914f28f5fb763a455a01c2f8f5632a",
+  "created_at": "2026-09-12T14:23:14Z",
+  "payload": {
+    "id": "syncproj",
+    "owned_paths": [
+      "internal/syncproj"
+    ],
+    "evidence": [
+      "is=[aggregate_views]",
+      "exportedFuncs: Discover",
+      "FormatCandidates",
+      "ParseSelection"
+    ],
+    "claims": [
+      "aggregate_views"
+    ],
+    "objective": "Aggregates views for project discovery and selection.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 5179,
+    "completion_tokens": 972,
+    "total_tokens": 6151
+  }
+}
