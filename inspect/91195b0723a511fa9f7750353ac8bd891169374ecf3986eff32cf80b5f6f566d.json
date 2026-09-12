@@ -1,0 +1,21 @@
+{
+  "kind": "inspect",
+  "fingerprint": "91195b0723a511fa9f7750353ac8bd891169374ecf3986eff32cf80b5f6f566d",
+  "created_at": "2026-09-12T14:21:11Z",
+  "payload": {
+    "path": "internal/triage",
+    "role": "aggregator",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:\"Analyzer.Analyze\", \"Request\", \"Response\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "unknown",
+    "llm_role": "aggregator",
+    "agreement": "match",
+    "rlm_iterations": 12,
+    "prompt_tokens": 23250,
+    "completion_tokens": 2940,
+    "total_tokens": 26190
+  }
+}
