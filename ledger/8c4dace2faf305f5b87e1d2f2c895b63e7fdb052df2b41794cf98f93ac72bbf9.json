@@ -1,0 +1,26 @@
+{
+  "kind": "ledger",
+  "fingerprint": "8c4dace2faf305f5b87e1d2f2c895b63e7fdb052df2b41794cf98f93ac72bbf9",
+  "created_at": "2026-09-12T14:23:43Z",
+  "payload": {
+    "id": "localgit",
+    "owned_paths": [
+      "internal/localgit"
+    ],
+    "evidence": [
+      "adapt_external",
+      "fill_dto",
+      "FillCheckoutMeta"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides mechanisms to inspect local git state and populate metadata for checkout operations.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 5107,
+    "completion_tokens": 574,
+    "total_tokens": 5681
+  }
+}
