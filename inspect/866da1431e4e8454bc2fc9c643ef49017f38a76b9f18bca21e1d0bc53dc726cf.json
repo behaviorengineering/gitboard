@@ -1,0 +1,21 @@
+{
+  "kind": "inspect",
+  "fingerprint": "866da1431e4e8454bc2fc9c643ef49017f38a76b9f18bca21e1d0bc53dc726cf",
+  "created_at": "2026-09-12T13:42:07Z",
+  "payload": {
+    "path": "internal/llm",
+    "role": "adapter",
+    "confidence": 0.95,
+    "evidence": [
+      "imports_net_http",
+      "exports_client_surface",
+      "not_server",
+      "rlm:\"Client\", \"OpenAI-compatible chat completions client\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "adapter",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 12
+  }
+}
