@@ -1,0 +1,28 @@
+{
+  "kind": "ledger",
+  "fingerprint": "de7c08b22529bb6ca463bff032d8854cecb1d8ea4bd68d60c5c3cdaae807c219",
+  "created_at": "2026-09-12T14:23:42Z",
+  "payload": {
+    "id": "llm",
+    "owned_paths": [
+      "internal/llm"
+    ],
+    "evidence": [
+      "mechanicalRole: adapter",
+      "mechanicalEvidence: imports_net_http",
+      "exports_client_surface",
+      "Client.Chat",
+      "Client.Enabled"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides an OpenAI-compatible chat completions client.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 12737,
+    "completion_tokens": 1121,
+    "total_tokens": 13858
+  }
+}
