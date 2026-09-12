@@ -1,0 +1,23 @@
+{
+  "kind": "inspect",
+  "fingerprint": "ae421c9c4ebad1989aa9671109980da731a07995417a273dc18d8daf3f0437ae",
+  "created_at": "2026-09-12T14:21:44Z",
+  "payload": {
+    "path": "internal/dashboard",
+    "role": "aggregator",
+    "confidence": 0.95,
+    "evidence": [
+      "orchestration_export",
+      "internal_imports_ge_2",
+      "rlm:\"Commands.InvestigateSync\", \"Commands.PruneSafe\", \"Commands.PullFF\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "aggregator",
+    "llm_role": "aggregator",
+    "agreement": "match",
+    "rlm_iterations": 12,
+    "prompt_tokens": 26919,
+    "completion_tokens": 3446,
+    "total_tokens": 30365
+  }
+}
