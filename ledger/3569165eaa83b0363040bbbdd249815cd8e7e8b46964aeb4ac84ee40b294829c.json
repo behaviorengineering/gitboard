@@ -1,0 +1,22 @@
+{
+  "kind": "ledger",
+  "fingerprint": "3569165eaa83b0363040bbbdd249815cd8e7e8b46964aeb4ac84ee40b294829c",
+  "created_at": "2026-09-12T14:03:24Z",
+  "payload": {
+    "id": "syncproj",
+    "owned_paths": [
+      "internal/syncproj"
+    ],
+    "evidence": [
+      "ForgeLister.ListGitHub",
+      "ForgeLister.ListGitLab"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides methods to list projects from external git providers and manage project selections.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
