@@ -1,0 +1,20 @@
+{
+  "kind": "inspect",
+  "fingerprint": "d0b02d42aa0a171bb32139d604fd611b7c836ef7861587aaa95bd12532351611",
+  "created_at": "2026-09-12T13:40:58Z",
+  "payload": {
+    "path": "internal/dashboard",
+    "role": "aggregator",
+    "confidence": 0.95,
+    "evidence": [
+      "orchestration_export",
+      "internal_imports_ge_2",
+      "rlm:\"InvestigateSync\", \"summarize\", \"attachLocal\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "aggregator",
+    "llm_role": "aggregator",
+    "agreement": "match",
+    "rlm_iterations": 5
+  }
+}
