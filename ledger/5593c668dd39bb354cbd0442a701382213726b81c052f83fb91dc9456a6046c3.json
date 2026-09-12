@@ -1,0 +1,19 @@
+{
+  "kind": "ledger",
+  "fingerprint": "5593c668dd39bb354cbd0442a701382213726b81c052f83fb91dc9456a6046c3",
+  "created_at": "2026-09-12T14:02:24Z",
+  "payload": {
+    "id": "pruneagent",
+    "owned_paths": [
+      "internal/pruneagent"
+    ],
+    "evidence": [
+      "Package pruneagent investigates local-only / likely-removable branches.",
+      "Service.Investigate"
+    ],
+    "claims": null,
+    "objective": "Investigate local-only or likely-removable branches.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm_unclaimed"
+  }
+}
