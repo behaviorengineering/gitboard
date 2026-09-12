@@ -1,0 +1,27 @@
+{
+  "kind": "ledger",
+  "fingerprint": "e0518c88f98580e0048cfb387f3d6e31c1e58b8e6e5dc9a8f8d98f7f2dca5e20",
+  "created_at": "2026-09-12T14:23:27Z",
+  "payload": {
+    "id": "gitboard",
+    "owned_paths": [
+      "cmd/gitboard"
+    ],
+    "evidence": [
+      "package: `main",
+      "hasMain: true",
+      "deliveryHint: cli",
+      "mechanicalRole: entrypoint"
+    ],
+    "claims": [
+      "run_cli",
+      "orchestrate"
+    ],
+    "objective": "Acts as the command-line entrypoint to orchestrate the gitboard application.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 7768,
+    "completion_tokens": 1219,
+    "total_tokens": 8987
+  }
+}
