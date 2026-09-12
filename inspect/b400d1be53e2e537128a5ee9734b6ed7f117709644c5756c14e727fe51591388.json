@@ -1,0 +1,20 @@
+{
+  "kind": "inspect",
+  "fingerprint": "b400d1be53e2e537128a5ee9734b6ed7f117709644c5756c14e727fe51591388",
+  "created_at": "2026-09-12T14:00:24Z",
+  "payload": {
+    "path": "internal/dashboard",
+    "role": "aggregator",
+    "confidence": 0.95,
+    "evidence": [
+      "orchestration_export",
+      "internal_imports_ge_2",
+      "rlm:\"Commands.InvestigateSync\", \"Commands.PruneSafe\", \"Service.Collect\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "aggregator",
+    "llm_role": "aggregator",
+    "agreement": "match",
+    "rlm_iterations": 12
+  }
+}
