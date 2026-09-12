@@ -1,0 +1,22 @@
+{
+  "kind": "inspect",
+  "fingerprint": "6d0a0f51f57a498a58ae40c50e9459770af7fcf604bff12516489090ad0b569e",
+  "created_at": "2026-09-12T13:41:37Z",
+  "payload": {
+    "path": "internal/board",
+    "role": "dto",
+    "confidence": 0.95,
+    "evidence": [
+      "json_tags",
+      "no_exported_funcs",
+      "no_exported_methods",
+      "shared_dto_multi_importer",
+      "rlm:\"AppearanceStandalone\", \"Dashboard\", \"ProjectSummary\", \"json_tags\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "dto",
+    "llm_role": "dto",
+    "agreement": "match",
+    "rlm_iterations": 3
+  }
+}
