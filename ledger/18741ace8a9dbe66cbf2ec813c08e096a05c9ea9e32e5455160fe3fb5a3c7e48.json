@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "18741ace8a9dbe66cbf2ec813c08e096a05c9ea9e32e5455160fe3fb5a3c7e48",
+  "created_at": "2026-09-12T14:22:49Z",
+  "payload": {
+    "id": "triage",
+    "owned_paths": [
+      "internal/triage"
+    ],
+    "evidence": [
+      "Analyzer.Analyze",
+      "Request",
+      "Response"
+    ],
+    "claims": [
+      "aggregate_views"
+    ],
+    "objective": "Analyzes project and job data to produce triage responses.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 7965,
+    "completion_tokens": 1994,
+    "total_tokens": 9959
+  }
+}
