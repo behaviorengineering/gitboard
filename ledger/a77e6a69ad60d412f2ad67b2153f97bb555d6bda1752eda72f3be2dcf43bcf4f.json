@@ -1,0 +1,27 @@
+{
+  "kind": "ledger",
+  "fingerprint": "a77e6a69ad60d412f2ad67b2153f97bb555d6bda1752eda72f3be2dcf43bcf4f",
+  "created_at": "2026-09-12T14:23:13Z",
+  "payload": {
+    "id": "remotegit",
+    "owned_paths": [
+      "internal/remotegit"
+    ],
+    "evidence": [
+      "GitHub",
+      "GitLab",
+      "NewGitHub",
+      "NewGitLab"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides clients for interacting with remote Git forge APIs like GitHub and GitLab.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 13189,
+    "completion_tokens": 1260,
+    "total_tokens": 14449
+  }
+}
