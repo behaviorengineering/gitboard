@@ -1,0 +1,21 @@
+{
+  "kind": "inspect",
+  "fingerprint": "b90d23a07a315b0371084b710bf5ed13c28a971ef9f0e481b9a7f751a63dc3d3",
+  "created_at": "2026-09-12T14:21:19Z",
+  "payload": {
+    "path": "internal/localgit",
+    "role": "adapter",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:\"Inspector.InspectSync\", \"BranchSync\", \"in.git(ctx, dir, ...)\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "unknown",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 4,
+    "prompt_tokens": 5105,
+    "completion_tokens": 784,
+    "total_tokens": 5889
+  }
+}
