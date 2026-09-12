@@ -1,0 +1,31 @@
+{
+  "kind": "ledger",
+  "fingerprint": "44465856817ced21cbf61115ac6403aba21659306e40a53dc5812c991d5e04fc",
+  "created_at": "2026-09-12T14:22:46Z",
+  "payload": {
+    "id": "board",
+    "owned_paths": [
+      "internal/board"
+    ],
+    "evidence": [
+      "role=dto",
+      "is=[data_shape]",
+      "packageDoc: \"Package board contains the JSON data types shared across the dashboard UI",
+      "forge adapters",
+      "and server handlers.",
+      "mechanicalEvidence: json_tags",
+      "no_exported_funcs",
+      "no_exported_methods",
+      "shared_dto_multi_importer"
+    ],
+    "claims": [
+      "data_shape"
+    ],
+    "objective": "Provide JSON data types shared across the dashboard UI, forge adapters, and server handlers.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 25978,
+    "completion_tokens": 2261,
+    "total_tokens": 28239
+  }
+}
