@@ -1,0 +1,25 @@
+{
+  "kind": "inspect",
+  "fingerprint": "613393c3f2801fb24e462385961a1b57e3e208b3df8686926e5a2a46d30d38c7",
+  "created_at": "2026-09-12T14:20:48Z",
+  "payload": {
+    "path": "internal/board",
+    "role": "dto",
+    "confidence": 0.95,
+    "evidence": [
+      "json_tags",
+      "no_exported_funcs",
+      "no_exported_methods",
+      "shared_dto_multi_importer",
+      "rlm:\"json data types\", \"exportedFuncs: (none)\", \"exportedMethods: (none)\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "dto",
+    "llm_role": "dto",
+    "agreement": "match",
+    "rlm_iterations": 3,
+    "prompt_tokens": 3330,
+    "completion_tokens": 475,
+    "total_tokens": 3805
+  }
+}
