@@ -1,0 +1,22 @@
+{
+  "kind": "ledger",
+  "fingerprint": "d7bc0024d373044e957aa188ee24073dc3dbe553f96537eb3d5f189adbd1936b",
+  "created_at": "2026-09-12T14:02:34Z",
+  "payload": {
+    "id": "dashboard",
+    "owned_paths": [
+      "internal/dashboard"
+    ],
+    "evidence": [
+      "mechanicalRole: aggregator",
+      "mechanicalEvidence: orchestration_export",
+      "internal_imports_ge_2"
+    ],
+    "claims": [
+      "aggregate_views"
+    ],
+    "objective": "Aggregates views for the dashboard.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
