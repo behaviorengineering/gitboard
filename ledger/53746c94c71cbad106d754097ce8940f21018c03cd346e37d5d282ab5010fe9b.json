@@ -1,0 +1,24 @@
+{
+  "kind": "ledger",
+  "fingerprint": "53746c94c71cbad106d754097ce8940f21018c03cd346e37d5d282ab5010fe9b",
+  "created_at": "2026-09-12T14:01:30Z",
+  "payload": {
+    "id": "board",
+    "owned_paths": [
+      "internal/board"
+    ],
+    "evidence": [
+      "json_tags",
+      "shared_dto_multi_importer",
+      "Dashboard",
+      "ProjectSummary",
+      "LocalStatus"
+    ],
+    "claims": [
+      "data_shape"
+    ],
+    "objective": "Provides shared JSON data structures used by the dashboard, adapters, and server.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
