@@ -1,0 +1,19 @@
+{
+  "kind": "inspect",
+  "fingerprint": "a7380042a900cebc358e16e98e0f878c3638bdf01bff33baee9ce69af0b788e7",
+  "created_at": "2026-09-12T13:59:42Z",
+  "payload": {
+    "path": "internal/config",
+    "role": "config",
+    "confidence": 0.95,
+    "evidence": [
+      "load_save_exports",
+      "rlm:\"Load\", \"Save\", \"DefaultLLMModel\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "config",
+    "llm_role": "config",
+    "agreement": "match",
+    "rlm_iterations": 4
+  }
+}
