@@ -1,0 +1,23 @@
+{
+  "kind": "ledger",
+  "fingerprint": "4bad1af4cf44474c49f4c2035034d2451a8903e983e33e7515ebada26d210e47",
+  "created_at": "2026-09-12T13:43:22Z",
+  "payload": {
+    "id": "observability",
+    "owned_paths": [
+      "internal/observability"
+    ],
+    "evidence": [
+      "imports_otel",
+      "Init",
+      "Shutdown",
+      "InitConfig"
+    ],
+    "claims": [
+      "observability"
+    ],
+    "objective": "Bootstraps OpenTelemetry and manages error-only inference dumps.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
