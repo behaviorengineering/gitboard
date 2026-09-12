@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "f25ef1a580d8e75f0210591f2d5acf43943642b9fd8bbd8ff7b480ceaa0887d8",
+  "created_at": "2026-09-12T13:44:04Z",
+  "payload": {
+    "id": "remotegit",
+    "owned_paths": [
+      "internal/remotegit"
+    ],
+    "evidence": [
+      "GitHub",
+      "GitLab",
+      "ListOrgRepos",
+      "ListGroupRepos",
+      "ProjectSummary"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides interfaces and clients for interacting with remote git providers like GitHub and GitLab to retrieve repository and project summaries.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
