@@ -1,0 +1,22 @@
+{
+  "kind": "ledger",
+  "fingerprint": "1f530f5d19adb0fede90a0934f0b9941c6dee6b98a5aa49eeee5a157848a5126",
+  "created_at": "2026-09-12T13:43:34Z",
+  "payload": {
+    "id": "localgit",
+    "owned_paths": [
+      "internal/localgit"
+    ],
+    "evidence": [
+      "role=adapter",
+      "FillCheckoutMeta"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides local git filesystem interaction and metadata population.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
