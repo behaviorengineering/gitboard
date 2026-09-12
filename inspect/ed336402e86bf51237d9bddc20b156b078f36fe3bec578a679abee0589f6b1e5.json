@@ -1,0 +1,19 @@
+{
+  "kind": "inspect",
+  "fingerprint": "ed336402e86bf51237d9bddc20b156b078f36fe3bec578a679abee0589f6b1e5",
+  "created_at": "2026-09-12T13:59:45Z",
+  "payload": {
+    "path": "cmd/gitboard",
+    "role": "entrypoint",
+    "confidence": 0.95,
+    "evidence": [
+      "has_main",
+      "rlm:`hasMain: true`"
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "entrypoint",
+    "llm_role": "entrypoint",
+    "agreement": "match",
+    "rlm_iterations": 6
+  }
+}
