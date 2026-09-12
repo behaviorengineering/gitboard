@@ -1,0 +1,22 @@
+{
+  "kind": "ledger",
+  "fingerprint": "231610b28cc271dc549fc816470fb1c52b900cb23589778ed509ed3426f27be8",
+  "created_at": "2026-09-12T14:04:04Z",
+  "payload": {
+    "id": "remotegit",
+    "owned_paths": [
+      "internal/remotegit"
+    ],
+    "evidence": [
+      "type GitHub struct { Run cliexec.Exec }",
+      "type GitLab struct { Run ... }"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides adapters for interacting with external Git providers like GitHub and GitLab.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
