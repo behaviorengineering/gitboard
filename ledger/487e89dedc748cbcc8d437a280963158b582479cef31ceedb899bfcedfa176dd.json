@@ -1,0 +1,23 @@
+{
+  "kind": "ledger",
+  "fingerprint": "487e89dedc748cbcc8d437a280963158b582479cef31ceedb899bfcedfa176dd",
+  "created_at": "2026-09-12T13:42:53Z",
+  "payload": {
+    "id": "cliexec",
+    "owned_paths": [
+      "internal/cliexec"
+    ],
+    "evidence": [
+      "imports_os_exec: true",
+      "mechanicalEvidence: imports_os_exec",
+      "exports_run_surface",
+      "Runner.Run"
+    ],
+    "claims": [
+      "exec_process"
+    ],
+    "objective": "Executes external processes using the operating system's execution capabilities.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
