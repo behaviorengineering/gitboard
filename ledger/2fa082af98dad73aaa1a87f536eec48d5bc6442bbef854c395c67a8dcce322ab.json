@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "2fa082af98dad73aaa1a87f536eec48d5bc6442bbef854c395c67a8dcce322ab",
+  "created_at": "2026-09-12T14:01:19Z",
+  "payload": {
+    "id": "triage",
+    "owned_paths": [
+      "internal/triage"
+    ],
+    "evidence": [
+      "role=adapter",
+      "is=[adapt_external",
+      "fill_dto]",
+      "type Request struct { ... json:\"project_id\" ... }",
+      "Analyzer.Analyze"
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides analysis capabilities by adapting external data into structured request and response types.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm"
+  }
+}
