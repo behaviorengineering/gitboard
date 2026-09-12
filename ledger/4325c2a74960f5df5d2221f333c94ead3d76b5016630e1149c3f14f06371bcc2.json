@@ -1,0 +1,29 @@
+{
+  "kind": "ledger",
+  "fingerprint": "4325c2a74960f5df5d2221f333c94ead3d76b5016630e1149c3f14f06371bcc2",
+  "created_at": "2026-09-12T14:23:50Z",
+  "payload": {
+    "id": "server",
+    "owned_paths": [
+      "internal/server"
+    ],
+    "evidence": [
+      "imports_net_http",
+      "delivery:http",
+      "delivery:ui",
+      "go_embed",
+      "embeds_static",
+      "NewMux"
+    ],
+    "claims": [
+      "serve_http",
+      "wire_handlers"
+    ],
+    "objective": "Provides an HTTP server interface and mux routing for the application.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 5168,
+    "completion_tokens": 539,
+    "total_tokens": 5707
+  }
+}
