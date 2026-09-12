@@ -1,0 +1,18 @@
+{
+  "kind": "inspect",
+  "fingerprint": "5f180f873b1b323c6aaa1495652ea52ca6249d532155e1c788886439d9f8cae0",
+  "created_at": "2026-09-12T13:59:22Z",
+  "payload": {
+    "path": "internal/triage",
+    "role": "adapter",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:\"Analyzer.Analyze\", \"Request\", \"Response\""
+    ],
+    "inspected_stage": 3,
+    "mechanical_role": "unknown",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 8
+  }
+}
