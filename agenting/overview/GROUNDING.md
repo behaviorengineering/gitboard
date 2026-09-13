@@ -1,3 +1,4 @@
+markdown: |
 # Overview
-
-High-level project grounding for review. Digest expands this from mission.md and architecture.md.
+The Majordomo agents operate within the `gitboard` ecosystem, a system designed to orchestrate git-based workflows through automated discovery, triage, and management. The mission centers on transforming raw repository state into actionable intelligence via specialized components like `triage` for data analysis and `syncproj` for project aggregation.
+The architecture follows a modular typology, distinguishing between domain-driven slices and technical libraries. Core orchestration is handled by the `gitboard` entrypoint, which leverages `localgit` and `remotegit` for state inspection and `llm` for intelligent reasoning. Observability is integrated via `observability` to manage inference telemetry, while `pruneagent` maintains repository hygiene. This structure ensures that agents interact with a stable, decoupled set of capabilities ranging from low-level git manipulation to high-level project triage.

@@ -1,5 +1,3 @@
-# Context branch
-
 <!-- majordomo-reading-nav:start -->
 **Reading path:** [Next: mission.md](mission.md) · [TOC](README.md)
 <!-- majordomo-reading-nav:end -->
@@ -13,15 +11,13 @@
 4. [conventions.md](conventions.md)
 5. [weaknesses.md](weaknesses.md)
 6. [chronology.md](chronology.md)
-7. `evidence/typology/` - appears after a Typology survey seed
+7. [evidence/typology/README.md](evidence/typology/README.md) - Typology seed briefing
 
 <!-- majordomo-reading-toc:end -->
 
-This orphan branch holds project understanding for the served repo.
-Never merge these files into the default branch.
-Context updates are PRs whose base is this branch.
-
+markdown: |
+# Context branch
+This orphan branch holds project understanding for the served repository. It serves as the source of truth for the Majordomo bootstrap process. These files are never merged into the default branch; instead, context updates are submitted via PRs targeting this branch.
 ## Story vs Typology evidence
-
-- Root markdown (`mission.md`, `architecture.md`, …) is the **teaching story**.
-- `evidence/typology/` holds Typology **seed evidence** for this digest proposal (for example `architecture_brief.md`). That brief is not the teaching story and not the confirmed `.typology/` catalog.
+Teaching Story: The root markdown files (`mission.md`, `architecture.md`, `conventions.md`, `weaknesses.md`, `chronology.md`, and `journey.md`) constitute the primary narrative and instructional flow.
+Typology Seed Evidence: The `evidence/typology/` directory contains seed evidence, such as `architecture_brief.md`. This data supports the digest proposal and represents the raw typology survey results rather than the finalized teaching story or the confirmed `.typology/` catalog.
