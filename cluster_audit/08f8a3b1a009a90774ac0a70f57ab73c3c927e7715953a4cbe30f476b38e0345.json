@@ -1,0 +1,25 @@
+{
+  "kind": "cluster_audit",
+  "fingerprint": "08f8a3b1a009a90774ac0a70f57ab73c3c927e7715953a4cbe30f476b38e0345",
+  "created_at": "2026-09-14T16:37:51Z",
+  "payload": {
+    "merges": [
+      {
+        "id": "git-adapters",
+        "packages": [
+          "internal/localgit",
+          "internal/remotegit"
+        ],
+        "verdict": "accept",
+        "reason": "Both packages serve as adapters for git operations, sharing the same mechanical role and lifecycle.",
+        "evidence": [
+          "internal/localgit: rlm:\"Inspector.InspectSync\", \"BranchSync\", \"in.git(ctx, dir, ...)\""
+        ]
+      }
+    ],
+    "rlm_iterations": 12,
+    "prompt_tokens": 29925,
+    "completion_tokens": 2692,
+    "total_tokens": 32617
+  }
+}
