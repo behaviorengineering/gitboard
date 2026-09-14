@@ -1,0 +1,22 @@
+{
+  "kind": "cluster_audit",
+  "fingerprint": "0c1195895a092e5c0eb0dedc771928ad3d104530e17b811e647fb85214f2e562",
+  "created_at": "2026-09-14T14:40:50Z",
+  "payload": {
+    "merges": [
+      {
+        "id": "git-ops",
+        "packages": [
+          "internal/observability",
+          "internal/syncproj"
+        ],
+        "verdict": "reject",
+        "reason": "The packages serve different functional roles (observability library vs product seed) and are only mechanically linked by being private to the same entrypoint."
+      }
+    ],
+    "rlm_iterations": 12,
+    "prompt_tokens": 30170,
+    "completion_tokens": 2689,
+    "total_tokens": 32859
+  }
+}
