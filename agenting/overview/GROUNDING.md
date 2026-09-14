@@ -1,3 +1,5 @@
+yaml
+markdown: |
 # Overview
-
-High-level project grounding for review. Digest expands this from mission.md and architecture.md.
+The Majordomo agent operates within the Gitboard ecosystem to orchestrate local and remote git forge intelligence. The mission is to transform raw repository metadata—CI statuses, open merge requests, and local worktree states—into actionable triage and project discovery insights.
+The architecture follows a refined Typology, distinguishing between technical Libraries (providing foundational capabilities like OpenAI-compatible LLM clients and local git inspection) and functional packages (executing domain-specific objectives such as `triage` for job analysis, `syncproj` for project aggregation, and `pruneagent` for branch management). This structure ensures a modular journey from raw data ingestion via `remotegit` and `localgit` to high-level observability and automated repository maintenance.

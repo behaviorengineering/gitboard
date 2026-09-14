@@ -1,0 +1,11 @@
+attempt: 3
+proposed_rows: 1
+trace_dir: /Users/hector/Xynova/ai/majordomo-tower/tmp/digest-runs/gitboard-20260914-000537Z/rlm-traces/typology_cluster_audit
+generated_at: "2026-09-14T00:08:17Z"
+merges:
+    - id: git_adapters
+      packages:
+        - internal/localgit
+        - internal/remotegit
+      verdict: overlay
+      reason: proposed as teaching nickname

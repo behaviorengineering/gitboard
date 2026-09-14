@@ -1,0 +1,5 @@
+- id: git_adapters
+  packages:
+    - internal/localgit
+    - internal/remotegit
+  intent: nickname
