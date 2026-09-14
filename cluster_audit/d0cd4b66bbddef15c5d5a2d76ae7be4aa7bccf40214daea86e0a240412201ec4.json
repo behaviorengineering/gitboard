@@ -1,0 +1,32 @@
+{
+  "kind": "cluster_audit",
+  "fingerprint": "d0cd4b66bbddef15c5d5a2d76ae7be4aa7bccf40214daea86e0a240412201ec4",
+  "created_at": "2026-09-14T14:39:37Z",
+  "payload": {
+    "merges": [
+      {
+        "id": "git-adapters",
+        "packages": [
+          "internal/localgit",
+          "internal/remotegit"
+        ],
+        "verdict": "reject",
+        "reason": "Both packages serve as low-level git interaction libraries for local and remote operations."
+      },
+      {
+        "id": "git-aggregators",
+        "packages": [
+          "internal/dashboard",
+          "internal/pruneagent",
+          "internal/triage"
+        ],
+        "verdict": "reject",
+        "reason": "The packages represent different lifecycles, including a dashboard service and background worker agents."
+      }
+    ],
+    "rlm_iterations": 12,
+    "prompt_tokens": 31833,
+    "completion_tokens": 9589,
+    "total_tokens": 41422
+  }
+}
