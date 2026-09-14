@@ -1,0 +1,22 @@
+{
+  "kind": "cluster_audit",
+  "fingerprint": "473d98bcebf6de4fc71b8f38cfe16e2982c82c8b389b3e64b786307fa44c8347",
+  "created_at": "2026-09-14T00:08:09Z",
+  "payload": {
+    "merges": [
+      {
+        "id": "git_adapters",
+        "packages": [
+          "internal/localgit",
+          "internal/remotegit"
+        ],
+        "verdict": "reject",
+        "reason": "unparsed: missing verdict for proposed id"
+      }
+    ],
+    "rlm_iterations": 12,
+    "prompt_tokens": 30265,
+    "completion_tokens": 2830,
+    "total_tokens": 33095
+  }
+}
