@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "fe7dbca7abd55269231d413fa1dc5aa3ccaca0ee07c7269932ba38132ef5cd65",
+  "created_at": "2026-09-16T10:06:44Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n# Mission\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: README.md](README.md) · [Next: architecture.md](architecture.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nGitboard provides a centralized local dashboard for managing development workflows across GitHub and GitLab. It streamlines developer focus by aggregating CI status, open merge requests, and pull requests into a single view, while facilitating failed job triage through automated log analysis and root cause summaries. By bridging remote forge data with local repository state and worktree information, Gitboard enables efficient project discovery and seamless transitions between remote oversight and local execution.",
+    "prompt_tokens": 19816,
+    "completion_tokens": 2121,
+    "total_tokens": 21937
+  }
+}
