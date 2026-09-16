@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "26d35e4aeed79a47b6e563ee647648e044463b3a057a3a5c8541a682358704f1",
+  "created_at": "2026-09-16T23:24:57Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n# Grounding\n\u003c!-- majordomo-reading-nav:start --\u003e\nThe `gitboard` grounding provides an agentic map of the repository's functional landscape, enabling autonomous agents to navigate the local-first interface for forge management. This section transitions from raw inventory to a journey-based orchestration, utilizing the slice objective ledger to define operational boundaries.\n## Mission Alignment\nAgents operate to maintain high-fidelity visibility into GitLab/GitHub workflows. The core objective is to transform remote forge data into actionable local intelligence, facilitating the triage of CI status, merge requests, and worktree states while preserving the developer's local security posture and environment integrity.\n## Architectural Typology\nThe `gitboard` architecture is organized via a refined Typology catalog, categorizing agentic interactions by their role in the development lifecycle:\nDiscovery Agents: Responsible for mapping the current state of the forge and the local repository state.\nTriage Agents: Focused on analyzing failed jobs and open merge requests to propose actionable resolutions based on slice objectives.\nSync Agents: Tasked with maintaining the integrity of the local `gitboard` state against remote forge realities.\nAll agentic reasoning must preserve `majordomo-reading` markers to ensure traceability across the bootstrap story.\n\u003c!-- majordomo-reading-nav:end --\u003e",
+    "prompt_tokens": 34945,
+    "completion_tokens": 3735,
+    "total_tokens": 38680
+  }
+}
