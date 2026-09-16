@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "4aa763a98887b776e5c03a798a72bba0da03ce5552216d7f8361fee65845c887",
+  "created_at": "2026-09-16T10:34:11Z",
+  "payload": {
+    "markdown": "markdown: |\n# Architecture\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: mission.md](mission.md) · [Next: conventions.md](conventions.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\n\u003e Teaching story. Living project architecture for humans and review grounding. Not Typology seed evidence (see `evidence/typology/architecture_brief.md`).\nGitboard operates as a local coordination layer between forge APIs (GitHub/GitLab) and the local developer environment.\n### Doors\nThe system provides two primary interaction patterns:\nCLI Entrypoints: Commands like `gitboard init` and `gitboard sync` serve as the administrative interface for configuring local credentials and pulling remote state into the local context.\nWeb Dashboard: The `gitboard serve` command opens a local server, providing a visual interface for monitoring CI status, pull requests, and worktree states.\n### Slice Objective Ledger\nThe architecture is organized around the objective of localizing forge visibility. Rather than acting as a remote deployment, Gitboard orchestrates existing local tools (`gh`, `glab`, and `git`) to aggregate data. The system's shape is defined by the movement of state from remote repositories and local git operations into a unified, local-first dashboard.",
+    "prompt_tokens": 24185,
+    "completion_tokens": 3365,
+    "total_tokens": 27550
+  }
+}
