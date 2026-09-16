@@ -1,0 +1,22 @@
+{
+  "kind": "inspect",
+  "fingerprint": "ac129de604404b86b36bb174ecaaf46b2468dfc166df3bb3cd718d1be0f6b0e8",
+  "created_at": "2026-09-16T05:25:00Z",
+  "payload": {
+    "path": "internal/syncproj",
+    "role": "aggregator",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:Discover, AddProject, RemoveProject, ForgeLister.ListGitHub"
+    ],
+    "inspected_stage": 3,
+    "language": "go",
+    "mechanical_role": "unknown",
+    "llm_role": "aggregator",
+    "agreement": "match",
+    "rlm_iterations": 12,
+    "prompt_tokens": 25560,
+    "completion_tokens": 2552,
+    "total_tokens": 28112
+  }
+}
