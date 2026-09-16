@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "80e549e6e20304c57771f3c22338bdb4e0e3d6ec684fde7b297a09c168e3c25b",
+  "created_at": "2026-09-16T10:11:16Z",
+  "payload": {
+    "markdown": "markdown: |\n# Chronology\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nNewest first.\nGitboard provides a local dashboard for managing GitLab and GitHub workflows, integrating CI status, merge requests, and local worktree states via `gh`, `glab`, and `git` binaries.\nThe tool operates through a lifecycle of initialization (`gitboard init`), data synchronization (`gitboard sync`), and local serving (`gitboard serve`).",
+    "prompt_tokens": 28013,
+    "completion_tokens": 2712,
+    "total_tokens": 30725
+  }
+}
