@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "6abd77e362250864283b66018a96b601266b19cf27a6d3caf466eb0a9789653a",
+  "created_at": "2026-09-16T09:34:51Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n# Context branch\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Next: mission.md](mission.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\n\u003c!-- majordomo-reading-toc:start --\u003e\n## Reading order\n1. [README.md](README.md) (this file)\n2. [mission.md](mission.md)\n3. [architecture.md](architecture.md)\n4. [conventions.md](conventions.md)\n5. [weaknesses.md](weaknesses.md)\n6. [chronology.md](chronology.md)\n7. `evidence/typology/` - appears after a Typology survey seed\n\u003c!-- majordomo-reading-toc:end --\u003e\nThis orphan branch holds project understanding for the gitboard repository.\nNever merge these files into the default branch.\nContext updates are PRs whose base is this branch.\n## Story vs Typology evidence\nRoot markdown (`mission.md`, `architecture.md`, …) is the teaching story.\n`evidence/typology/` holds Typology seed evidence for this digest proposal (for example `architecture_brief.md`). That brief is not the teaching story and not the confirmed `.typology/` catalog.",
+    "prompt_tokens": 6948,
+    "completion_tokens": 1326,
+    "total_tokens": 8274
+  }
+}
