@@ -1,0 +1,10 @@
+{
+  "kind": "cluster_cot",
+  "fingerprint": "cdd21fc7fab5c39292b8797d1097fbe7e8c5f2860c3dd2a5d4b545e7a7ab9c68",
+  "created_at": "2026-09-16T10:28:04Z",
+  "payload": {
+    "merge_ids": "git-adapters",
+    "merge_packages": "internal/localgit,internal/remotegit",
+    "merge_intents": "nickname"
+  }
+}
