@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "9a1d82e8df3b64cbf258b6c8f35a2486de245da56298c02ca32f723efdcc4d08",
+  "created_at": "2026-09-16T09:37:27Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n# Conventions\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nContributors maintain `gitboard` by following the established Go workspace patterns and leveraging the existing component topology.\n### Development Workflow\nThe project utilizes a Go workspace (`go.work`) to manage multiple internal modules. Development tasks are orchestrated via the `Makefile`. Standard workflows include:\nEnvironment Setup: Ensure `glab`, `gh`, and `git` are authenticated and available in the local path.\nTask Execution: Use `make` for common lifecycle operations such as building, testing, and linting.\nTesting: Logic is distributed across specialized domain packages (e.g., `internal/triage`, `internal/remotegit`); tests should be co-located within these packages to maintain the integrity of the component boundaries.\n### Component Responsibility\nCode changes should respect the existing package boundaries:\nDomain Logic: New features related to project analysis should reside in `internal/triage` or `internal/syncproj`.\nGit Integration: Modifications to provider interactions belong in `internal/remotegit`.\nInfrastructure: UI and HTTP handling are encapsulated within `internal/server`.",
+    "prompt_tokens": 27632,
+    "completion_tokens": 3234,
+    "total_tokens": 30866
+  }
+}
