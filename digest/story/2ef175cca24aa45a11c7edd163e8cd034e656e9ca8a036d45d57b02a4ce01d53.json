@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "2ef175cca24aa45a11c7edd163e8cd034e656e9ca8a036d45d57b02a4ce01d53",
+  "created_at": "2026-09-16T10:46:20Z",
+  "payload": {
+    "markdown": "markdown: |\n# Conventions\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nContributors maintain the Gitboard ecosystem by ensuring seamless integration with local forge environments. Development and usage follow these core patterns:\n### Environment Integration\nGitboard operates as a local orchestration layer. Contributors ensure that all supported forge CLIs—specifically `gh` for GitHub and `glab` for GitLab—are authenticated and available in the system `PATH`. Local state is managed through the `gitboard` binary, utilizing `init`, `sync`, and `serve` commands to drive the dashboard lifecycle.\n### Configuration Management\nUser-specific behavior and LLM integrations are managed via filesystem-based configuration. The primary source of truth for local settings resides in `~/.config/gitboard/config.yaml`. Changes to the tool's interaction with external APIs or local worktree state are reflected through this configuration.\n### Local Workflow\nThe tool is designed for local developer experience (DX). It prioritizes the inspection of local checkout and worktree states, meaning development focuses on how Gitboard consumes and visualizes data from the local machine's existing Git, GitHub, and GitLab interfaces.",
+    "prompt_tokens": 30208,
+    "completion_tokens": 3082,
+    "total_tokens": 33290
+  }
+}
