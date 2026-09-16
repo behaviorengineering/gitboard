@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "74618689b8103cd3373674033dac50283bc7762335dabae5e470062ed2de9577",
+  "created_at": "2026-09-16T10:40:50Z",
+  "payload": {
+    "markdown": "markdown: |\n# Overview\nHigh-level project grounding for review. This section maps the `gitboard` product landscape to facilitate agentic navigation.\n## Product Mission\n`gitboard` serves as a local code-change dashboard, aggregating critical development telemetry from GitLab and GitHub. It centralizes CI/CD status, active Merge Requests (MRs), and Pull Requests (PRs) into a single local view.\n## Core Objectives (Slice Ledger)\nThe system operates through specialized slices to maintain developer focus:\nboard: Provides the primary JSON-driven interface for visualizing local and remote repository states.\ntriage: Analyzes failed CI jobs via LLM integration to provide root cause summaries and actionable insights.\nsync: Monitors local checkout, worktree states, and forge-specific CLI outputs (`gh`, `glab`).\n## Typology \u0026 Structure\nThe repository is organized according to a refined Typology catalog, moving beyond raw file inventory to functional groupings of package roles and capability constraints. This structure ensures that agents can navigate the codebase based on logical service boundaries rather than mere directory depth.",
+    "prompt_tokens": 57687,
+    "completion_tokens": 6414,
+    "total_tokens": 64101
+  }
+}
