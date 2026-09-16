@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "83ab0ba0fe592e3a3fd91a2e0f72d56a56208ab8ff0d4f88697e5910d6973619",
+  "created_at": "2026-09-16T09:49:53Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n# Overview\n`gitboard` serves as a local code-change board for GitLab and GitHub, providing a structured view of repository activity. This grounding map outlines the system's functional boundaries and component roles.\n## Bounded Contexts and Objectives\nThe system is organized into specialized slices, each fulfilling a distinct role within the `gitboard` ecosystem:\n`board`: Manages the core JSON data structures utilized by the dashboard and supporting components.\n`localgit`: Facilitates local Git operations and provides metadata enrichment for local repositories.\n`remotegit`: Handles interactions with remote Git services.\n`llm`: Provides an OpenAI-compatible chat completions client, adapting external API responses for system use.\n`cliexec`: A utility slice responsible for executing external processes via `os/exec`.\n`dashboard`: Aggregates various data views for user visualization and interaction.\n## Typology Mapping\nComponents are categorized via the Typology catalog to maintain clear separation of concerns, ensuring that orchestration layers consume data from well-defined utility slices rather than direct implementation details.",
+    "prompt_tokens": 38158,
+    "completion_tokens": 7155,
+    "total_tokens": 45313
+  }
+}
