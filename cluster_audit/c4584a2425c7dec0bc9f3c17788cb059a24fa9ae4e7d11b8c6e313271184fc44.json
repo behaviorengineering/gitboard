@@ -1,0 +1,25 @@
+{
+  "kind": "cluster_audit",
+  "fingerprint": "c4584a2425c7dec0bc9f3c17788cb059a24fa9ae4e7d11b8c6e313271184fc44",
+  "created_at": "2026-09-16T06:01:28Z",
+  "payload": {
+    "merges": [
+      {
+        "id": "git-adapters",
+        "packages": [
+          "internal/localgit",
+          "internal/remotegit"
+        ],
+        "verdict": "overlay",
+        "reason": "Both packages perform specialized git operations (local vs remote) that share the same lifecycle and functional domain.; accept without per-package evidence quotes",
+        "evidence": [
+          "internal/localgit: BranchSync, Checkout, Inspector, RemoteRef"
+        ]
+      }
+    ],
+    "rlm_iterations": 12,
+    "prompt_tokens": 30657,
+    "completion_tokens": 3237,
+    "total_tokens": 33894
+  }
+}
