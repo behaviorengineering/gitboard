@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "49111ffc8d6516758eaa5c629cd88a9c942567eb8b9714442b9096a259871a4e",
+  "created_at": "2026-09-16T05:45:42Z",
+  "payload": {
+    "id": "server",
+    "owned_paths": [
+      "internal/server"
+    ],
+    "evidence": [
+      "importsNetHTTP: true",
+      "delivery:http"
+    ],
+    "claims": [
+      "serve_http",
+      "wire_handlers"
+    ],
+    "objective": "Provides HTTP serving capabilities and wires request handlers.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 6480,
+    "completion_tokens": 1218,
+    "total_tokens": 7698
+  }
+}
