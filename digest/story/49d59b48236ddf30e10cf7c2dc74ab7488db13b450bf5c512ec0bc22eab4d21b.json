@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "49d59b48236ddf30e10cf7c2dc74ab7488db13b450bf5c512ec0bc22eab4d21b",
+  "created_at": "2026-09-16T10:07:54Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n# Architecture\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: mission.md](mission.md) · [Next: conventions.md](conventions.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\n\u003e Teaching story. Living project architecture for humans and review grounding. Not Typology seed evidence (see `evidence/typology/architecture_brief.md`).\nGitboard operates as a local coordination layer between forge APIs (GitHub/GitLab) and the developer's workstation. The system architecture is organized around two primary entrypoints (doors) and a set of synchronization jobs.\n## Entrypoints\nThe CLI (Sync Door): The `gitboard` command-line interface acts as the primary driver for state acquisition. It orchestrates the interaction with `gh`, `glab`, and `git` to pull remote status and local worktree metadata into the local environment.\nThe Web Server (View Door): The `serve` command launches a local web server that provides a visual dashboard. This entrypoint transforms the synchronized local state into a human-readable interface for monitoring CI status, open MRs, and failed jobs.\n## Objective Ledger Jobs\nThe system's activity is defined by the following functional objectives:\nForge Synchronization: Periodically querying forge APIs to update the local view of remote repository states, including MR status and CI pipelines.\nLocal State Integration: Mapping remote forge data to the local filesystem and worktree state, enabling the \"local code-change board\" capability.\nDashboard Rendering: Serving the processed local state via HTTP to the user's browser for real-time triage and monitoring.",
+    "prompt_tokens": 29470,
+    "completion_tokens": 3886,
+    "total_tokens": 33356
+  }
+}
