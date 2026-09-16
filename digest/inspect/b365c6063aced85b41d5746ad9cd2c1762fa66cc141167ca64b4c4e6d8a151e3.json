@@ -1,0 +1,28 @@
+{
+  "kind": "inspect",
+  "fingerprint": "b365c6063aced85b41d5746ad9cd2c1762fa66cc141167ca64b4c4e6d8a151e3",
+  "created_at": "2026-09-16T10:00:28Z",
+  "payload": {
+    "path": "internal/server",
+    "role": "server",
+    "confidence": 0.95,
+    "evidence": [
+      "delivery:http",
+      "go_embed",
+      "delivery:ui",
+      "embeds_static",
+      "imports_net_http",
+      "http_surface_ident",
+      "rlm:\"NewMux\", \"Options\", \"imports_net_http\""
+    ],
+    "inspected_stage": 3,
+    "language": "go",
+    "mechanical_role": "server",
+    "llm_role": "server",
+    "agreement": "match",
+    "rlm_iterations": 3,
+    "prompt_tokens": 3496,
+    "completion_tokens": 798,
+    "total_tokens": 4294
+  }
+}
