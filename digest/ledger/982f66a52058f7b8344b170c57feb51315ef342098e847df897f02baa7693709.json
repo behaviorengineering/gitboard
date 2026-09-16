@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "982f66a52058f7b8344b170c57feb51315ef342098e847df897f02baa7693709",
+  "created_at": "2026-09-16T10:03:53Z",
+  "payload": {
+    "id": "pruneagent",
+    "owned_paths": [
+      "internal/pruneagent"
+    ],
+    "evidence": [
+      "role=entrypoint",
+      "Service.Investigate"
+    ],
+    "claims": [
+      "orchestrate",
+      "run_cli"
+    ],
+    "objective": "Investigates local-only or likely-removable branches via the Service.Investigate method.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 5592,
+    "completion_tokens": 1187,
+    "total_tokens": 6779
+  }
+}
