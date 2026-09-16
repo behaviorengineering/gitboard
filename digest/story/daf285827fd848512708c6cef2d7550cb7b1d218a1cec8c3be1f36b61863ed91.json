@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "daf285827fd848512708c6cef2d7550cb7b1d218a1cec8c3be1f36b61863ed91",
+  "created_at": "2026-09-16T23:22:45Z",
+  "payload": {
+    "markdown": "markdown: |\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: mission.md](mission.md) · [Next: conventions.md](conventions.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\n# Architecture\n\u003e Teaching story. Living project architecture for humans and review grounding. Not Typology seed evidence (see `evidence/typology/architecture_brief.md`).\nThe `gitboard` architecture organizes the system into functional slices that bridge local Git environments with remote forge data. The system operates through distinct entrypoints and a centralized server interface.\n### Entrypoints and Orchestration\nThe `gitboard` package serves as the primary command-line entrypoint, orchestrating the application lifecycle. Project discovery and view aggregation are handled by `syncproj`, which allows users to select and navigate specific repository contexts.\n### Analysis and Jobs\nThe system processes repository state through specialized logic slices. The `triage` package analyzes project and job data to produce intelligent responses regarding CI status and open work. Complementary to this, `pruneagent` investigates local or removable branches to maintain repository health.\n### Connectivity and Intelligence\nIntegration with external ecosystems is managed via `git-adapters`, which provide standardized clients for GitHub and GitLab APIs. Reasoning capabilities are abstracted through the `llm` package, providing an OpenAI-compatible interface for all intelligence-driven tasks.\n### Server and Observability\nThe application exposes its state and dashboard through the `server` package, which provides HTTP interfaces and mux routing. System reliability and debugging are supported by `observability`, which bootstraps OpenTelemetry (OTEL) and manages error-only inference dumps for analyzing complex LLM interactions.",
+    "prompt_tokens": 4925,
+    "completion_tokens": 1232,
+    "total_tokens": 6157
+  }
+}
