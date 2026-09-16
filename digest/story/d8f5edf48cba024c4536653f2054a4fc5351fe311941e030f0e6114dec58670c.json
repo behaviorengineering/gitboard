@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "d8f5edf48cba024c4536653f2054a4fc5351fe311941e030f0e6114dec58670c",
+  "created_at": "2026-09-16T09:41:02Z",
+  "payload": {
+    "markdown": "markdown: |\n# Grounding\nGitboard serves as a local coordination layer for developer-centric code changes, bridging the gap between remote forge states (GitHub/GitLab) and local worktree environments. It provides a unified view of CI status, pull/merge request lifecycles, and job triage to accelerate local development velocity.\n## Objectives\nThe system operates on the following core objectives:\nSynchronize Forge State: Maintain a real-time local representation of remote repository activity using `gh` and `glab`.\nTriage Visibility: Surface failed CI jobs and open MRs directly to the local developer interface.\nWorktree Alignment: Map remote change requests to local checkout and worktree states to facilitate seamless context switching.\n## Typology \u0026 Roles\nThe product's functional landscape is defined by the integration of local CLI tooling and remote forge APIs:\nForge Integrators: Interfaces for `gh` and `glab` that pull remote metadata.\nState Monitors: Logic for tracking CI/CD status and job failures.\nLocal Context Providers: Mechanisms for inspecting and managing local `git` worktrees and checkout states.",
+    "prompt_tokens": 31994,
+    "completion_tokens": 3615,
+    "total_tokens": 35609
+  }
+}
