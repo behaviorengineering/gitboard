@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "5cbd4d514ee2835fe3ea8ce2023168d5bfd73f8371f6bf148ca5566b7c11cca7",
+  "created_at": "2026-09-16T23:22:59Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\n# Conventions\nDevelopment with Gitboard focuses on local-first visibility into forge-based workflows. Contributors manage their environment and interaction with GitLab and GitHub through the following established patterns:\n### Tooling and Environment\nThe system operates by orchestrating existing forge CLI tools on the user's machine. A functional environment requires:\n`gh` (GitHub CLI) for GitHub integration.\n`glab` (GitLab CLI) for GitLab integration.\n`git` for local version control and worktree management.\n### Core Workflow\nThe standard operational lifecycle follows a three-step sequence to initialize, update, and view local state:\n1. Initialization: `gitboard init` sets up the local environment and configuration (e.g., `~/.config/gitboard/config.yaml`).\n2. Synchronization: `gitboard sync` fetches and reconciles remote forge data with the local state.\n3. Observation: `gitboard serve` launches the local dashboard, typically accessible at `http://127.0.0.1:1325/`, for visual triage and monitoring.\n### Project Structure and Modularity\nThe codebase is organized into domain-specific internal packages that separate concerns between remote interaction, local state, and the user interface:\nCore Logic \u0026 State: Managed via `internal/board`, `internal/config`, and `internal/syncproj`.\nForge Interaction: Handled by `internal/localgit`, `internal/remotegit`, and `internal/cliexec`.\nIntelligence \u0026 Triage: Driven by `internal/llm`, `internal/pruneagent`, and `internal/triage`.\nInterface \u0026 Observability: Provided by `internal/dashboard`, `internal/server`, and `internal/observability`.",
+    "prompt_tokens": 4692,
+    "completion_tokens": 1192,
+    "total_tokens": 5884
+  }
+}
