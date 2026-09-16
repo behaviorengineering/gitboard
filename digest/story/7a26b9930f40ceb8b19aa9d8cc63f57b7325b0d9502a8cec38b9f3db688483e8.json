@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "7a26b9930f40ceb8b19aa9d8cc63f57b7325b0d9502a8cec38b9f3db688483e8",
+  "created_at": "2026-09-16T10:13:17Z",
+  "payload": {
+    "markdown": "markdown: |\n# Overview\nGitboard serves as a local code-change dashboard for GitLab and GitHub, centralizing CI status, open merge requests, and failed job triage alongside local worktree state. It operates by interfacing with local forge CLIs (`gh`, `glab`) and `git` to provide a unified view of development activity.\n## Core Objectives\nThe system is organized around several key functional objectives:\nView Aggregation: The `dashboard` component aggregates disparate data sources into a unified interface for developer review.\nProcess Execution: The `cliexec` module facilitates the execution of external processes, enabling the tool to interact with the local environment and forge tools.\nProject Synchronization: Through `syncproj` and `remotegit`, the system maintains alignment between local state and remote repository information.\nAutomated Triage: The `triage` component assists in identifying and categorizing failed jobs and actionable repository events.\n## Component Topology\nThe product is composed of several specialized internal packages:\n`cmd/gitboard`: The primary entrypoint for the application.\n`internal/dashboard`: Manages the presentation layer and view aggregation.\n`internal/config`: Handles local configuration and settings.\n`internal/cliexec`: Provides the interface for executing system commands.\n`internal/localgit` \u0026 `internal/remotegit`: Manage local and remote Git operations.\n`internal/server`: Provides the backend services for the local dashboard.\n`internal/syncproj`: Orchestrates project-level synchronization tasks.\n`internal/triage`: Implements logic for analyzing and triaging repository signals.",
+    "prompt_tokens": 28561,
+    "completion_tokens": 3547,
+    "total_tokens": 32108
+  }
+}
