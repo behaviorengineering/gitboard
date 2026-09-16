@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "b67c0d41397cd96e950d58abbf61e906c19158e76641a5b3bd744ca3d43b1659",
+  "created_at": "2026-09-16T10:49:26Z",
+  "payload": {
+    "markdown": "markdown: |\n# Grounding\n`gitboard` serves as a platform for git-centric project analysis and management. The system's capabilities are organized into functional objectives that drive its automated workflows.\n### Product Objectives\n| Objective | Description |\n| :--- | :--- |\n| Git Operations \u0026 Integration | Manages local repository metadata enrichment via `localgit` and provides adapters for remote services like GitHub and GitLab through `remotegit`. |\n| Project Discovery \u0026 Sync | Aggregates project selection and discovery information using `syncproj`. |\n| Automated Analysis | Performs root cause analysis and log summarization through `triage`, and investigates removable branches via `pruneagent`. |\n| Inference \u0026 Communication | Facilitates LLM-based interactions through an OpenAI-compatible `llm` client. |\n| Infrastructure \u0026 Observability | Provides HTTP serving capabilities via `server` and manages OpenTelemetry tracing and inference dumps via `observability`. |",
+    "prompt_tokens": 29187,
+    "completion_tokens": 3149,
+    "total_tokens": 32336
+  }
+}
