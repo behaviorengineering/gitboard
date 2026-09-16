@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "4f8a925d7262219f5f36fe182fec53489f8829665f86a3975314e25d5177e9c3",
+  "created_at": "2026-09-16T10:18:13Z",
+  "payload": {
+    "markdown": "yaml\nmarkdown: |\n# Conventions\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nContributors work with Gitboard as a local-first tool, extending its ability to aggregate and triage forge data.\n### Development Workflow\nDevelopment focuses on the modular service architecture. New capabilities are typically implemented as discrete services (e.g., `triage`, `syncproj`, `remotegit`) to maintain a clear separation between local git operations and remote forge interactions.\n### Tooling and Environment\nBecause Gitboard operates on your local machine by wrapping `gh`, `glab`, and `git`, development environments must have these CLIs authenticated and configured. Changes to the core logic often involve updating how the `server` handles requests or how `localgit` enriches metadata.\n### Code Organization\nThe repository follows a service-oriented structure:\nServices: Domain-specific logic (e.g., `llm` for completions, `pruneagent` for branch investigation).\nLibraries: Technical, domain-agnostic packages like `config` used across the platform.",
+    "prompt_tokens": 28644,
+    "completion_tokens": 2691,
+    "total_tokens": 31335
+  }
+}
