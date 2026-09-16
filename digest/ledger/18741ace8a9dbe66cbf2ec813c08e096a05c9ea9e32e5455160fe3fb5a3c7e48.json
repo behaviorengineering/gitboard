@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "18741ace8a9dbe66cbf2ec813c08e096a05c9ea9e32e5455160fe3fb5a3c7e48",
+  "created_at": "2026-09-16T05:44:46Z",
+  "payload": {
+    "id": "triage",
+    "owned_paths": [
+      "internal/triage"
+    ],
+    "evidence": [
+      "exportedDecls: Analyzer, Request, Response",
+      "exportedMethods: Analyzer.Analyze",
+      "Response { Summary string, RootCause string, FixSteps []string }"
+    ],
+    "claims": [
+      "aggregate_views"
+    ],
+    "objective": "Analyzes project logs and job information to produce a summary and root cause analysis.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 8165,
+    "completion_tokens": 1703,
+    "total_tokens": 9868
+  }
+}
