@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "ea26e89640b407b6d688c9ca5255e0a6f8aa1fef620c8b5b97299c82e726fab5",
+  "created_at": "2026-09-16T15:28:50Z",
+  "payload": {
+    "markdown": "markdown: |\n# Conventions\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nContributors maintain the `gitboard` ecosystem by adhering to the following patterns:\n### Project Structure\nThe repository follows a standard Go workspace layout using `go.work`. Core logic is encapsulated within the `internal/` directory to prevent external leakage, organized by functional domains such as `remotegit` for forge interactions, `triage` for log analysis, and `dashboard` for the UI layer.\n### Development Workflow\nTask Automation: Use the `Makefile` for common development tasks, including building, testing, and linting.\nTooling Integration: Development relies on the presence of the `gh` (GitHub CLI), `glab` (GitLab CLI), and `git` binaries on the local machine.\nConfiguration: Local environment settings are managed via `~/.config/gitboard/config.yaml`.\n### Code Standards\nPackage Privacy: Logic intended for use only within `gitboard` resides in `internal/` packages.\nWorkspace Management: Ensure all changes are reflected in the `go.work` file to maintain consistency across the multi-module environment.",
+    "prompt_tokens": 30074,
+    "completion_tokens": 2735,
+    "total_tokens": 32809
+  }
+}
