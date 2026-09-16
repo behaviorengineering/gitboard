@@ -1,0 +1,24 @@
+{
+  "kind": "ledger",
+  "fingerprint": "44465856817ced21cbf61115ac6403aba21659306e40a53dc5812c991d5e04fc",
+  "created_at": "2026-09-16T05:46:11Z",
+  "payload": {
+    "id": "board",
+    "owned_paths": [
+      "internal/board"
+    ],
+    "evidence": [
+      "Package board contains the JSON data types shared across the dashboard UI",
+      "is=[data_shape]"
+    ],
+    "claims": [
+      "data_shape"
+    ],
+    "objective": "Provides JSON data structures used by the dashboard and other components.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 12015,
+    "completion_tokens": 1810,
+    "total_tokens": 13825
+  }
+}
