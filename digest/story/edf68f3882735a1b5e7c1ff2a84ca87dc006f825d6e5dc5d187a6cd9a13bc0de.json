@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "edf68f3882735a1b5e7c1ff2a84ca87dc006f825d6e5dc5d187a6cd9a13bc0de",
+  "created_at": "2026-09-16T10:54:17Z",
+  "payload": {
+    "markdown": "markdown: |\n# Conventions\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nContributors interact with Gitboard primarily through its CLI tool to manage local development workflows.\n### Tooling and Environment\nGitboard relies on the presence of standard forge command-line interfaces. A functional development environment requires:\n`git` for local repository state and worktree management.\n`gh` (GitHub CLI) for GitHub integration.\n`glab` (GitLab CLI) for GitLab integration.\n### Configuration and Initialization\nThe tool is initialized via `gitboard init`, which sets up the local environment. Users manage specific behaviors, such as LLM integration, by editing the configuration file located at `~/.config/gitboard/config.yaml`.\n### Workflow Synchronization\nThe standard operational loop involves running `gitboard sync` to fetch the latest status from the remote forges (CI status, MRs/PRs) followed by `gitboard serve` to host the local dashboard. Contributors ensure their local forge authentication is active via `gh auth login` or `glab auth login` to allow Gitboard to triage failed jobs and track open changes effectively.",
+    "prompt_tokens": 27904,
+    "completion_tokens": 2791,
+    "total_tokens": 30695
+  }
+}
