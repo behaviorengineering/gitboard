@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "e579ba5a969894c6dae1fe20aacf2c27650f00497a5c1e27631e2ecb70e0dcba",
+  "created_at": "2026-09-16T15:24:37Z",
+  "payload": {
+    "markdown": "markdown: |\n# Mission\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: README.md](README.md) · [Next: architecture.md](architecture.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nGitboard serves as a local code-change dashboard for GitLab and GitHub repositories. It centralizes developer workflows by providing visibility into CI status, open merge requests, and failed job triage, while facilitating local checkout and worktree state management. By leveraging local CLI tools like `gh`, `glab`, and `git`, Gitboard acts as a lightweight, local-first interface for managing active development tasks and repository health.",
+    "prompt_tokens": 3506,
+    "completion_tokens": 665,
+    "total_tokens": 4171
+  }
+}
