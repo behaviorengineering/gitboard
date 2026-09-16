@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "44ea9b94fbdc8bd4670d025f3ae467cafb8f222f36caae4bad36ed43c6085b24",
+  "created_at": "2026-09-16T10:38:30Z",
+  "payload": {
+    "markdown": "markdown: |\n# Chronology\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nNewest first.\n[2026-09-16] Current state: Gitboard operates as a local dashboard for GitLab and GitHub, integrating `gh`, `glab`, and `git` to provide visibility into CI status, open MRs, and local worktree states. The architecture is organized into specialized internal packages including `remotegit` for forge interaction, `localgit` for workspace state, and `triage` for job management.",
+    "prompt_tokens": 30650,
+    "completion_tokens": 2603,
+    "total_tokens": 33253
+  }
+}
