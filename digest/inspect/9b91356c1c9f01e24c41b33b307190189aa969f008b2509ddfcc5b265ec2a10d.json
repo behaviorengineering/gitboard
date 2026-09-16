@@ -1,0 +1,23 @@
+{
+  "kind": "inspect",
+  "fingerprint": "9b91356c1c9f01e24c41b33b307190189aa969f008b2509ddfcc5b265ec2a10d",
+  "created_at": "2026-09-16T05:23:57Z",
+  "payload": {
+    "path": "cmd/gitboard",
+    "role": "entrypoint",
+    "confidence": 0.95,
+    "evidence": [
+      "has_main",
+      "rlm:\"main\", \"runServe\""
+    ],
+    "inspected_stage": 3,
+    "language": "go",
+    "mechanical_role": "entrypoint",
+    "llm_role": "entrypoint",
+    "agreement": "match",
+    "rlm_iterations": 4,
+    "prompt_tokens": 5224,
+    "completion_tokens": 813,
+    "total_tokens": 6037
+  }
+}
