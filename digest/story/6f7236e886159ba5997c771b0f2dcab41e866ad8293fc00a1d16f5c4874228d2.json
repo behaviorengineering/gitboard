@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "6f7236e886159ba5997c771b0f2dcab41e866ad8293fc00a1d16f5c4874228d2",
+  "created_at": "2026-09-16T15:34:38Z",
+  "payload": {
+    "markdown": "markdown: |\n# Overview\nHigh-level project grounding for review. This section maps the `gitboard` product landscape to facilitate agentic navigation.\n## Product Purpose\n`gitboard` serves as a local code-change dashboard for GitLab and GitHub. It synchronizes and presents CI status, open Merge Requests, and failed job triage data alongside local worktree and checkout states. The tool operates via local forge CLIs (`gh`, `glab`) and `git`, providing a unified view of developer-centric forge activity.\n## Operational Scope\nThe product functions as a local-first interface for managing the intersection of remote forge state and local development environments. It focuses on visibility into the development lifecycle—from CI execution to merge readiness—without managing the remote deployment or runtime operations of the forges themselves.\n## Structural Grounding\nThe repository is organized around a structured typology and objective-based ledger. Agentic interaction should prioritize the objectives defined in the slice objective ledger and the functional roles specified in the package roles, rather than treating the file structure as a simple flat inventory.",
+    "prompt_tokens": 30403,
+    "completion_tokens": 3647,
+    "total_tokens": 34050
+  }
+}
