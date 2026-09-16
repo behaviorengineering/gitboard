@@ -1,0 +1,10 @@
+{
+  "kind": "cluster_cot",
+  "fingerprint": "2bf79aeddd51a27ac823c8d68f92983cbdd67eb87c63ed7ab42ec67c73a92340",
+  "created_at": "2026-09-16T10:03:23Z",
+  "payload": {
+    "merge_ids": "git-adapters,aggregator-group",
+    "merge_packages": "internal/llm,internal/localgit,internal/remotegit;internal/dashboard,internal/syncproj,internal/triage",
+    "merge_intents": "nickname,slice"
+  }
+}
