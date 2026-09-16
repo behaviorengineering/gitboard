@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "2b4b56a90a3aa587b76bf36779090101af4fd45d77ead744fb39b95ce61c655d",
+  "created_at": "2026-09-16T10:21:48Z",
+  "payload": {
+    "markdown": "markdown: |\n# Overview\nGitboard serves as a local orchestration dashboard for managing code-change workflows across GitLab and GitHub. It synchronizes local development state with remote forge activity, providing visibility into CI status, open Merge Requests/Pull Requests, and failed job triage.\n## Agentic Grounding\nAgents interacting with this repository operate within a local-first development context. The system leverages existing CLI tools (`gh`, `glab`, and `git`) to bridge the gap between remote forge metadata and local worktree states.\n### Core Objectives (via Slice Objective Ledger)\nThe product's operational goals are defined by the synchronization of remote forge signals with local developer environments, ensuring that CI failures and pending reviews are surfaced directly within the local workflow.\n### Typology \u0026 Roles\nThe system architecture is organized into functional packages that manage:\nForge connectivity and authentication via `gh` and `glab`.\nLocal worktree and checkout state synchronization.\nReal-time dashboarding of CI/CD pipeline health.\nTriage workflows for failed jobs and pending repository changes.\nThis grounding provides a map of the `gitboard` ecosystem, focusing on the interaction between local git state and remote forge APIs.",
+    "prompt_tokens": 30011,
+    "completion_tokens": 3119,
+    "total_tokens": 33130
+  }
+}
