@@ -1,0 +1,25 @@
+{
+  "kind": "inspect",
+  "fingerprint": "fdc8bae7d825a18a8e40f161184164c3c621c3379e566efd291ba0cbd7a8b7e7",
+  "created_at": "2026-09-16T05:24:53Z",
+  "payload": {
+    "path": "internal/llm",
+    "role": "adapter",
+    "confidence": 0.95,
+    "evidence": [
+      "imports_net_http",
+      "exports_client_surface",
+      "not_server",
+      "rlm:\"Client\", \"Chat\""
+    ],
+    "inspected_stage": 3,
+    "language": "go",
+    "mechanical_role": "adapter",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 5,
+    "prompt_tokens": 6004,
+    "completion_tokens": 1094,
+    "total_tokens": 7098
+  }
+}
