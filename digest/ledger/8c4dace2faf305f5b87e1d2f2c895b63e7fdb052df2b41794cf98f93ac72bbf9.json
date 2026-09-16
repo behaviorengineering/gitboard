@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "8c4dace2faf305f5b87e1d2f2c895b63e7fdb052df2b41794cf98f93ac72bbf9",
+  "created_at": "2026-09-16T05:44:56Z",
+  "payload": {
+    "id": "localgit",
+    "owned_paths": [
+      "internal/localgit"
+    ],
+    "evidence": [
+      "exportedFuncs: FillCheckoutMeta",
+      "role=adapter"
+    ],
+    "claims": [
+      "fill_dto",
+      "adapt_external"
+    ],
+    "objective": "Provides git operations and metadata enrichment for local repositories.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 15042,
+    "completion_tokens": 2324,
+    "total_tokens": 17366
+  }
+}
