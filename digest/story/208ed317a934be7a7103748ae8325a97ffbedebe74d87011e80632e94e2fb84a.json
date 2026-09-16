@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "208ed317a934be7a7103748ae8325a97ffbedebe74d87011e80632e94e2fb84a",
+  "created_at": "2026-09-16T10:57:55Z",
+  "payload": {
+    "markdown": "markdown: |\n# Overview\nHigh-level project grounding for review. This section maps the `gitboard` product landscape for agentic interaction, focusing on its role as a local code-change dashboard for GitLab and GitHub.\n## Product Grounding\n`gitboard` provides visibility into CI status, open Merge Requests, failed job triage, and local worktree states by interfacing with `gh`, `glab`, and `git`. It operates as a local service, typically served via `gitboard serve`.\n### Slice Objective Ledger (Inferred)\nThe system is organized into functional slices that manage the lifecycle of repository observation and local synchronization:\nObservation \u0026 Triage: `internal/triage` and `internal/dashboard` manage the presentation of CI status and job failures.\nRemote Integration: `internal/remotegit` and `internal/syncproj` handle the interaction with GitLab and GitHub forge APIs.\nLocal State: `internal/localgit` and `internal/cliexec` manage the local git environment and CLI tool execution.\nCore Services: `internal/server`, `internal/config`, and `internal/board` provide the orchestration and configuration layer.\n### Typology Catalog\nThe following package categories define the operational capabilities of the `gitboard` ecosystem:\nInterface: `internal/dashboard`, `internal/server` (Provides the user-facing web interface and API).\nExecution: `internal/cliexec`, `internal/localgit` (Manages local machine tool invocation and git state).\nSynchronization: `internal/remotegit`, `internal/syncproj` (Bridges remote forge data to the local board).\nIntelligence: `internal/llm`, `internal/pruneagent` (Supports automated triage and agentic processing of repository changes).",
+    "prompt_tokens": 32749,
+    "completion_tokens": 4439,
+    "total_tokens": 37188
+  }
+}
