@@ -1,0 +1,22 @@
+{
+  "kind": "inspect",
+  "fingerprint": "d3a786163950f279950e9af4edd771cf428efbc2d8ab79d16968568698c1646f",
+  "created_at": "2026-09-16T05:24:23Z",
+  "payload": {
+    "path": "internal/remotegit",
+    "role": "adapter",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:\"GitHub.ListOrgRepos\", \"GitLab.ProjectSummary\", \"NewGitHub\", \"NewGitLab\""
+    ],
+    "inspected_stage": 3,
+    "language": "go",
+    "mechanical_role": "unknown",
+    "llm_role": "adapter",
+    "agreement": "match",
+    "rlm_iterations": 7,
+    "prompt_tokens": 12519,
+    "completion_tokens": 1144,
+    "total_tokens": 13663
+  }
+}
