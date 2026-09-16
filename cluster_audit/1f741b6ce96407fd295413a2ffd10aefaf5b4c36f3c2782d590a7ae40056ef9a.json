@@ -1,0 +1,26 @@
+{
+  "kind": "cluster_audit",
+  "fingerprint": "1f741b6ce96407fd295413a2ffd10aefaf5b4c36f3c2782d590a7ae40056ef9a",
+  "created_at": "2026-09-16T07:20:55Z",
+  "payload": {
+    "merges": [
+      {
+        "id": "git-adapters",
+        "packages": [
+          "internal/localgit",
+          "internal/remotegit"
+        ],
+        "verdict": "accept",
+        "reason": "Both packages serve as shared git interaction layers with similar lifecycles.",
+        "evidence": [
+          "\"internal/localgit: exportedDecls: BranchSync, Checkout, Discovery, Inspector\"",
+          "\"internal/remotegit: exportedDecls: Client, GitHub, GitLa...\""
+        ]
+      }
+    ],
+    "rlm_iterations": 8,
+    "prompt_tokens": 16683,
+    "completion_tokens": 1744,
+    "total_tokens": 18427
+  }
+}
