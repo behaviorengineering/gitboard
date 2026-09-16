@@ -1,0 +1,23 @@
+{
+  "kind": "inspect",
+  "fingerprint": "649c1172a02c25af3b7264db0c6b8dd9595372e142a55407a58436c751e49f36",
+  "created_at": "2026-09-16T10:00:27Z",
+  "payload": {
+    "path": "internal/observability",
+    "role": "observability",
+    "confidence": 0.95,
+    "evidence": [
+      "imports_otel",
+      "rlm:Init, Shutdown, bootstraps OTEL"
+    ],
+    "inspected_stage": 3,
+    "language": "go",
+    "mechanical_role": "observability",
+    "llm_role": "observability",
+    "agreement": "match",
+    "rlm_iterations": 2,
+    "prompt_tokens": 1889,
+    "completion_tokens": 274,
+    "total_tokens": 2163
+  }
+}
