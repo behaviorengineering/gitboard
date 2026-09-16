@@ -1,0 +1,26 @@
+{
+  "kind": "cluster_audit",
+  "fingerprint": "74854303bf40a6c4b9672e8832fb9e8f124d72f3840306c3d78b57cf486a9ab6",
+  "created_at": "2026-09-16T10:03:21Z",
+  "payload": {
+    "merges": [
+      {
+        "id": "aggregator-group",
+        "packages": [
+          "internal/dashboard",
+          "internal/syncproj",
+          "internal/triage"
+        ],
+        "verdict": "overlay",
+        "reason": "All packages belong to the same orchestration and aggregation lifecycle.; accept without per-package evidence quotes",
+        "evidence": [
+          "\"internal/dashboard: mechanicalRole: aggregator\""
+        ]
+      }
+    ],
+    "rlm_iterations": 12,
+    "prompt_tokens": 30361,
+    "completion_tokens": 3452,
+    "total_tokens": 33813
+  }
+}
