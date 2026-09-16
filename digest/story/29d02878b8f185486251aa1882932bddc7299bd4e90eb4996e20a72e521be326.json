@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "29d02878b8f185486251aa1882932bddc7299bd4e90eb4996e20a72e521be326",
+  "created_at": "2026-09-16T23:24:08Z",
+  "payload": {
+    "markdown": "markdown: |\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: weaknesses.md](weaknesses.md) · [Next: README.md](evidence/typology/README.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\n# Chronology\nNewest first.\nThe gitboard system evolves through a structured refinement of its operational typology.\n### Typology Development\nThe system moves from initial survey and refinement arcs toward a stable typology architecture. This stage establishes the core organizational patterns for managing GitLab and GitHub code changes, transitioning from raw discovery to a refined state documented in the architecture brief.\n### System Discovery\nInitial evidence collection and module scoping define the boundaries of the gitboard environment, establishing the local dashboard capabilities for CI status, MR tracking, and worktree state.",
+    "prompt_tokens": 30824,
+    "completion_tokens": 2937,
+    "total_tokens": 33761
+  }
+}
