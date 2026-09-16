@@ -1,0 +1,22 @@
+{
+  "kind": "inspect",
+  "fingerprint": "3a1ba14a6c1ca86aad3b8545cf061f5e3eab37aeb83166d3c21ce73a38782654",
+  "created_at": "2026-09-16T10:01:46Z",
+  "payload": {
+    "path": "internal/pruneagent",
+    "role": "entrypoint",
+    "confidence": 0.75,
+    "evidence": [
+      "rlm:Service.Investigate"
+    ],
+    "inspected_stage": 3,
+    "language": "go",
+    "mechanical_role": "unknown",
+    "llm_role": "entrypoint",
+    "agreement": "match",
+    "rlm_iterations": 4,
+    "prompt_tokens": 12920,
+    "completion_tokens": 1904,
+    "total_tokens": 14824
+  }
+}
