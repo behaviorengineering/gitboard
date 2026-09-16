@@ -1,0 +1,27 @@
+{
+  "kind": "ledger",
+  "fingerprint": "de7c08b22529bb6ca463bff032d8854cecb1d8ea4bd68d60c5c3cdaae807c219",
+  "created_at": "2026-09-16T05:46:37Z",
+  "payload": {
+    "id": "llm",
+    "owned_paths": [
+      "internal/llm"
+    ],
+    "evidence": [
+      "mechanicalRole: adapter",
+      "mechanicalEvidence: imports_net_http, exports_client_surface, not_server",
+      "importsNetHTTP: true",
+      "Package llm provides an OpenAI-compatible chat completions client."
+    ],
+    "claims": [
+      "adapt_external",
+      "fill_dto"
+    ],
+    "objective": "Provides an OpenAI-compatible chat completions client by adapting external API responses.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 11454,
+    "completion_tokens": 1483,
+    "total_tokens": 12937
+  }
+}
