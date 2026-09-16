@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "24af5434c9dc69a622e2792f0873d68d4310bd570f97e6aa7edda408a843bf51",
+  "created_at": "2026-09-16T09:46:28Z",
+  "payload": {
+    "markdown": "markdown: |\n# Conventions\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nGitboard is a local-first developer utility that orchestrates existing forge CLIs (`gh`, `glab`) and local `git` state. Contributors follow these patterns:\n### Tooling and Environment\nDevelopment assumes access to local Git credentials and authenticated forge CLIs. The application operates by wrapping and enriching metadata from these tools rather than replacing them.\n### Modular Architecture\nThe codebase is organized into domain-specific modules. When extending functionality, identify the appropriate layer:\nRemotes: Use `remotegit` for GitHub/GitLab API interactions.\nLocal State: Use `localgit` for interacting with the user's local worktrees and repositories.\nIntelligence: Use `llm` for OpenAI-compatible chat completions and `triage` for job analysis.\nServing: Use `server` for HTTP handling and `syncproj` for project discovery.\n### Configuration\nUser-specific settings, including LLM configurations, are managed via `~/.config/gitboard/config.yaml`. Changes to the configuration schema should be reflected in the documentation and the `config` library.",
+    "prompt_tokens": 30572,
+    "completion_tokens": 2966,
+    "total_tokens": 33538
+  }
+}
