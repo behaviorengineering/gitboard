@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -30,7 +31,26 @@ import (
 )
 
 // version is set by GoReleaser / make build via -ldflags -X main.version=...
+// go install does not apply those ldflags, so reportVersion falls back to BuildInfo.
 var version = "dev"
+
+func reportVersion() string {
+	moduleVersion := ""
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		moduleVersion = bi.Main.Version
+	}
+	return resolveVersion(version, moduleVersion)
+}
+
+func resolveVersion(ldflag, moduleVersion string) string {
+	if v := strings.TrimSpace(ldflag); v != "" && v != "dev" {
+		return v
+	}
+	if v := strings.TrimSpace(moduleVersion); v != "" && v != "(devel)" {
+		return v
+	}
+	return "dev"
+}
 
 func main() {
 	log.SetFlags(0)
@@ -51,7 +71,7 @@ func main() {
 	case "serve":
 		err = runServe(args)
 	case "version", "-version", "--version":
-		fmt.Printf("gitboard %s\n", version)
+		fmt.Printf("gitboard %s\n", reportVersion())
 		return
 	case "-h", "--help", "help":
 		printUsage(os.Stdout)
