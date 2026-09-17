@@ -167,6 +167,32 @@ func (g *GitLab) loadMerged(ctx context.Context, repo string) ([]board.MergedRev
 	if err != nil {
 		return nil, err
 	}
+	return decodeGitLabMerged(raw)
+}
+
+// MergedForBranch looks up merged MRs whose source branch matches branch.
+func (g *GitLab) MergedForBranch(ctx context.Context, repo, branch string) ([]board.MergedReview, error) {
+	if g == nil {
+		return nil, fmt.Errorf("gitlab client missing")
+	}
+	branch = trimBranch(branch)
+	if err := forgeBranchNameOK(branch); err != nil {
+		return nil, err
+	}
+	raw, err := g.Run.RunJSON(ctx, "glab", "mr", "list",
+		"-R", repo,
+		"--merged",
+		"--source-branch", branch,
+		"--per-page", "1",
+		"--output", "json",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("gitlab merged for %s: %w", branch, err)
+	}
+	return decodeGitLabMerged(raw)
+}
+
+func decodeGitLabMerged(raw []byte) ([]board.MergedReview, error) {
 	var mrs []struct {
 		IID          int    `json:"iid"`
 		SourceBranch string `json:"source_branch"`

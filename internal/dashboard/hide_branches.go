@@ -51,3 +51,24 @@ func branchHidden(name string, patterns []string) bool {
 	}
 	return false
 }
+
+// syncOpenItemsToVisibleBranches resets open_items to the count of still-visible
+// branches marked open_review. Call after filterHiddenBranches so board filters
+// and attention ranking do not treat hidden PR/MR heads as open review work.
+func syncOpenItemsToVisibleBranches(row *board.ProjectSummary) {
+	if row == nil {
+		return
+	}
+	n := 0
+	for _, b := range row.Branches {
+		if b.OpenReview {
+			n++
+		}
+	}
+	row.OpenItems = board.OpenItems{}
+	if strings.EqualFold(strings.TrimSpace(row.Host), "gitlab") {
+		row.OpenItems.MergeRequests = n
+		return
+	}
+	row.OpenItems.PullRequests = n
+}

@@ -174,6 +174,32 @@ func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]board.MergedRev
 	if err != nil {
 		return nil, err
 	}
+	return decodeGitHubMerged(raw)
+}
+
+// MergedForBranch looks up merged PRs whose head branch matches branch.
+func (g *GitHub) MergedForBranch(ctx context.Context, repo, branch string) ([]board.MergedReview, error) {
+	if g == nil {
+		return nil, fmt.Errorf("github client missing")
+	}
+	branch = trimBranch(branch)
+	if err := forgeBranchNameOK(branch); err != nil {
+		return nil, err
+	}
+	raw, err := g.Run.RunJSON(ctx, "gh", "pr", "list",
+		"--repo", repo,
+		"--state", "merged",
+		"--head", branch,
+		"--limit", "1",
+		"--json", "number,headRefName,url,mergedAt",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("github merged for %s: %w", branch, err)
+	}
+	return decodeGitHubMerged(raw)
+}
+
+func decodeGitHubMerged(raw []byte) ([]board.MergedReview, error) {
 	var prs []struct {
 		Number   int    `json:"number"`
 		Head     string `json:"headRefName"`

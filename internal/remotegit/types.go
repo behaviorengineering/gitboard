@@ -35,6 +35,7 @@ type Client interface {
 	ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (board.ProjectSummary, error)
 	FailedJobs(ctx context.Context, p config.Project, runID string) ([]board.FailedJob, error)
 	JobLog(ctx context.Context, p config.Project, runID, jobID string) (string, error)
+	MergedForBranch(ctx context.Context, repo, branch string) ([]board.MergedReview, error)
 }
 
 // RepoRef is a discoverable repository from an org or group.

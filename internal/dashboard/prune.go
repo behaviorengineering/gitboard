@@ -38,9 +38,10 @@ func badRequest(msg string) error {
 
 // PruneSafeRequest identifies a local checkout marked safe to remove.
 type PruneSafeRequest struct {
-	ProjectID    string `json:"project_id"`
-	Branch       string `json:"branch"`
-	WorktreePath string `json:"worktree_path"`
+	ProjectID      string `json:"project_id"`
+	Branch         string `json:"branch"`
+	WorktreePath   string `json:"worktree_path"`
+	ClearIndexLock bool   `json:"clear_index_lock,omitempty"`
 }
 
 // PruneSafe re-checks forge prune hints, then removes the local checkout when still safe.
@@ -71,6 +72,8 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 		abs = resolved
 	}
 	abs = filepath.Clean(abs)
+	abs = canonicalCheckoutPath(ctx, s.Local, abs)
+	canon := func(p string) string { return canonicalCheckoutPath(ctx, s.Local, p) }
 
 	opts := remotegit.SummaryOpts{
 		Fresh:     true,
@@ -90,13 +93,14 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 	if row.Local == nil || !row.Local.Mapped {
 		return badRequest("project has no mapped local checkout")
 	}
-	if !repoPathAllowed(row.Local, abs) {
+	if !repoPathAllowedCanon(row.Local, abs, canon) {
 		return badRequest("worktree_path is not a mapped checkout for this project")
 	}
 	s.annotateContentOnDefault(ctx, &row)
+	s.confirmMergedForCandidates(ctx, p, &row, opts)
 	remotegit.EnrichPruneHints(&row)
 
-	wt, ok := findSafeWorktree(row.Local, branch, abs)
+	wt, ok := findSafeWorktree(row.Local, branch, abs, canon)
 	if !ok {
 		return badRequest(fmt.Sprintf("branch %q is not safe to remove (re-check prune hints)", branch))
 	}
@@ -104,7 +108,19 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 	if defaultBranch == "" {
 		defaultBranch = "main"
 	}
-	if err := s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch); err != nil {
+	if err := c.ensureWritableIndex(ctx, wt.Path, req.ClearIndexLock); err != nil {
+		return err
+	}
+	err = s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch)
+	if err != nil && localgit.IsIndexLockError(err) {
+		if lockErr := c.ensureWritableIndex(ctx, wt.Path, req.ClearIndexLock); lockErr != nil {
+			return lockErr
+		}
+		if req.ClearIndexLock {
+			err = s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch)
+		}
+	}
+	if err != nil {
 		if errors.Is(err, localgit.ErrInvalidBranch) ||
 			errors.Is(err, localgit.ErrDirtyTree) ||
 			errors.Is(err, localgit.ErrDiverged) ||
@@ -116,7 +132,7 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 	return nil
 }
 
-func findSafeWorktree(local *board.LocalStatus, branch, absPath string) (board.LocalWorktree, bool) {
+func findSafeWorktree(local *board.LocalStatus, branch, absPath string, canon func(string) string) (board.LocalWorktree, bool) {
 	if local == nil {
 		return board.LocalWorktree{}, false
 	}
@@ -125,18 +141,49 @@ func findSafeWorktree(local *board.LocalStatus, branch, absPath string) (board.L
 		if strings.TrimSpace(wt.Branch) != branch {
 			continue
 		}
-		wtPath := filepath.Clean(wt.Path)
-		if resolved, err := filepath.EvalSymlinks(wtPath); err == nil {
-			wtPath = resolved
-		}
-		if wtPath != absPath {
+		if !sameCheckoutPath(wt.Path, absPath, canon) && !sameCheckoutPath(wt.AppearancePath, absPath, canon) {
 			continue
 		}
 		if wt.PruneHint != board.PruneSafe {
 			continue
 		}
-		wt.Path = wtPath
+		wt.Path = absPath
 		return wt, true
 	}
 	return board.LocalWorktree{}, false
+}
+
+func sameCheckoutPath(a, b string, canon func(string) string) bool {
+	if canon != nil {
+		a = canon(a)
+		b = canon(b)
+	}
+	a = cleanRepoPath(a)
+	b = cleanRepoPath(b)
+	return a != "" && a == b
+}
+
+func cleanRepoPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+
+func canonicalCheckoutPath(ctx context.Context, local LocalGit, path string) string {
+	path = cleanRepoPath(path)
+	if path == "" || local == nil {
+		return path
+	}
+	if c, ok := local.(interface {
+		CanonicalCheckoutPath(context.Context, string) string
+	}); ok {
+		return c.CanonicalCheckoutPath(ctx, path)
+	}
+	return path
 }

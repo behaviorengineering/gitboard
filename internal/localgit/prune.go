@@ -47,6 +47,7 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 		abs = resolved
 	}
 	abs = filepath.Clean(abs)
+	abs = in.CanonicalCheckoutPath(ctx, abs)
 
 	trees, err := in.listWorktrees(ctx, abs)
 	if err != nil {
@@ -57,10 +58,7 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 	var main *Worktree
 	for i := range trees {
 		wt := &trees[i]
-		path := filepath.Clean(wt.Path)
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			path = resolved
-		}
+		path := in.CanonicalCheckoutPath(ctx, wt.Path)
 		wt.Path = path
 		if wt.Main {
 			main = wt

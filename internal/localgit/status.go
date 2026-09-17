@@ -102,6 +102,7 @@ func (in *Inspector) InspectPath(ctx context.Context, path string) Status {
 		if trees[i].Bare {
 			continue
 		}
+		trees[i].Path = in.CanonicalCheckoutPath(ctx, trees[i].Path)
 		detail, detailErr := in.inspectWorktree(ctx, trees[i].Path, trees[i].Main)
 		if detailErr != nil {
 			// Fail closed for prune: never leave Dirty as a false zero-value.
@@ -208,6 +209,44 @@ func (in *Inspector) listWorktrees(ctx context.Context, dir string) ([]Worktree,
 		return nil, fmt.Errorf("no worktrees listed")
 	}
 	return trees, nil
+}
+
+func looksLikeGitDir(path string) bool {
+	slash := filepath.ToSlash(path)
+	if strings.Contains(slash, "/.git/modules/") {
+		return true
+	}
+	base := filepath.Base(slash)
+	return base == ".git" || strings.HasSuffix(slash, "/.git")
+}
+
+// CanonicalCheckoutPath returns the working tree for path.
+// Submodule `git worktree list` often reports the git dir under .git/modules;
+// --show-toplevel follows core.worktree to the real checkout.
+func (in *Inspector) CanonicalCheckoutPath(ctx context.Context, path string) string {
+	abs, err := ExpandPath(path)
+	if err != nil {
+		return strings.TrimSpace(path)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	abs = filepath.Clean(abs)
+	if in == nil || !looksLikeGitDir(abs) {
+		return abs
+	}
+	top, err := in.git(ctx, abs, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return abs
+	}
+	out := strings.TrimSpace(string(top))
+	if out == "" {
+		return abs
+	}
+	if resolved, err := filepath.EvalSymlinks(out); err == nil {
+		out = resolved
+	}
+	return filepath.Clean(out)
 }
 
 func (in *Inspector) inspectWorktree(ctx context.Context, dir string, isMain bool) (Worktree, error) {

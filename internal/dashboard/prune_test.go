@@ -81,7 +81,7 @@ func TestFindSafeWorktree(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wt, ok := findSafeWorktree(tt.local, tt.branch, tt.path)
+			wt, ok := findSafeWorktree(tt.local, tt.branch, tt.path, nil)
 			if ok != tt.wantOK {
 				t.Fatalf("ok=%v want %v", ok, tt.wantOK)
 			}
@@ -89,6 +89,29 @@ func TestFindSafeWorktree(t *testing.T) {
 				t.Fatalf("path=%q want %q", wt.Path, abs)
 			}
 		})
+	}
+}
+
+func TestFindSafeWorktreeGitDirVsCheckout(t *testing.T) {
+	checkout := filepath.Clean("/tmp/providers/pkg")
+	gitdir := filepath.Clean("/tmp/parent/.git/modules/providers/pkg")
+	canon := func(p string) string {
+		p = filepath.Clean(p)
+		if p == gitdir {
+			return checkout
+		}
+		return p
+	}
+	local := &board.LocalStatus{
+		Worktrees: []board.LocalWorktree{{
+			Path:      gitdir,
+			Branch:    "feat/ai-copilots",
+			PruneHint: board.PruneSafe,
+		}},
+	}
+	wt, ok := findSafeWorktree(local, "feat/ai-copilots", checkout, canon)
+	if !ok || wt.Path != checkout {
+		t.Fatalf("gitdir must match checkout: ok=%v path=%q", ok, wt.Path)
 	}
 }
 

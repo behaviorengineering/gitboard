@@ -34,6 +34,7 @@ const ICONS = {
   dot: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8"/></svg>`,
   trash: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h-3ZM2.25 3.75a.75.75 0 0 1 0-1.5h11.5a.75.75 0 0 1 0 1.5H13v9.5A1.75 1.75 0 0 1 11.25 15h-6.5A1.75 1.75 0 0 1 3 13.25v-9.5Zm1.5 0v9.5c0 .138.112.25.25.25h6.5a.25.25 0 0 0 .25-.25v-9.5Zm2 1.75a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75Zm3 0a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0v-5.5a.75.75 0 0 1 .75-.75Z"/></svg>`,
   search: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"/></svg>`,
+  info: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>`,
   pull: `<svg class="mark-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8.75 1.75a.75.75 0 0 0-1.5 0v7.19L4.72 6.41a.75.75 0 0 0-1.06 1.06l3.75 3.75a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.94ZM2.75 13.5a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5Z"/></svg>`,
   spinner: `<svg class="mark-icon mark-icon--spin" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 6.5 6.5h-1.5A5 5 0 1 1 8 3V1.5Z"/></svg>`,
 };
@@ -328,15 +329,33 @@ function localByBranch(local) {
   return map;
 }
 
-/** Prefer primary appearance worktree, else main, else first. */
-function pickLocalWorktree(wts, local) {
+/** Prefer a worktree on branchName, else primary appearance, else main, else first. */
+function pickLocalWorktree(wts, local, branchName) {
   const list = Array.isArray(wts) ? wts : (wts ? [wts] : []);
   if (!list.length) return null;
+  const branch = String(branchName || '').trim();
+  const pool = branch
+    ? list.filter((w) => !w.detached && !w.bare && String(w.branch || '') === branch)
+    : list;
+  const use = pool.length ? pool : list;
   const primaryPath = String(local?.path || '');
-  const primary = list.find((w) => primaryPath && w.appearance_path === primaryPath);
+  const primary = use.find((w) => primaryPath && w.appearance_path === primaryPath);
   if (primary) return primary;
-  const main = list.find((w) => w.main);
-  return main || list[0];
+  const main = use.find((w) => w.main);
+  return main || use[0];
+}
+
+/** Origin sync for the appearance that owns wt; falls back to project-level sync. */
+function originSyncForWorktree(local, branchName, wt) {
+  const apps = localAppearances(local);
+  const want = String(wt?.appearance_path || wt?.path || '').trim();
+  if (want) {
+    const app = apps.find((a) => String(a.path || '') === want);
+    if (app) {
+      return originSyncFor(app, branchName);
+    }
+  }
+  return originSyncFor(local, branchName);
 }
 
 function originSyncFor(local, branchName) {
@@ -352,6 +371,15 @@ function originSyncBits(sync) {
   if (sync.ahead) bits.push(`↑${sync.ahead}`);
   if (sync.behind) bits.push(`↓${sync.behind}`);
   return bits;
+}
+
+/** Drop stale ↓N while this checkout is pulling or waiting for a fresh board paint. */
+function originSyncBitsForPull(sync, projectID, branchName, repoPath) {
+  const bits = originSyncBits(sync);
+  if (!sync?.behind || !projectID || !branchName || !repoPath) return bits;
+  const key = pullActionKey(projectID, branchName, repoPath);
+  if (!pendingPulls.has(key) && !recentPulled.has(key)) return bits;
+  return bits.filter((b) => !String(b).startsWith('↓'));
 }
 
 function originSyncTitle(sync) {
@@ -416,10 +444,10 @@ function localColumn(wts, local, branchName, project) {
     return cell;
   }
   const list = Array.isArray(wts) ? wts : (wts ? [wts] : []);
-  const sync = originSyncFor(local, branchName);
-  const syncBits = originSyncBits(sync);
-  const preferred = pickLocalWorktree(list, local);
+  const preferred = pickLocalWorktree(list, local, branchName);
   const repoPath = preferred?.path || local.path || '';
+  const sync = originSyncForWorktree(local, branchName, preferred) || originSyncFor(local, branchName);
+  const syncBits = originSyncBitsForPull(sync, project?.id, branchName, repoPath);
 
   if (!list.length) {
     if (local.error) {
@@ -429,6 +457,7 @@ function localColumn(wts, local, branchName, project) {
     }
     if (syncBits.length) {
       const span = el('span', 'branch-local-sync is-divergent', syncBits.join(' '));
+      if (project?.id) span.id = morphId('sync', project.id, branchName, repoPath);
       span.title = `${originSyncTitle(sync)} (local branch not checked out)`;
       cell.appendChild(span);
       appendSyncInvestigateButton(cell, {
@@ -480,6 +509,7 @@ function localColumn(wts, local, branchName, project) {
   // Skip ↑/↓ and pull when origin freshness is unknown (for example fetch failed).
   if (!local.error && syncBits.length) {
     const span = el('span', 'branch-local-sync is-divergent', syncBits.join(' '));
+    if (project?.id) span.id = morphId('sync', project.id, branchName, repoPath);
     span.title = originSyncTitle(sync);
     cell.appendChild(span);
   }
@@ -508,9 +538,15 @@ function localColumn(wts, local, branchName, project) {
 /** @type {Set<string>} */
 const pendingPulls = new Set();
 
-/** Keys that just finished pull successfully; cleared after a successful board paint or failed flush retry. */
+/** Keys that just finished pull successfully; cleared after a successful fresh board paint. */
 /** @type {Set<string>} */
 const recentPulled = new Set();
+
+/** True until a fresh dashboard paint lands after one or more successful pulls. */
+let pullBoardDirty = false;
+
+/** Quiet polls must not abort an in-flight ?fresh=1 load (post-pull / Refresh). */
+let dashboardFreshInFlight = false;
 
 /** @type {{ label: string, path: string, message: string }[]} */
 const pullFailures = [];
@@ -537,18 +573,19 @@ async function flushPullBatch() {
   if (pendingPulls.size > 0) return;
   const failures = pullFailures.splice(0, pullFailures.length);
   const status = document.getElementById('status');
-  // loadDashboard bumps a generation token so this fresh fetch wins over an older in-flight poll.
+  // Prefer a fresh load so origin ahead/behind matches the pulls that just finished.
   let ok = await loadDashboard({ quiet: true, fresh: true });
-  if (!ok) {
+  if (!ok && pullBoardDirty) {
     ok = await loadDashboard({ quiet: true, fresh: true });
   }
-  if (!ok) {
-    // Do not leave ephemeral "pulled" labels forever when the refresh fails.
-    recentPulled.clear();
-    applyBoard();
+  if (!ok && pullBoardDirty) {
+    // Keep "pulled" until a later fresh paint; do not clear recentPulled on abort races.
+    if (status && !String(status.textContent || '').startsWith('Error:')) {
+      status.textContent = 'Pulls finished; refresh pending…';
+    }
   }
   if (failures.length === 0) {
-    if (status && !String(status.textContent || '').startsWith('Error:')) {
+    if (status && !String(status.textContent || '').startsWith('Error:') && ok) {
       status.textContent = status.textContent || 'Pulls finished';
     }
     return;
@@ -573,9 +610,14 @@ function pullActionKey(projectID, branch, repoPath) {
 }
 
 function appendPullButton(cell, { sync, project, branchName, repoPath, dirty, whyDirty }) {
-  if (!sync?.behind || sync.ahead) return;
   if (!project?.id || !branchName || !repoPath) return;
   const key = pullActionKey(project.id, branchName, repoPath);
+  // Drop ephemeral "pulled" once this checkout is no longer behind.
+  if (recentPulled.has(key) && (!sync?.behind || sync.ahead)) {
+    recentPulled.delete(key);
+    if (recentPulled.size === 0) pullBoardDirty = false;
+  }
+  if (!sync?.behind || sync.ahead) return;
   const pending = pendingPulls.has(key);
   const justPulled = recentPulled.has(key);
   const btn = el('button', 'branch-pull-ff');
@@ -693,7 +735,7 @@ function branchesCell(branches, host, project) {
 }
 
 function branchRow({ remote: b, localWts, local, host, project, reviewKind, localOnly }) {
-  const localWt = pickLocalWorktree(localWts, local);
+  const localWt = pickLocalWorktree(localWts, local, b.name);
   const failed = ['failed', 'failure', 'error'].includes(String(b.ci_status || '').toLowerCase());
   const pruneHint = String(localWt?.prune_hint || '');
   const itemClass = [
@@ -886,7 +928,7 @@ function appearanceRefLabel(app) {
   return String(app.branch || '').trim();
 }
 
-function appearanceStatusMarks(app) {
+function appearanceStatusMarks(app, project) {
   const marks = el('span', 'appearance-marks');
   if (app.error) {
     marks.appendChild(iconMark(ICONS.alert, 'mark--bad', app.error));
@@ -906,9 +948,10 @@ function appearanceStatusMarks(app) {
     marks.appendChild(iconMark(ICONS.laptop, 'mark--warn', 'dirty working tree'));
   }
   const sync = appearanceBranchSync(app);
-  const bits = originSyncBits(sync);
+  const bits = originSyncBitsForPull(sync, project?.id, app.branch, app.path);
   if (bits.length) {
     const span = el('span', 'appearance-sync is-divergent', bits.join(' '));
+    if (project?.id) span.id = morphId('app-sync', project.id, app.path || '', app.branch || '');
     span.title = originSyncTitle(sync) || 'versus upstream';
     marks.appendChild(span);
   }
@@ -968,7 +1011,7 @@ function renderAppearances(local, project) {
     const id = el('span', 'project-local-path appearance-id', app.display_id || app.path || '');
     id.title = app.path || '';
     head.appendChild(id);
-    head.appendChild(appearanceStatusMarks(app));
+    head.appendChild(appearanceStatusMarks(app, project));
     const detail = renderAppearanceDetail(app);
     detail.hidden = true;
     line.appendChild(head);
@@ -1179,8 +1222,9 @@ function projectCIFailed(row) {
 }
 
 function projectOpenReview(row) {
-  const openCount = (row.open_items?.pull_requests || 0) + (row.open_items?.merge_requests || 0);
-  return openCount > 0 || (row.branches || []).some((b) => b.open_review);
+  // Only branches still shown after ui.hide_branches; ignore forge open_items
+  // totals that may still count hidden PR/MR heads.
+  return (row.branches || []).some((b) => b.open_review);
 }
 
 function projectConflicts(row) {
@@ -1356,6 +1400,47 @@ function setScopeMenuOpen(open) {
   menu.hidden = !open;
 }
 
+function setConfigInfoOpen(open) {
+  const btn = document.getElementById('config-info-btn');
+  const menu = document.getElementById('config-info-menu');
+  if (!btn || !menu) return;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menu.hidden = !open;
+}
+
+/** @param {{ hide_branches?: string[] } | null | undefined} ui */
+function renderConfigInfo(ui) {
+  const btn = document.getElementById('config-info-btn');
+  const menu = document.getElementById('config-info-menu');
+  if (!btn || !menu) return;
+  const patterns = Array.isArray(ui?.hide_branches)
+    ? ui.hide_branches.map((p) => String(p || '').trim()).filter(Boolean)
+    : [];
+  btn.classList.toggle('has-patterns', patterns.length > 0);
+  btn.title = patterns.length
+    ? `${patterns.length} hide_branches pattern${patterns.length === 1 ? '' : 's'} active`
+    : 'Board config from your config file';
+  if (!btn.querySelector('.mark-icon')) {
+    btn.insertAdjacentHTML('afterbegin', ICONS.info);
+  }
+  const section = el('div', 'config-info-section');
+  section.appendChild(el('p', 'config-info-key', 'ui.hide_branches'));
+  if (patterns.length === 0) {
+    section.appendChild(el('p', 'config-info-empty', 'None (showing all branches)'));
+  } else {
+    const list = el('ul', 'config-info-list');
+    for (const p of patterns) {
+      const li = document.createElement('li');
+      const code = document.createElement('code');
+      code.textContent = p;
+      li.appendChild(code);
+      list.appendChild(li);
+    }
+    section.appendChild(list);
+  }
+  menu.replaceChildren(el('p', 'config-info-title', 'Board config'), section);
+}
+
 function applyBoard() {
   const rows = filteredProjects();
   renderRows(rows);
@@ -1392,6 +1477,8 @@ function bindFilters() {
   const clearBtn = document.getElementById('filter-clear');
   const scopeBtn = document.getElementById('filter-scope-btn');
   const scopeRoot = document.getElementById('filter-scope');
+  const configBtn = document.getElementById('config-info-btn');
+  const configRoot = document.getElementById('config-info');
   const onChange = () => {
     readFiltersFromDom();
     applyBoard();
@@ -1402,15 +1489,25 @@ function bindFilters() {
     ev.preventDefault();
     ev.stopPropagation();
     const open = scopeBtn.getAttribute('aria-expanded') === 'true';
+    setConfigInfoOpen(false);
     setScopeMenuOpen(!open);
   });
-  document.addEventListener('click', (ev) => {
-    if (!scopeRoot) return;
-    if (scopeRoot.contains(ev.target)) return;
+  configBtn?.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const open = configBtn.getAttribute('aria-expanded') === 'true';
     setScopeMenuOpen(false);
+    setConfigInfoOpen(!open);
+  });
+  document.addEventListener('click', (ev) => {
+    if (scopeRoot && !scopeRoot.contains(ev.target)) setScopeMenuOpen(false);
+    if (configRoot && !configRoot.contains(ev.target)) setConfigInfoOpen(false);
   });
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') setScopeMenuOpen(false);
+    if (ev.key === 'Escape') {
+      setScopeMenuOpen(false);
+      setConfigInfoOpen(false);
+    }
   });
   for (const btn of document.querySelectorAll('.filter-chip[data-filter]')) {
     btn.addEventListener('click', () => {
@@ -1422,6 +1519,7 @@ function bindFilters() {
       onChange();
     });
   }
+  renderConfigInfo({ hide_branches: [] });
 }
 
 function renderRows(projects) {
@@ -1429,6 +1527,8 @@ function renderRows(projects) {
   // Build rows under a detached tbody, then morph its *children* into #rows.
   // Morphing a second tbody (especially with id="rows") makes Idiomorph try to
   // insert that element under the live #rows and throws HierarchyRequestError.
+  // Sync/pull nodes use morphId so ephemeral ↓N / pull busy state updates in place
+  // instead of leaving stale marks from a prior paint.
   const scratch = document.createElement('tbody');
   for (const row of projects || []) {
     const tr = el('tr');
@@ -1519,8 +1619,8 @@ function schedulePoll() {
   }
   if (pollSeconds <= 0) return;
   pollTimer = setInterval(() => {
-    if (document.hidden || loading || pendingPulls.size > 0) return;
-    void loadDashboard({ quiet: true });
+    if (document.hidden || loading || pendingPulls.size > 0 || pullFlushScheduled) return;
+    void loadDashboard({ quiet: true, fresh: pullBoardDirty });
   }, pollSeconds * 1000);
 }
 
@@ -1529,6 +1629,10 @@ function schedulePoll() {
  * @param {{ quiet?: boolean, fresh?: boolean }} [opts]
  */
 async function loadDashboard({ quiet = false, fresh = false } = {}) {
+  // Do not let a quiet poll abort a post-pull / Refresh fresh load mid-flight.
+  if (!fresh && dashboardFreshInFlight) {
+    return false;
+  }
   const gen = ++dashboardGen;
   if (dashboardAbort) {
     dashboardAbort.abort();
@@ -1536,6 +1640,8 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
   const ac = new AbortController();
   dashboardAbort = ac;
   loading = true;
+  const trackingFresh = fresh;
+  if (trackingFresh) dashboardFreshInFlight = true;
   const status = document.getElementById('status');
   if (!quiet) status.textContent = 'Refreshing…';
   try {
@@ -1553,8 +1659,16 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
         schedulePoll();
       }
     }
-    // Successful paint replaces ephemeral pull labels with server state.
-    recentPulled.clear();
+    renderConfigInfo(data.ui);
+    if (fresh) {
+      recentPulled.clear();
+      pullBoardDirty = false;
+    } else if (pullBoardDirty) {
+      // A stale poll painted; keep ephemeral pull state and force a fresh follow-up.
+      schedulePullFlush();
+    } else {
+      recentPulled.clear();
+    }
     renderTooling(data.tooling);
     allProjects = Array.isArray(data.projects) ? data.projects : [];
     rebuildScopeMenu();
@@ -1572,6 +1686,7 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
     if (gen === dashboardGen) {
       loading = false;
       if (dashboardAbort === ac) dashboardAbort = null;
+      if (trackingFresh) dashboardFreshInFlight = false;
     }
   }
 }
@@ -1595,18 +1710,25 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
   setButtonBusy(button, 'removing…');
   if (status) status.textContent = `Removing ${label}…`;
   try {
-    const res = await fetch('/api/prune/safe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id, branch, worktree_path }),
+    await postJSONWithIndexLockConfirm('/api/prune/safe', {
+      project_id,
+      branch,
+      worktree_path,
+    }, {
+      title: `${label}: stale git lock`,
+      body: 'A leftover git index.lock is blocking remove. Remove the lock and continue?',
     });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(text.trim() || `HTTP ${res.status}`);
-    }
     if (status) status.textContent = `Removed ${label}`;
     await loadDashboard({ quiet: true, fresh: true });
   } catch (err) {
+    if (err && err.name === 'AbortError') {
+      setButtonIdle(button, {
+        svg: ICONS.trash,
+        label: 'safe to remove',
+      });
+      if (status) status.textContent = '';
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     if (status) status.textContent = '';
     setButtonIdle(button, {
@@ -1632,42 +1754,91 @@ async function pullFFCheckout({ project_id, branch, repo_path, behind, button })
   if (pendingPulls.has(key)) return;
 
   pendingPulls.add(key);
-  setButtonBusy(button, 'pulling…', `Pulling ${branch} from origin…`);
+  // Repaint so the static ↓N hides while the button shows pulling…
+  applyBoard();
   if (status) status.textContent = pullStatusText();
 
   try {
-    const res = await fetch('/api/pull/ff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id, branch, repo_path }),
+    await postJSONWithIndexLockConfirm('/api/pull/ff', {
+      project_id,
+      branch,
+      repo_path,
+    }, {
+      title: `${label}: stale git lock`,
+      body: 'A leftover git index.lock is blocking pull. Remove the lock and continue?',
     });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(text.trim() || `HTTP ${res.status}`);
-    }
     recentPulled.add(key);
-    setButtonIdle(button, {
-      svg: ICONS.pull,
-      label: 'pulled',
-      title: `Fast-forwarded ${branch} from origin`,
-    });
-    if (button) button.disabled = true;
+    pullBoardDirty = true;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    pullFailures.push({ label, path: repo_path, message: msg });
-    setButtonIdle(button, {
-      svg: ICONS.pull,
-      label: `pull ↓${behind}`,
-      title: `Fast-forward local ${branch} from origin (${behind} behind)`,
-    });
+    if (err && err.name === 'AbortError') {
+      // User declined lock clear; treat as cancel, not a pull failure.
+    } else {
+      const msg = err instanceof Error ? err.message : String(err);
+      pullFailures.push({ label, path: repo_path, message: msg });
+    }
   } finally {
     pendingPulls.delete(key);
+    // Pending cleared: show "pulled" (or restore ↓) before the fresh fetch returns.
+    applyBoard();
     if (pendingPulls.size > 0) {
       if (status) status.textContent = pullStatusText();
     } else {
+      if (status && recentPulled.size > 0) {
+        status.textContent = 'Pulls finished; refreshing…';
+      }
       schedulePullFlush();
     }
   }
+}
+
+/**
+ * POST JSON; on 409 stale_index_lock ask to clear and retry once with clear_index_lock.
+ * @param {string} url
+ * @param {Record<string, unknown>} body
+ * @param {{ title: string, body: string }} lockPrompt
+ */
+async function postJSONWithIndexLockConfirm(url, body, lockPrompt) {
+  const send = async (payload) => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const text = await res.text();
+    let data = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+    }
+    return { res, text, data };
+  };
+
+  let { res, text, data } = await send(body);
+  if (res.status === 409 && data && data.code === 'stale_index_lock') {
+    const age = data.age_seconds ? ` (about ${data.age_seconds}s old)` : '';
+    const ok = await confirmDialog({
+      title: lockPrompt.title,
+      body: `${lockPrompt.body}${age}`,
+      detail: data.lock_path || data.repo_path || '',
+      confirmLabel: 'Remove lock',
+      cancelLabel: 'Cancel',
+      danger: true,
+    });
+    if (!ok) {
+      const cancel = new Error('cancelled');
+      cancel.name = 'AbortError';
+      throw cancel;
+    }
+    ({ res, text, data } = await send({ ...body, clear_index_lock: true }));
+  }
+  if (!res.ok) {
+    const msg = (data && data.message) || text.trim() || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
 }
 
 function syncRelationLabel(relation) {
@@ -2001,7 +2172,9 @@ document.getElementById('refresh').addEventListener('click', () => {
   });
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) void loadDashboard({ quiet: true });
+  if (document.hidden) return;
+  if (pendingPulls.size > 0 || pullFlushScheduled) return;
+  void loadDashboard({ quiet: true, fresh: pullBoardDirty });
 });
 
 function findProjectById(id) {

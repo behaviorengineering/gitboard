@@ -44,6 +44,10 @@ func (f *syncLocalFake) RemoveSafeCheckout(context.Context, string, string, stri
 	return nil
 }
 
+func (f *syncLocalFake) EnsureWritableIndex(context.Context, string, bool) error {
+	return nil
+}
+
 func (f *syncLocalFake) ContentOnDefault(context.Context, string, string, string) (bool, string, error) {
 	return false, "", nil
 }

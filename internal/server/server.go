@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
@@ -88,9 +89,10 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
-		_, poll := live.snapshot()
+		doc, poll := live.snapshot()
 		writeJSON(w, map[string]any{
 			"poll_interval_seconds": poll,
+			"ui":                    boardUIConfig(doc),
 		})
 	})
 
@@ -109,6 +111,7 @@ func NewMux(opts Options) http.Handler {
 		doc, poll := live.snapshot()
 		payload := opts.Dash.Collect(ctx, doc, fresh)
 		payload.PollIntervalSeconds = poll
+		payload.UI = boardUIConfig(doc)
 		if err := ctx.Err(); err != nil {
 			http.Error(w, "dashboard timed out or canceled", http.StatusGatewayTimeout)
 			return
@@ -207,11 +210,10 @@ func NewMux(opts Options) http.Handler {
 		defer cancel()
 		doc, _ := live.snapshot()
 		if err := opts.Commands.PruneSafe(ctx, doc, body); err != nil {
-			code := http.StatusInternalServerError
-			if dashboard.IsBadRequest(err) {
-				code = http.StatusBadRequest
+			if writeCommandError(w, err) {
+				return
 			}
-			http.Error(w, err.Error(), code)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true})
@@ -235,11 +237,10 @@ func NewMux(opts Options) http.Handler {
 		doc, _ := live.snapshot()
 		result, err := opts.Commands.PullFF(ctx, doc, body)
 		if err != nil {
-			code := http.StatusInternalServerError
-			if dashboard.IsBadRequest(err) {
-				code = http.StatusBadRequest
+			if writeCommandError(w, err) {
+				return
 			}
-			http.Error(w, err.Error(), code)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, result)
@@ -414,4 +415,38 @@ func writeJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("gitboard: write json: %v", err)
 	}
+}
+
+// writeCommandError maps dashboard validation and confirm errors to HTTP.
+// Returns true when the response was written.
+func writeCommandError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if dashboard.IsConfirmRequired(err) {
+		var cre dashboard.ConfirmRequiredError
+		_ = errors.As(err, &cre)
+		w.WriteHeader(http.StatusConflict)
+		writeJSON(w, cre)
+		return true
+	}
+	if dashboard.IsBadRequest(err) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return true
+	}
+	return false
+}
+
+// boardUIConfig copies presentation settings the UI may display (read-only).
+func boardUIConfig(doc config.File) board.UIConfig {
+	patterns := doc.UI.HideBranches
+	out := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return board.UIConfig{HideBranches: out}
 }

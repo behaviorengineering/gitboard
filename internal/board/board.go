@@ -46,7 +46,7 @@ type MergedReview struct {
 // Prune hint values for local worktrees whose remote head is gone.
 const (
 	PruneSafe   = "safe"   // forge merged PR/MR, or local content already on default
-	PruneLikely = "likely" // remote gone, no open review, not dirty, content not on default
+	PruneLikely = "likely" // remote gone, confirmed no merged PR/MR, content not on default
 )
 
 // ProjectSummary is one row in the dashboard.
@@ -70,8 +70,11 @@ type ProjectSummary struct {
 	// RemoteNamesOK is true when heads were loaded successfully (live or cache).
 	// When false, EnrichPruneHints suppresses all prune hints (fail closed).
 	RemoteNamesOK bool `json:"-"`
-	// MergedOK is true when the merged slice was loaded successfully (live or fresh cache).
+	// MergedOK is true when the bulk merged slice was loaded successfully (live or cache).
 	MergedOK bool `json:"-"`
+	// MergedChecked is true for source branches whose per-branch merged lookup
+	// succeeded (hit or confirmed miss). Likely prune requires this, not MergedOK alone.
+	MergedChecked map[string]bool `json:"-"`
 }
 
 // LocalAppearance roles match localgit checkout roles.
@@ -175,10 +178,18 @@ type Tooling struct {
 	} `json:"gitlab"`
 }
 
+// UIConfig is board-facing presentation settings from the loaded config file.
+type UIConfig struct {
+	// HideBranches are path.Match patterns applied to the Branches column.
+	// Empty means show all remote heads (subject to the usual row limit).
+	HideBranches []string `json:"hide_branches"`
+}
+
 // Dashboard is the aggregated pane payload.
 type Dashboard struct {
 	GeneratedAt         string           `json:"generated_at"`
 	PollIntervalSeconds int              `json:"poll_interval_seconds"`
+	UI                  UIConfig         `json:"ui"`
 	Tooling             Tooling          `json:"tooling"`
 	Projects            []ProjectSummary `json:"projects"`
 }

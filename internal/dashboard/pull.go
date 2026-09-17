@@ -15,9 +15,10 @@ import (
 
 // PullFFRequest identifies a local branch to fast-forward from origin.
 type PullFFRequest struct {
-	ProjectID string `json:"project_id"`
-	Branch    string `json:"branch"`
-	RepoPath  string `json:"repo_path"`
+	ProjectID      string `json:"project_id"`
+	Branch         string `json:"branch"`
+	RepoPath       string `json:"repo_path"`
+	ClearIndexLock bool   `json:"clear_index_lock,omitempty"`
 }
 
 // PullFFResult is returned after a successful fast-forward.
@@ -29,6 +30,7 @@ type PullFFResult struct {
 
 // PullFF validates the mapped checkout, then fast-forwards the branch from origin.
 // Ahead/behind is decided inside PullFFOnly after a fresh fetch.
+// Already up to date is success: the board may still show a stale ↓N until refresh.
 func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFRequest) (PullFFResult, error) {
 	var zero PullFFResult
 	s := c.Service
@@ -70,12 +72,29 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 		return zero, badRequest("repo_path is not a mapped checkout for this project")
 	}
 
-	if err := s.Local.PullFFOnly(ctx, abs, branch); err != nil {
+	if err := c.ensureWritableIndex(ctx, abs, req.ClearIndexLock); err != nil {
+		return zero, err
+	}
+
+	err = s.Local.PullFFOnly(ctx, abs, branch)
+	if err != nil && localgit.IsIndexLockError(err) {
+		if lockErr := c.ensureWritableIndex(ctx, abs, req.ClearIndexLock); lockErr != nil {
+			return zero, lockErr
+		}
+		if req.ClearIndexLock {
+			err = s.Local.PullFFOnly(ctx, abs, branch)
+		}
+	}
+	if err != nil {
+		// Idempotent with ensureBranchFFFromOrigin: a fresh fetch can show the
+		// checkout is already caught up while the board still painted ↓N.
+		if errors.Is(err, localgit.ErrUpToDate) {
+			return PullFFResult{OK: true, Branch: branch, Path: abs}, nil
+		}
 		if errors.Is(err, localgit.ErrInvalidBranch) ||
 			errors.Is(err, localgit.ErrMissingBranch) ||
 			errors.Is(err, localgit.ErrDirtyTree) ||
-			errors.Is(err, localgit.ErrDiverged) ||
-			errors.Is(err, localgit.ErrUpToDate) {
+			errors.Is(err, localgit.ErrDiverged) {
 			return zero, badRequest(err.Error())
 		}
 		return zero, fmt.Errorf("pull ff-only: %w", err)
@@ -84,25 +103,21 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 }
 
 func repoPathAllowed(local *board.LocalStatus, abs string) bool {
+	return repoPathAllowedCanon(local, abs, nil)
+}
+
+func repoPathAllowedCanon(local *board.LocalStatus, abs string, canon func(string) string) bool {
 	if local == nil {
 		return false
 	}
 	check := func(c string) bool {
-		c = strings.TrimSpace(c)
-		if c == "" {
-			return false
-		}
-		path := filepath.Clean(c)
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			path = resolved
-		}
-		return path == abs
+		return sameCheckoutPath(c, abs, canon)
 	}
 	if check(local.Path) {
 		return true
 	}
 	for _, wt := range local.Worktrees {
-		if check(wt.Path) {
+		if check(wt.Path) || check(wt.AppearancePath) {
 			return true
 		}
 	}
@@ -111,7 +126,7 @@ func repoPathAllowed(local *board.LocalStatus, abs string) bool {
 			return true
 		}
 		for _, wt := range app.Worktrees {
-			if check(wt.Path) {
+			if check(wt.Path) || check(wt.AppearancePath) {
 				return true
 			}
 		}

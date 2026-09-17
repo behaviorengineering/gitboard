@@ -228,3 +228,43 @@ func TestGithubHasConflict(t *testing.T) {
 		t.Fatal("clean should not conflict")
 	}
 }
+
+func TestGitHubMergedForBranch(t *testing.T) {
+	fk := &fakeExec{
+		responses: map[string][]byte{
+			"--head feat/old":     []byte(`[{"number":7,"headRefName":"feat/old","url":"https://example/pr/7","mergedAt":"2026-01-01T12:00:00Z"}]`),
+			"--head feat/missing": []byte(`[]`),
+		},
+	}
+	gh := NewGitHub(fk)
+	hit, err := gh.MergedForBranch(context.Background(), "acme/app", "feat/old")
+	if err != nil || len(hit) != 1 || hit[0].ID != 7 {
+		t.Fatalf("hit: %v %+v", err, hit)
+	}
+	miss, err := gh.MergedForBranch(context.Background(), "acme/app", "feat/missing")
+	if err != nil || len(miss) != 0 {
+		t.Fatalf("miss: %v %+v", err, miss)
+	}
+	_, err = gh.MergedForBranch(context.Background(), "acme/app", "bad:name")
+	if err == nil {
+		t.Fatal("invalid branch must fail")
+	}
+}
+
+func TestGitLabMergedForBranch(t *testing.T) {
+	fk := &fakeExec{
+		responses: map[string][]byte{
+			"--source-branch feat/done":    []byte(`[{"iid":2,"source_branch":"feat/done","web_url":"https://gitlab.example/mr/2","merged_at":"2026-01-01T12:00:00Z"}]`),
+			"--source-branch feat/missing": []byte(`[]`),
+		},
+	}
+	gl := NewGitLab(fk)
+	hit, err := gl.MergedForBranch(context.Background(), "acme/app", "feat/done")
+	if err != nil || len(hit) != 1 || hit[0].ID != 2 {
+		t.Fatalf("hit: %v %+v", err, hit)
+	}
+	miss, err := gl.MergedForBranch(context.Background(), "acme/app", "feat/missing")
+	if err != nil || len(miss) != 0 {
+		t.Fatalf("miss: %v %+v", err, miss)
+	}
+}

@@ -1,6 +1,7 @@
 package remotegit
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -200,4 +201,15 @@ func parseTime(raw string) (time.Time, bool) {
 
 func trimBranch(name string) string {
 	return strings.TrimSpace(name)
+}
+
+func forgeBranchNameOK(branch string) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("branch is required")
+	}
+	if strings.ContainsAny(branch, " \t\n:") || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	return nil
 }

@@ -10,8 +10,9 @@ import (
 // Safe: remote head gone, clean tree, no open PR/MR, and either forge has a
 // merged PR/MR for the branch or LocalWorktree.ContentOnDefault is true
 // (caller annotates via localgit).
-// Likely: remote head gone, clean tree, no open PR/MR, merged lookup succeeded,
-// no merged/content match.
+// Likely: remote head gone, clean tree, no open PR/MR, a per-branch merged
+// lookup confirmed no match (MergedChecked), and content is not on default.
+// A bulk top-50 miss without MergedChecked is not likely.
 // Main is the primary worktree (first git worktree list entry), not "never prune";
 // only the default branch name is excluded.
 //
@@ -60,7 +61,7 @@ func EnrichPruneHints(summary *board.ProjectSummary) {
 
 	mergedByBranch := newestMergedByBranch(summary.Merged)
 	for i := range summary.Local.Worktrees {
-		applyPruneHint(&summary.Local.Worktrees[i], defaultName, remote, open, mergedByBranch, summary.MergedOK)
+		applyPruneHint(&summary.Local.Worktrees[i], defaultName, remote, open, mergedByBranch, summary.MergedOK, summary.MergedChecked)
 	}
 }
 
@@ -110,6 +111,7 @@ func applyPruneHint(
 	remote, open map[string]struct{},
 	mergedByBranch map[string]board.MergedReview,
 	mergedOK bool,
+	mergedChecked map[string]bool,
 ) {
 	if wt == nil {
 		return
@@ -143,6 +145,9 @@ func applyPruneHint(
 		return
 	}
 	if !mergedOK {
+		return
+	}
+	if !mergedChecked[branch] {
 		return
 	}
 	wt.PruneHint = board.PruneLikely
