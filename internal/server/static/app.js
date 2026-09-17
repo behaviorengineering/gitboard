@@ -719,6 +719,7 @@ function branchesCell(branches, host, project) {
 
   for (const [name, wts] of byLocal) {
     if (remoteNames.has(name)) continue;
+    if (branchNameHidden(name, hideBranchPatterns)) continue;
     list.appendChild(branchRow({
       remote: { name, ci_status: '', web_url: '' },
       localWts: wts,
@@ -1066,6 +1067,9 @@ function renderTooling(tool) {
 const CI_FAILED = new Set(['failed', 'failure', 'error', 'cancelled', 'canceled']);
 
 let allProjects = [];
+
+/** @type {string[]} Active ui.hide_branches patterns from the last dashboard payload. */
+let hideBranchPatterns = [];
 const filters = {
   q: '',
   /** @type {Set<string>} empty = all host/org scopes */
@@ -1409,13 +1413,19 @@ function setConfigInfoOpen(open) {
 }
 
 /** @param {{ hide_branches?: string[] } | null | undefined} ui */
+function setHideBranchPatterns(ui) {
+  hideBranchPatterns = Array.isArray(ui?.hide_branches)
+    ? ui.hide_branches.map((p) => String(p || '').trim()).filter(Boolean)
+    : [];
+}
+
+/** @param {{ hide_branches?: string[] } | null | undefined} ui */
 function renderConfigInfo(ui) {
+  setHideBranchPatterns(ui);
   const btn = document.getElementById('config-info-btn');
   const menu = document.getElementById('config-info-menu');
   if (!btn || !menu) return;
-  const patterns = Array.isArray(ui?.hide_branches)
-    ? ui.hide_branches.map((p) => String(p || '').trim()).filter(Boolean)
-    : [];
+  const patterns = hideBranchPatterns;
   btn.classList.toggle('has-patterns', patterns.length > 0);
   btn.title = patterns.length
     ? `${patterns.length} hide_branches pattern${patterns.length === 1 ? '' : 's'} active`
@@ -1439,6 +1449,62 @@ function renderConfigInfo(ui) {
     section.appendChild(list);
   }
   menu.replaceChildren(el('p', 'config-info-title', 'Board config'), section);
+}
+
+/**
+ * Go path.Match subset used by ui.hide_branches: * and ? do not cross '/'.
+ * Invalid patterns never match (same as the server).
+ * @param {string} pattern
+ * @param {string} name
+ */
+function pathMatch(pattern, name) {
+  const pat = String(pattern || '');
+  const text = String(name || '');
+  if (!pat) return false;
+  let re = '^';
+  for (let i = 0; i < pat.length; i++) {
+    const c = pat[i];
+    if (c === '*') {
+      re += '[^/]*';
+      continue;
+    }
+    if (c === '?') {
+      re += '[^/]';
+      continue;
+    }
+    if (c === '\\') {
+      i++;
+      if (i >= pat.length) return false;
+      re += pat[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      continue;
+    }
+    if ('^$+(){}|[]'.includes(c) || c === '.') {
+      re += `\\${c}`;
+      continue;
+    }
+    re += c;
+  }
+  re += '$';
+  try {
+    return new RegExp(re).test(text);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} name
+ * @param {string[]} patterns
+ */
+function branchNameHidden(name, patterns) {
+  const n = String(name || '');
+  if (!n || !Array.isArray(patterns) || patterns.length === 0) return false;
+  for (const pat of patterns) {
+    const p = String(pat || '').trim();
+    if (!p) continue;
+    if (pathMatch(p, n)) return true;
+  }
+  return false;
 }
 
 function applyBoard() {
