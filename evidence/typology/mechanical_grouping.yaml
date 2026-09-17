@@ -1,0 +1,56 @@
+delivery_paths:
+    - internal/server
+entrypoint_paths:
+    - cmd/gitboard
+    - internal/pruneagent
+door_walks:
+    - door_path: cmd/gitboard
+      door_role: entrypoint
+      private_paths:
+        - internal/observability
+        - internal/syncproj
+      cross_door_wiring:
+        - '`cmd/gitboard` -[imports]-> `internal/pruneagent`'
+        - '`cmd/gitboard` -[serves_server]-> `internal/server`'
+    - door_path: internal/pruneagent
+      door_role: entrypoint
+    - door_path: internal/server
+      door_role: server
+      cross_door_wiring:
+        - '`internal/server` -[imports]-> `internal/pruneagent`'
+shared_paths:
+    - internal/board
+    - internal/cliexec
+    - internal/config
+    - internal/dashboard
+    - internal/llm
+    - internal/localgit
+    - internal/remotegit
+    - internal/triage
+library_by_role:
+    config:
+        - internal/config
+    dto:
+        - internal/board
+    exec_runner:
+        - internal/cliexec
+    observability:
+        - internal/observability
+product_seeds:
+    - paths:
+        - internal/syncproj
+notes:
+    - '`entrypoint` and `server` are distinct delivery doors; do not merge them.'
+    - '`dto` packages are technical libraries, not product slices.'
+    - '`config` packages are technical libraries, not product slices.'
+    - '`exec_runner` packages are technical libraries, not product slices.'
+    - '`observability` packages are technical libraries, not product slices.'
+    - '`internal/board` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/cliexec` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/config` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/dashboard` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/llm` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/localgit` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/remotegit` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/triage` is shared across doors; do not invent sole ownership for one door (shared is not the same as library).'
+    - '`internal/syncproj` is a singleton aggregator component; let the LLM argue whether it belongs with a neighbour or stays separate.'
