@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "ec57fcdff623b3e1a7d86c8e77aff9d9ca682a85ecc6f6e186898253867bedd4",
+  "created_at": "2026-09-17T14:15:27Z",
+  "payload": {
+    "markdown": "# Mission\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: README.md](README.md) · [Next: architecture.md](architecture.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\ngitboard serves as a local code-change dashboard for GitLab and GitHub. It provides a unified interface to monitor CI status, track open Merge Requests and Pull Requests, and perform failed job triage. By integrating with `gh`, `glab`, and `git` on the local machine, it synchronizes remote forge activity with local checkout and worktree states to streamline developer workflows.",
+    "prompt_tokens": 14492,
+    "completion_tokens": 1633,
+    "total_tokens": 16125
+  }
+}
