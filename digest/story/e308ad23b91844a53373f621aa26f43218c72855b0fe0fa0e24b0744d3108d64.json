@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "e308ad23b91844a53373f621aa26f43218c72855b0fe0fa0e24b0744d3108d64",
+  "created_at": "2026-09-17T14:20:13Z",
+  "payload": {
+    "markdown": "# Conventions\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Prev: architecture.md](architecture.md) · [Next: weaknesses.md](weaknesses.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\nContributors to `gitboard` work within a local-first development workflow that integrates directly with standard forge CLI tools.\n### Environment and Tooling\nDevelopment and testing rely on the presence of `gh` (GitHub CLI), `glab` (GitLab CLI), and standard `git` installations. Because `gitboard` functions as a local dashboard for CI status, MRs/PRs, and worktree state, all contributions must ensure compatibility with these underlying command-line interfaces.\n### Development Workflow\nInstallation: For local development, use `go install github.com/behaviorengineering/gitboard/cmd/gitboard@latest` to ensure you are working with the most recent local build.\nConfiguration: Initial setup is managed via `gitboard init`, which populates the local configuration at `~/.config/gitboard/config.yaml`. Changes to the LLM or provider settings should be reflected in this configuration.\nTesting: Since the tool interacts with local worktrees and forge-specific metadata, testing should be performed against active local repositories to validate the aggregation of project views and triage capabilities.",
+    "prompt_tokens": 29547,
+    "completion_tokens": 3181,
+    "total_tokens": 32728
+  }
+}
