@@ -1,0 +1,25 @@
+{
+  "kind": "ledger",
+  "fingerprint": "af56eaf798ff3ba214210283279352492c6ab0e550f6965a129a74b13ab94905",
+  "created_at": "2026-09-17T14:12:11Z",
+  "payload": {
+    "id": "gitboard",
+    "owned_paths": [
+      "cmd/gitboard"
+    ],
+    "evidence": [
+      "mechanicalRole: entrypoint",
+      "hasMain: true"
+    ],
+    "claims": [
+      "orchestrate",
+      "run_cli"
+    ],
+    "objective": "The package serves as a command-line entrypoint that orchestrates local code-change board operations.",
+    "verdict": "grounded",
+    "source": "slice_objective_rlm",
+    "prompt_tokens": 9284,
+    "completion_tokens": 1696,
+    "total_tokens": 10980
+  }
+}
