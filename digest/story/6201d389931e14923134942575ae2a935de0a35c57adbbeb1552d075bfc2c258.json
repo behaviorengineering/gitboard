@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "6201d389931e14923134942575ae2a935de0a35c57adbbeb1552d075bfc2c258",
+  "created_at": "2026-09-17T14:14:29Z",
+  "payload": {
+    "markdown": "# README\n\u003c!-- majordomo-reading-nav:start --\u003e\nReading path: [Next: mission.md](mission.md) · [TOC](README.md)\n\u003c!-- majordomo-reading-nav:end --\u003e\n\u003c!-- majordomo-reading-toc:start --\u003e\n## Reading order\n1. [README.md](README.md) (this file)\n2. [mission.md](mission.md)\n3. [architecture.md](architecture.md)\n4. [conventions.md](conventions.md)\n5. [weaknesses.md](weaknesses.md)\n6. [chronology.md](chronology.md)\n7. `evidence/typology/` - appears after a Typology survey seed\n\u003c!-- majordomo-reading-toc:end --\u003e\nGitboard serves as a local code-change dashboard for GitLab and GitHub. It aggregates CI status, open Merge Requests, and failed job triage data alongside local checkout and worktree states. The tool operates by interfacing with the `gh`, `glab`, and `git` CLIs installed on the user's machine, providing a unified view of development activity directly in the local environment.\nThis orphan branch holds project understanding for the `gitboard` repository.\nNever merge these files into the default branch.\nContext updates are PRs whose base is this branch.\n## Story vs Typology evidence\nRoot markdown (`mission.md`, `architecture.md`, …) is the teaching story.\n`evidence/typology/` holds Typology seed evidence for this digest proposal (for example `architecture_brief.md`). That brief is not the teaching story and not the confirmed `.typology/` catalog.",
+    "prompt_tokens": 2837,
+    "completion_tokens": 887,
+    "total_tokens": 3724
+  }
+}
