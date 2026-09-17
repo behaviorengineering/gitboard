@@ -1,0 +1,11 @@
+{
+  "kind": "story",
+  "fingerprint": "bec36e27e0610b8575d64fb417234479ec60ceeb4d5b6a29ec85a9bcafe65859",
+  "created_at": "2026-09-17T14:26:29Z",
+  "payload": {
+    "markdown": "# Grounding\nGitboard serves as a local coordination layer for developer workflows across GitLab and GitHub. It functions as a centralized dashboard for managing code-change state, providing visibility into CI status, open Merge Requests, and failed job triage directly from the local machine.\n### Core Typology and Objectives\nThe system operates through a set of functional modules designed to bridge remote forge state with local development environments:\nTriage and Observability: Monitoring failed jobs and managing the flow of incoming work via `triage` and `observability` modules.\nLocal/Remote Synchronization: Managing the relationship between local worktrees and remote repository states through `localgit` and `remotegit` components.\nProject Synchronization: Orchestrating project-level configurations and state via `syncproj`.\nExecution and Interface: Providing command-line interaction through `cliexec` and visual status through the `dashboard` and `board` components.\n### Operational Scope\nGitboard is a client-side tool that leverages existing forge CLIs (`gh`, `glab`) and local `git` installations. It does not manage remote deployments or runtime operations; instead, it focuses on the developer's local context, facilitating efficient movement between remote repository updates and local worktree management.",
+    "prompt_tokens": 4053,
+    "completion_tokens": 883,
+    "total_tokens": 4936
+  }
+}
