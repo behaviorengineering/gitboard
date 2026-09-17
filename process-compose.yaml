@@ -17,9 +17,10 @@ environment:
 
 processes:
   dashboard:
+    # exec replaces the shell so SIGTERM reaches gitboard (not a leftover child holding :1325).
     command: >-
       go build -o bin/gitboard ./cmd/gitboard
-      && ./bin/gitboard serve -config ${GITBOARD_CONFIG} -addr ${GITBOARD_ADDR}
+      && exec ./bin/gitboard serve -config ${GITBOARD_CONFIG} -addr ${GITBOARD_ADDR}
     working_dir: "${GITBOARD_DIR}"
     readiness_probe:
       http_get:

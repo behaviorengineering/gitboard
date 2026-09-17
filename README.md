@@ -14,7 +14,7 @@ glab auth login
 gh auth login
 ```
 
-2. Download the `gitboard` archive for your OS from the [latest release](https://github.com/behaviorengineering/gitboard/releases/latest), unpack it, and put `gitboard` on your `PATH`.
+2. Download the `gitboard` archive for your OS from the [latest release](https://github.com/behaviorengineering/gitboard/releases/latest), unpack it, and put `gitboard` on your `PATH`. (`go install github.com/behaviorengineering/gitboard/cmd/gitboard@vX.Y.Z` also works; `gitboard version` reports the module tag via BuildInfo.)
 
 3. Run:
 
