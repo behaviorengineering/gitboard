@@ -2,6 +2,7 @@ package localgit
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -33,6 +34,54 @@ func TestInspectPathWithFakeExec(t *testing.T) {
 	}
 	if len(st.Worktrees) != 1 {
 		t.Fatalf("worktrees=%d", len(st.Worktrees))
+	}
+}
+
+func TestLooksLikeGitDir(t *testing.T) {
+	if !looksLikeGitDir("/repo/.git/modules/providers/pkg") {
+		t.Fatal("modules git dir")
+	}
+	if !looksLikeGitDir("/repo/.git") {
+		t.Fatal(".git")
+	}
+	if looksLikeGitDir("/repo/providers/pkg") {
+		t.Fatal("checkout is not a git dir")
+	}
+}
+
+func TestInspectPathResolvesSubmoduleGitDir(t *testing.T) {
+	checkout := t.TempDir()
+	gitdir := filepath.Join(checkout, ".git", "modules", "prov")
+	if err := os.MkdirAll(gitdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fk := &fakeExec{
+		responses: map[string][]byte{
+			"rev-parse --git-dir": []byte(".git\n"),
+			"worktree list --porcelain": []byte(
+				"worktree " + gitdir + "\nHEAD abcdef\nbranch refs/heads/main\n\n",
+			),
+			"--show-toplevel":                    []byte(checkout + "\n"),
+			"rev-parse --abbrev-ref HEAD":        []byte("main\n"),
+			"status --porcelain":                 []byte(""),
+			"rev-parse --abbrev-ref @{upstream}": []byte("origin/main\n"),
+			"rev-list --left-right --count":      []byte("0\t0\n"),
+		},
+	}
+	in := NewInspector(fk)
+	st := in.InspectPath(context.Background(), checkout)
+	if !st.Mapped || st.Error != "" {
+		t.Fatalf("status: %+v", st)
+	}
+	if len(st.Worktrees) != 1 {
+		t.Fatalf("worktrees=%d", len(st.Worktrees))
+	}
+	want := checkout
+	if resolved, err := filepath.EvalSymlinks(checkout); err == nil {
+		want = resolved
+	}
+	if st.Worktrees[0].Path != want {
+		t.Fatalf("path=%q want %q", st.Worktrees[0].Path, want)
 	}
 }
 

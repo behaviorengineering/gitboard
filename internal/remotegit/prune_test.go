@@ -19,6 +19,9 @@ func TestEnrichPruneHintsSafeAndLikely(t *testing.T) {
 			{Branch: "feat/merged", ID: 41, URL: "https://example/pr/41", MergedAt: "2026-08-10T10:00:00Z"},
 		},
 		MergedOK: true,
+		MergedChecked: map[string]bool{
+			"feat/gone": true,
+		},
 		Local: &board.LocalStatus{
 			Mapped:        true,
 			DefaultBranch: "main",
@@ -58,6 +61,9 @@ func TestEnrichPruneHintsContentOnDefaultSafe(t *testing.T) {
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
 		MergedOK:      true,
+		MergedChecked: map[string]bool{
+			"feat/gone": true,
+		},
 		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
 		},
@@ -259,6 +265,28 @@ func TestEnrichPruneHintsEmptyRemoteNamesOKStillAllowsGone(t *testing.T) {
 	}
 }
 
+func TestEnrichPruneHintsBulkMissWithoutCheckIsNotLikely(t *testing.T) {
+	summary := &board.ProjectSummary{
+		RemoteNames:   []string{"main"},
+		RemoteNamesOK: true,
+		MergedOK:      true,
+		Branches: []board.BranchRef{
+			{Name: "main", Default: true},
+		},
+		Local: &board.LocalStatus{
+			Mapped:        true,
+			DefaultBranch: "main",
+			Worktrees: []board.LocalWorktree{
+				{Path: "/wt", Branch: "feat/gone"},
+			},
+		},
+	}
+	EnrichPruneHints(summary)
+	if got := summary.Local.Worktrees[0].PruneHint; got != "" {
+		t.Fatalf("bulk miss without MergedChecked must not be likely, got %q", got)
+	}
+}
+
 func TestEnrichPruneHintsMergedNotOKSuppressesLikely(t *testing.T) {
 	summary := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
@@ -298,6 +326,7 @@ func TestEnrichPruneHintsPrimaryCheckout(t *testing.T) {
 			},
 		},
 	}
+	summary.MergedChecked = map[string]bool{"feat/primary-gone": true}
 
 	EnrichPruneHints(summary)
 
@@ -336,6 +365,7 @@ func TestEnrichPruneHintsMultiAppearanceWorktrees(t *testing.T) {
 			},
 		},
 	}
+	summary.MergedChecked = map[string]bool{"feat/gone": true}
 	EnrichPruneHints(summary)
 
 	var safe, likely int

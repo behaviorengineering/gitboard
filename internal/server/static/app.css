@@ -293,6 +293,102 @@ body {
   border: 0;
 }
 
+.config-info {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.config-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.config-info-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--muted) 65%, transparent);
+}
+
+.config-info-btn[aria-expanded="true"] {
+  color: var(--link);
+  border-color: color-mix(in srgb, var(--link) 50%, transparent);
+}
+
+.config-info-btn .mark-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.config-info-btn.has-patterns {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.config-info-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  z-index: 20;
+  min-width: 16rem;
+  max-width: 24rem;
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 0.45rem;
+  background: var(--panel);
+  box-shadow: 0 0.5rem 1.25rem rgba(0, 0, 0, 0.35);
+  text-align: left;
+}
+
+.config-info-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.config-info-section {
+  margin: 0 0 0.55rem;
+}
+
+.config-info-section:last-child {
+  margin-bottom: 0;
+}
+
+.config-info-key {
+  margin: 0 0 0.25rem;
+  font-size: 0.72rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--muted);
+}
+
+.config-info-list {
+  margin: 0;
+  padding: 0 0 0 1.1rem;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.config-info-list code {
+  font-size: 0.8rem;
+}
+
+.config-info-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .poll-label, .status {
   color: var(--muted);
   font-size: 0.85rem;

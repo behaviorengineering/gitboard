@@ -60,6 +60,10 @@ func (f *syncLocalFake) RemoveSafeCheckout(context.Context, string, string, stri
 	return nil
 }
 
+func (f *syncLocalFake) EnsureWritableIndex(context.Context, string, bool) error {
+	return nil
+}
+
 func (f *syncLocalFake) ContentOnDefault(context.Context, string, string, string) (bool, string, error) {
 	return false, "", nil
 }
@@ -190,6 +194,9 @@ func TestDashboardHidesBranchesFromInitialDoc(t *testing.T) {
 	if !foundMain {
 		t.Fatalf("main missing: %+v", payload.Projects[0].Branches)
 	}
+	if len(payload.UI.HideBranches) != 1 || payload.UI.HideBranches[0] != "majordomo-context/*" {
+		t.Fatalf("ui.hide_branches: %+v", payload.UI.HideBranches)
+	}
 }
 
 func TestHealthAndMeta(t *testing.T) {
@@ -214,6 +221,17 @@ func TestHealthAndMeta(t *testing.T) {
 	}
 	if meta["poll_interval_seconds"] != float64(42) {
 		t.Fatalf("poll: %+v", meta)
+	}
+	ui, ok := meta["ui"].(map[string]any)
+	if !ok {
+		t.Fatalf("ui missing: %+v", meta)
+	}
+	hb, ok := ui["hide_branches"].([]any)
+	if !ok {
+		t.Fatalf("hide_branches: %+v", ui)
+	}
+	if len(hb) != 0 {
+		t.Fatalf("want empty hide_branches, got %+v", hb)
 	}
 }
 

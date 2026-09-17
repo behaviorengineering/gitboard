@@ -21,7 +21,7 @@ type summaryLoader interface {
 	loadOpenReviews(ctx context.Context, repo string, summary *board.ProjectSummary, branches *branchAccum) error
 	// loadCI populates the latest CI status in summary and attaches run info to branches.
 	loadCI(ctx context.Context, repo string, summary *board.ProjectSummary, branches *branchAccum) error
-	// loadMerged returns recently merged PRs/MRs for prune hint matching.
+	// loadMerged returns a bounded recent merged PR/MR list (warm index for prune).
 	loadMerged(ctx context.Context, repo string) ([]board.MergedReview, error)
 }
 

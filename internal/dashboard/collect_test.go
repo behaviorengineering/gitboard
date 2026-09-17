@@ -155,6 +155,36 @@ func TestCollectHideBranches(t *testing.T) {
 	}
 }
 
+func TestCollectHideBranchesClearsOpenItems(t *testing.T) {
+	fx := dualHostFake()
+	fx.responses["--state open"] = []byte(`[
+		{"number":9,"headRefName":"feat/x","url":"https://example/pr/9","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","updatedAt":"2026-01-02T00:00:00Z","isDraft":false}
+	]`)
+	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	doc := config.File{
+		UI: config.UI{HideBranches: []string{"feat/*"}},
+		Projects: []config.Project{
+			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+		},
+	}
+	out := s.Collect(context.Background(), doc, true)
+	if len(out.Projects) != 1 {
+		t.Fatalf("projects: %d", len(out.Projects))
+	}
+	gh := out.Projects[0]
+	if gh.Error != "" {
+		t.Fatalf("gh-app: %+v", gh)
+	}
+	for _, b := range gh.Branches {
+		if b.OpenReview {
+			t.Fatalf("no open_review branch should remain: %+v", gh.Branches)
+		}
+	}
+	if gh.OpenItems.PullRequests != 0 || gh.OpenItems.MergeRequests != 0 {
+		t.Fatalf("open_items should be zero after hiding PR head: %+v", gh.OpenItems)
+	}
+}
+
 func TestCollectNilClients(t *testing.T) {
 	s := &Service{}
 	doc := config.File{

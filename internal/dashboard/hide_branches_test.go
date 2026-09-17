@@ -61,3 +61,38 @@ func TestFilterHiddenBranches(t *testing.T) {
 		}
 	})
 }
+
+func TestSyncOpenItemsToVisibleBranches(t *testing.T) {
+	t.Run("github recounts pull requests", func(t *testing.T) {
+		row := board.ProjectSummary{
+			Host:      "github",
+			OpenItems: board.OpenItems{PullRequests: 3},
+			Branches: []board.BranchRef{
+				{Name: "main"},
+				{Name: "feat/a", OpenReview: true},
+			},
+		}
+		syncOpenItemsToVisibleBranches(&row)
+		if row.OpenItems.PullRequests != 1 || row.OpenItems.MergeRequests != 0 {
+			t.Fatalf("open_items: %+v", row.OpenItems)
+		}
+	})
+
+	t.Run("gitlab recounts merge requests", func(t *testing.T) {
+		row := board.ProjectSummary{
+			Host:      "gitlab",
+			OpenItems: board.OpenItems{MergeRequests: 2},
+			Branches: []board.BranchRef{
+				{Name: "main"},
+			},
+		}
+		syncOpenItemsToVisibleBranches(&row)
+		if row.OpenItems.PullRequests != 0 || row.OpenItems.MergeRequests != 0 {
+			t.Fatalf("open_items: %+v", row.OpenItems)
+		}
+	})
+
+	t.Run("nil row is no-op", func(t *testing.T) {
+		syncOpenItemsToVisibleBranches(nil)
+	})
+}
