@@ -1,0 +1,29 @@
+=== Typology Import Graph (13 packages) ===
+
+Hubs (high coupling):
+  - ./cmd/gitboard (in: 0, out: 11)
+  - ./internal/cliexec (in: 4, out: 0)
+  - ./internal/config (in: 7, out: 0)
+  - ./internal/dashboard (in: 2, out: 4)
+  - ./internal/llm (in: 3, out: 1)
+  - ./internal/localgit (in: 3, out: 1)
+  - ./internal/remotegit (in: 3, out: 3)
+  - ./internal/server (in: 1, out: 4)
+
+Leaves (out-degree 0):
+  - ./internal/board (in: 2)
+  - ./internal/cliexec (in: 4)
+  - ./internal/config (in: 7)
+  - ./internal/observability (in: 1)
+
+Merge suggestions (heuristics):
+  - ./internal/observability -> ./cmd/gitboard (sole importer: only imported by ./cmd/gitboard)
+  - ./internal/server -> ./cmd/gitboard (sole importer: only imported by ./cmd/gitboard)
+  - ./internal/syncproj -> ./cmd/gitboard (sole importer: only imported by ./cmd/gitboard)
+
+Platform utility leaves (keep small):
+  - ./internal/config
+
+Source evidence (AST):
+  - packages: 13
+  - anchored packages: 13

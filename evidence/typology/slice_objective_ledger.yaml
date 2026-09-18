@@ -1,0 +1,145 @@
+slices:
+    - id: board
+      owned_paths:
+        - internal/board
+      evidence:
+        - Package board contains the JSON data types shared across the dashboard UI
+        - is=[data_shape]
+      claims:
+        - data_shape
+      objective: Provides JSON data structures used by the dashboard and other components.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: cliexec
+      owned_paths:
+        - internal/cliexec
+      evidence:
+        - 'importsOsExec: true'
+        - 'mechanicalEvidence: imports_os_exec, exports_run_surface'
+      claims:
+        - exec_process
+      objective: Executes external processes using the os/exec package.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: dashboard
+      owned_paths:
+        - internal/dashboard
+      evidence:
+        - role=aggregator
+        - is=[aggregate_views]
+      claims:
+        - aggregate_views
+      objective: Aggregates views for the dashboard.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: gitboard
+      owned_paths:
+        - cmd/gitboard
+      evidence:
+        - 'mechanicalRole: entrypoint'
+        - 'hasMain: true'
+      claims:
+        - orchestrate
+        - run_cli
+      objective: The package serves as a command-line entrypoint that orchestrates local code-change board operations.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: llm
+      owned_paths:
+        - internal/llm
+      evidence:
+        - 'mechanicalRole: adapter'
+        - 'mechanicalEvidence: imports_net_http, exports_client_surface, not_server'
+        - 'importsNetHTTP: true'
+        - Package llm provides an OpenAI-compatible chat completions client.
+      claims:
+        - adapt_external
+        - fill_dto
+      objective: Provides an OpenAI-compatible chat completions client by adapting external API responses.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: localgit
+      owned_paths:
+        - internal/localgit
+      evidence:
+        - 'exportedFuncs: FillCheckoutMeta'
+        - role=adapter
+      claims:
+        - fill_dto
+        - adapt_external
+      objective: Provides git operations and metadata enrichment for local repositories.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: observability
+      owned_paths:
+        - internal/observability
+      evidence:
+        - Package observability bootstraps OTEL and writes error-only inference dumps
+        - Init(cfg InitConfig) (*sdktrace.TracerProvider, error)
+      claims:
+        - observability
+      objective: Initializes OpenTelemetry tracing and manages error-only inference dumps.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: pruneagent
+      owned_paths:
+        - internal/pruneagent
+      evidence:
+        - role=entrypoint
+        - Service.Investigate
+      claims:
+        - orchestrate
+        - run_cli
+      objective: Investigates local-only or likely-removable branches via the Service.Investigate method.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: remotegit
+      owned_paths:
+        - internal/remotegit
+      evidence:
+        - role=adapter
+        - is=[adapt_external, fill_dto]
+        - 'exportedFuncs: NewGitHub, NewGitLab'
+      claims:
+        - adapt_external
+        - fill_dto
+      objective: Provides adapters to interact with remote git services such as GitHub and GitLab.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: server
+      owned_paths:
+        - internal/server
+      evidence:
+        - 'imports_net_http: true'
+        - delivery:http
+        - NewMux
+      claims:
+        - serve_http
+        - wire_handlers
+      objective: Provides HTTP serving capabilities and multiplexer initialization.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: syncproj
+      owned_paths:
+        - internal/syncproj
+      evidence:
+        - role=aggregator
+        - is=[aggregate_views]
+        - 'exportedFuncs: AddProject, ApplySelection, Discover, FormatCandidates, ParseSelection, ProjectFromRef, PromptSyncSources, RemoveProject, SelectInteractive'
+      claims:
+        - aggregate_views
+      objective: Aggregates project selection and discovery information.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
+    - id: triage
+      owned_paths:
+        - internal/triage
+      evidence:
+        - 'exportedDecls: Analyzer, Request, Response'
+        - 'exportedMethods: Analyzer.Analyze'
+        - Response { Summary string, RootCause string, FixSteps []string }
+      claims:
+        - aggregate_views
+      objective: Analyzes project logs and job information to produce a summary and root cause analysis.
+      verdict: grounded
+      source: slice_objective_rlm_aligned
