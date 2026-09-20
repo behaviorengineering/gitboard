@@ -74,8 +74,13 @@ function closeModal(ok) {
   const root = document.getElementById('modal-root');
   const modal = root?.querySelector('.modal');
   const cancelBtn = document.getElementById('modal-cancel');
-  if (root) root.hidden = true;
-  if (modal) modal.classList.remove('modal--wide');
+	if (root) root.hidden = true;
+  if (modal) {
+    modal.classList.remove('modal--wide');
+    modal.classList.remove('modal--manage');
+  }
+  const body = document.getElementById('modal-body');
+  if (body) body.classList.remove('modal-body--rich');
   if (cancelBtn) cancelBtn.hidden = false;
   document.removeEventListener('keydown', onModalKeydown);
   const resolve = modalResolve;
@@ -142,7 +147,7 @@ function setModalDetailText(text) {
 
 /**
  * Theme confirm dialog. Resolves true when confirmed.
- * @param {{ title: string, body?: string, bodyNode?: Node, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, info?: boolean, wide?: boolean }} opts
+ * @param {{ title: string, body?: string, bodyNode?: Node, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, info?: boolean, wide?: boolean, manage?: boolean }} opts
  */
 function confirmDialog(opts) {
   const root = document.getElementById('modal-root');
@@ -164,10 +169,18 @@ function confirmDialog(opts) {
   } else {
     setModalBodyContent(opts.body || '');
   }
+  if (opts.manage || opts.bodyNode instanceof Node) {
+    body.classList.add('modal-body--rich');
+  } else {
+    body.classList.remove('modal-body--rich');
+  }
   setModalDetailText(opts.detail || '');
 
   cancelBtn.hidden = info;
-  if (modal) modal.classList.toggle('modal--wide', info || Boolean(opts.wide));
+  if (modal) {
+    modal.classList.toggle('modal--wide', info || Boolean(opts.wide) || Boolean(opts.manage));
+    modal.classList.toggle('modal--manage', Boolean(opts.manage));
+  }
 
   const danger = info ? false : opts.danger !== false;
   confirmBtn.className = `modal-btn ${danger ? 'modal-btn--danger' : 'modal-btn--ok'}`;
@@ -1070,6 +1083,19 @@ let allProjects = [];
 
 /** @type {string[]} Active ui.hide_branches patterns from the last dashboard payload. */
 let hideBranchPatterns = [];
+
+const VIEW_STORAGE_KEY = 'gitboard.activeView';
+/** @type {string} */
+let activeViewId = '';
+/** @type {{ id: string, label: string, count: number, implicit?: boolean }[]} */
+let boardViews = [];
+
+try {
+  activeViewId = String(localStorage.getItem(VIEW_STORAGE_KEY) || '').trim();
+} catch (_) {
+  activeViewId = '';
+}
+
 const filters = {
   q: '',
   /** @type {Set<string>} empty = all host/org scopes */
@@ -1690,6 +1716,46 @@ function schedulePoll() {
   }, pollSeconds * 1000);
 }
 
+function dashboardURL(fresh) {
+  const params = new URLSearchParams();
+  if (activeViewId) params.set('view', activeViewId);
+  if (fresh) params.set('fresh', '1');
+  const q = params.toString();
+  return q ? `/api/dashboard?${q}` : '/api/dashboard';
+}
+
+function persistActiveView(id) {
+  activeViewId = String(id || '').trim();
+  try {
+    if (activeViewId) localStorage.setItem(VIEW_STORAGE_KEY, activeViewId);
+    else localStorage.removeItem(VIEW_STORAGE_KEY);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function renderViewSwitcher(views, active) {
+  const root = document.getElementById('view-switcher');
+  if (!root) return;
+  boardViews = Array.isArray(views) ? views : [];
+  root.replaceChildren();
+  if (boardViews.length === 0) return;
+  for (const v of boardViews) {
+    const btn = el('button', 'view-tab');
+    btn.type = 'button';
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', v.id === active ? 'true' : 'false');
+    btn.textContent = v.label || v.id;
+    btn.title = `${v.label || v.id} (${v.count ?? 0})`;
+    btn.addEventListener('click', () => {
+      if (v.id === activeViewId) return;
+      persistActiveView(v.id);
+      void loadDashboard({ fresh: false });
+    });
+    root.appendChild(btn);
+  }
+}
+
 /**
  * Fetch and paint the board. Returns true when this generation painted successfully.
  * @param {{ quiet?: boolean, fresh?: boolean }} [opts]
@@ -1711,10 +1777,21 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
   const status = document.getElementById('status');
   if (!quiet) status.textContent = 'Refreshing…';
   try {
-    const url = fresh ? '/api/dashboard?fresh=1' : '/api/dashboard';
+    const url = dashboardURL(fresh);
     const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
     if (gen !== dashboardGen) return false;
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 400 && activeViewId) {
+        persistActiveView('');
+        if (gen === dashboardGen) {
+          loading = false;
+          if (dashboardAbort === ac) dashboardAbort = null;
+          if (trackingFresh) dashboardFreshInFlight = false;
+        }
+        return loadDashboard({ quiet, fresh });
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
     const data = await res.json();
     if (gen !== dashboardGen) return false;
     if (typeof data.poll_interval_seconds === 'number') {
@@ -1726,11 +1803,15 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
       }
     }
     renderConfigInfo(data.ui);
+    if (Array.isArray(data.views)) {
+      const active = String(data.active_view || '').trim();
+      if (active && active !== activeViewId) persistActiveView(active);
+      renderViewSwitcher(data.views, activeViewId || active);
+    }
     if (fresh) {
       recentPulled.clear();
       pullBoardDirty = false;
     } else if (pullBoardDirty) {
-      // A stale poll painted; keep ephemeral pull state and force a fresh follow-up.
       schedulePullFlush();
     } else {
       recentPulled.clear();
@@ -2226,6 +2307,372 @@ async function runTriage(project, job, runID, button) {
     setButtonIdle(button, { svg: ICONS.search, label: 'AI triage' });
   }
 }
+
+async function apiJSON(url, opts = {}) {
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    ...opts,
+  });
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      data = null;
+    }
+  }
+  if (!res.ok) {
+    const msg = (data && (data.error || data.message)) || text || `HTTP ${res.status}`;
+    throw new Error(typeof msg === 'string' ? msg : `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+async function openManageSync() {
+  const state = {
+    tab: 'tracked',
+    payload: null,
+    candidates: null,
+    status: '',
+  };
+
+  const root = el('div', 'manage-root');
+  const tabs = el('div', 'manage-tabs');
+  const panel = el('div', 'manage-panel');
+  const statusEl = el('p', 'manage-empty');
+  root.appendChild(tabs);
+  root.appendChild(statusEl);
+  root.appendChild(panel);
+
+  const setStatus = (msg) => {
+    state.status = msg || '';
+    statusEl.textContent = state.status;
+    statusEl.hidden = !state.status;
+  };
+
+  const refreshState = async () => {
+    setStatus('Loading…');
+    state.payload = await apiJSON('/api/views');
+    setStatus('');
+    renderPanel();
+  };
+
+  const tabDefs = [
+    { id: 'tracked', label: 'Tracked' },
+    { id: 'discover', label: 'Discover' },
+    { id: 'views', label: 'Views' },
+    { id: 'sources', label: 'Sources' },
+  ];
+
+  const renderTabs = () => {
+    tabs.replaceChildren();
+    for (const t of tabDefs) {
+      const btn = el('button', 'manage-tab');
+      btn.type = 'button';
+      btn.setAttribute('aria-selected', t.id === state.tab ? 'true' : 'false');
+      btn.textContent = t.label;
+      btn.addEventListener('click', () => {
+        state.tab = t.id;
+        renderTabs();
+        renderPanel();
+      });
+      tabs.appendChild(btn);
+    }
+  };
+
+  const renderTracked = () => {
+    panel.replaceChildren();
+    const projects = Array.isArray(state.payload?.projects) ? state.payload.projects : [];
+    if (projects.length === 0) {
+      panel.appendChild(el('p', 'manage-empty', 'No tracked projects yet. Use Discover or add sources first.'));
+      return;
+    }
+    for (const p of projects) {
+      const row = el('div', 'manage-row');
+      const main = el('div', 'manage-row-main');
+      main.appendChild(el('div', '', p.label || p.id));
+      main.appendChild(el('div', 'manage-row-meta', `${p.host} · ${p.path}`));
+      const actions = el('div', 'manage-actions');
+      const rm = el('button', 'modal-btn modal-btn--ghost');
+      rm.type = 'button';
+      rm.textContent = 'Remove';
+      rm.addEventListener('click', async () => {
+        try {
+          setStatus(`Removing ${p.id}…`);
+          state.payload = await apiJSON('/api/sync/projects', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'remove', id: p.id }),
+          });
+          setStatus(`Removed ${p.id}`);
+          renderPanel();
+        } catch (err) {
+          setStatus(err instanceof Error ? err.message : String(err));
+        }
+      });
+      actions.appendChild(rm);
+      row.appendChild(main);
+      row.appendChild(actions);
+      panel.appendChild(row);
+    }
+  };
+
+  const renderDiscover = () => {
+    panel.replaceChildren();
+    const actions = el('div', 'manage-actions');
+    const loadBtn = el('button', 'modal-btn modal-btn--ok');
+    loadBtn.type = 'button';
+    loadBtn.textContent = 'Load candidates';
+    const applyBtn = el('button', 'modal-btn modal-btn--ok');
+    applyBtn.type = 'button';
+    applyBtn.textContent = 'Apply selection';
+    applyBtn.disabled = !state.candidates;
+    actions.appendChild(loadBtn);
+    actions.appendChild(applyBtn);
+    panel.appendChild(actions);
+    const list = el('div', 'manage-check-list');
+    panel.appendChild(list);
+
+    const paintCandidates = () => {
+      list.replaceChildren();
+      const cands = Array.isArray(state.candidates) ? state.candidates : [];
+      if (cands.length === 0) {
+        list.appendChild(el('p', 'manage-empty', 'No candidates. Configure sync sources, then load.'));
+        return;
+      }
+      for (const c of cands) {
+        const lab = el('label', '');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = Boolean(c.Tracked || c.tracked);
+        cb.dataset.host = c.Host || c.host || '';
+        cb.dataset.path = c.Path || c.path || '';
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(`${c.Host || c.host} ${c.Path || c.path}`));
+        list.appendChild(lab);
+      }
+    };
+
+    loadBtn.addEventListener('click', async () => {
+      try {
+        setStatus('Discovering…');
+        const data = await apiJSON('/api/sync/candidates');
+        state.candidates = data.candidates || [];
+        applyBtn.disabled = false;
+        setStatus(`${state.candidates.length} candidates`);
+        paintCandidates();
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+    });
+
+    applyBtn.addEventListener('click', async () => {
+      const selected = [];
+      list.querySelectorAll('input[type="checkbox"]').forEach((node) => {
+        if (!(node instanceof HTMLInputElement) || !node.checked) return;
+        selected.push({ host: node.dataset.host, path: node.dataset.path });
+      });
+      try {
+        setStatus('Saving selection…');
+        state.payload = await apiJSON('/api/sync/selection', {
+          method: 'PUT',
+          body: JSON.stringify({ selected }),
+        });
+        setStatus(`Tracked ${selected.length} projects`);
+        state.tab = 'tracked';
+        renderTabs();
+        renderPanel();
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+    });
+
+    paintCandidates();
+  };
+
+  const renderViews = () => {
+    panel.replaceChildren();
+    const projects = Array.isArray(state.payload?.projects) ? state.payload.projects : [];
+    /** @type {{ id: string, label: string, projects: string[] }[]} */
+    let defs = Array.isArray(state.payload?.view_defs)
+      ? state.payload.view_defs.map((v) => ({
+        id: String(v.id || ''),
+        label: String(v.label || ''),
+        projects: Array.isArray(v.projects) ? [...v.projects] : [],
+      }))
+      : [];
+    if (defs.length === 0) {
+      defs = [{
+        id: 'default',
+        label: 'Default',
+        projects: projects.map((p) => p.id),
+      }];
+    }
+
+    const list = el('div', '');
+    panel.appendChild(list);
+
+    const paint = () => {
+      list.replaceChildren();
+      defs.forEach((view, idx) => {
+        const block = el('div', 'manage-view-block');
+        const idField = el('div', 'manage-field');
+        const idLab = el('label', '', 'View id');
+        const idInput = document.createElement('input');
+        idInput.value = view.id;
+        idInput.addEventListener('input', () => {
+          defs[idx].id = idInput.value.trim();
+        });
+        idField.appendChild(idLab);
+        idField.appendChild(idInput);
+        block.appendChild(idField);
+
+        const labelField = el('div', 'manage-field');
+        const labelLab = el('label', '', 'Label');
+        const labelInput = document.createElement('input');
+        labelInput.value = view.label;
+        labelInput.addEventListener('input', () => {
+          defs[idx].label = labelInput.value.trim();
+        });
+        labelField.appendChild(labelLab);
+        labelField.appendChild(labelInput);
+        block.appendChild(labelField);
+
+        const checks = el('div', 'manage-check-list');
+        for (const p of projects) {
+          const lab = el('label', '');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = view.projects.includes(p.id);
+          cb.addEventListener('change', () => {
+            const set = new Set(defs[idx].projects);
+            if (cb.checked) set.add(p.id);
+            else set.delete(p.id);
+            defs[idx].projects = [...set];
+          });
+          lab.appendChild(cb);
+          lab.appendChild(document.createTextNode(`${p.label || p.id} (${p.path})`));
+          checks.appendChild(lab);
+        }
+        block.appendChild(checks);
+
+        const rm = el('button', 'modal-btn modal-btn--ghost');
+        rm.type = 'button';
+        rm.textContent = 'Delete view';
+        rm.addEventListener('click', () => {
+          if (defs.length <= 1) {
+            setStatus('Keep at least one view');
+            return;
+          }
+          defs.splice(idx, 1);
+          paint();
+        });
+        block.appendChild(rm);
+        list.appendChild(block);
+      });
+    };
+
+    const actions = el('div', 'manage-actions');
+    const addBtn = el('button', 'modal-btn modal-btn--ghost');
+    addBtn.type = 'button';
+    addBtn.textContent = 'Add view';
+    addBtn.addEventListener('click', () => {
+      defs.push({ id: `view-${defs.length + 1}`, label: 'New view', projects: [] });
+      paint();
+    });
+    const saveBtn = el('button', 'modal-btn modal-btn--ok');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save views';
+    saveBtn.addEventListener('click', async () => {
+      try {
+        setStatus('Saving views…');
+        state.payload = await apiJSON('/api/views', {
+          method: 'PUT',
+          body: JSON.stringify({ views: defs }),
+        });
+        setStatus('Views saved');
+        paint();
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+    });
+    actions.appendChild(addBtn);
+    actions.appendChild(saveBtn);
+    panel.appendChild(actions);
+    paint();
+  };
+
+  const renderSources = () => {
+    panel.replaceChildren();
+    const sync = state.payload?.sync || {};
+    const orgField = el('div', 'manage-field');
+    orgField.appendChild(el('label', '', 'GitHub orgs (comma-separated)'));
+    const orgInput = document.createElement('input');
+    orgInput.value = (sync.github_orgs || []).join(', ');
+    orgField.appendChild(orgInput);
+    const groupField = el('div', 'manage-field');
+    groupField.appendChild(el('label', '', 'GitLab groups (comma-separated)'));
+    const groupInput = document.createElement('input');
+    groupInput.value = (sync.gitlab_groups || []).join(', ');
+    groupField.appendChild(groupInput);
+    const saveBtn = el('button', 'modal-btn modal-btn--ok');
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save sources';
+    saveBtn.addEventListener('click', async () => {
+      const split = (s) => String(s || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+      try {
+        setStatus('Saving sources…');
+        const data = await apiJSON('/api/sync/sources', {
+          method: 'PUT',
+          body: JSON.stringify({
+            github_orgs: split(orgInput.value),
+            gitlab_groups: split(groupInput.value),
+          }),
+        });
+        if (state.payload) {
+          state.payload.sync = {
+            github_orgs: data.github_orgs || [],
+            gitlab_groups: data.gitlab_groups || [],
+          };
+        }
+        setStatus('Sources saved');
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
+    });
+    panel.appendChild(orgField);
+    panel.appendChild(groupField);
+    panel.appendChild(saveBtn);
+  };
+
+  const renderPanel = () => {
+    if (state.tab === 'tracked') renderTracked();
+    else if (state.tab === 'discover') renderDiscover();
+    else if (state.tab === 'views') renderViews();
+    else renderSources();
+  };
+
+  renderTabs();
+  try {
+    await refreshState();
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : String(err));
+    renderPanel();
+  }
+
+  await infoDialog({
+    title: 'Manage projects and views',
+    bodyNode: root,
+    manage: true,
+    confirmLabel: 'Done',
+  });
+  await loadDashboard({ fresh: true });
+}
+
+document.getElementById('manage-sync')?.addEventListener('click', () => {
+  void openManageSync();
+});
 
 document.getElementById('refresh').addEventListener('click', () => {
   const btn = document.getElementById('refresh');

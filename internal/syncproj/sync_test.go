@@ -166,3 +166,35 @@ func TestDiscoverHostFilter(t *testing.T) {
 		t.Fatalf("%+v", cands)
 	}
 }
+
+func TestApplySelectionByRefs(t *testing.T) {
+	cands := []syncproj.Candidate{
+		{Host: config.HostGitHub, Path: "acme/a", Name: "a", Index: 1},
+		{Host: config.HostGitHub, Path: "acme/b", Name: "b", Index: 2},
+	}
+	existing := []config.Project{{
+		ID: "a", Label: "a", Host: config.HostGitHub, Path: "acme/a", LocalPath: "~/code/a",
+	}}
+	projects, err := syncproj.ApplySelectionByRefs(cands, []syncproj.RepoRef{
+		{Host: config.HostGitHub, Path: "acme/b"},
+		{Host: config.HostGitHub, Path: "acme/a"},
+	}, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("projects=%d", len(projects))
+	}
+	byPath := map[string]config.Project{}
+	for _, p := range projects {
+		byPath[p.Path] = p
+	}
+	if byPath["acme/a"].LocalPath != "~/code/a" {
+		t.Fatalf("local_path lost: %+v", byPath["acme/a"])
+	}
+	if _, err := syncproj.ApplySelectionByRefs(cands, []syncproj.RepoRef{
+		{Host: config.HostGitHub, Path: "acme/missing"},
+	}, existing); err == nil {
+		t.Fatal("expected unknown ref error")
+	}
+}

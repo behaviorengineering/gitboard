@@ -46,16 +46,33 @@ func (s *Service) ClearCaches() {
 	}
 }
 
-// Collect builds the dashboard for all configured projects.
+// CollectOpts controls dashboard aggregation.
+type CollectOpts struct {
+	Fresh  bool
+	ViewID string
+}
+
+// Collect builds the dashboard for projects in the resolved view.
 // When fresh is true, forge and origin-fetch TTL caches are bypassed for this request.
-func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) board.Dashboard {
+// Empty viewID selects the first effective view. Unknown viewID returns an error.
+func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool, viewID string) (board.Dashboard, error) {
+	return s.CollectWith(ctx, doc, CollectOpts{Fresh: fresh, ViewID: viewID})
+}
+
+// CollectWith builds the dashboard using CollectOpts.
+func (s *Service) CollectWith(ctx context.Context, doc config.File, opts CollectOpts) (board.Dashboard, error) {
 	out := board.Dashboard{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Views:       ViewSummaries(doc),
 	}
+	projects, view, err := doc.ProjectsForView(opts.ViewID)
+	if err != nil {
+		return out, err
+	}
+	out.ActiveView = view.ID
 	if s == nil {
-		return out
+		return out, nil
 	}
-	projects := doc.Projects
 	if s.GitHub != nil {
 		installed, authed, detail := s.GitHub.AuthStatus(ctx)
 		out.Tooling.GitHub.Installed = installed
@@ -75,8 +92,8 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) boar
 	}
 	labelByKey := projectLabelsByKey(doc.Projects)
 
-	opts := remotegit.SummaryOpts{
-		Fresh:     fresh,
+	summaryOpts := remotegit.SummaryOpts{
+		Fresh:     opts.Fresh,
 		Cache:     s.Cache,
 		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
 		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
@@ -98,10 +115,10 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) boar
 			if ctx.Err() != nil {
 				return
 			}
-			row := s.summarize(ctx, p, opts)
-			row.Local = s.attachLocal(ctx, p, disc, labelByKey, fresh, fetchTTL)
+			row := s.summarize(ctx, p, summaryOpts)
+			row.Local = s.attachLocal(ctx, p, disc, labelByKey, opts.Fresh, fetchTTL)
 			s.annotateContentOnDefault(ctx, &row)
-			s.confirmMergedForCandidates(ctx, p, &row, opts)
+			s.confirmMergedForCandidates(ctx, p, &row, summaryOpts)
 			remotegit.EnrichPruneHints(&row)
 			row.Branches = filterHiddenBranches(row.Branches, doc.UI.HideBranches)
 			syncOpenItemsToVisibleBranches(&row)
@@ -110,7 +127,7 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) boar
 	}
 	wg.Wait()
 	out.Projects = rows
-	return out
+	return out, nil
 }
 
 func projectLabelsByKey(projects []config.Project) map[string]string {

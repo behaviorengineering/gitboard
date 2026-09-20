@@ -40,11 +40,11 @@ func (f ForgeLister) ListGitLab(ctx context.Context, group string) ([]remotegit.
 
 // Candidate is one selectable repository.
 type Candidate struct {
-	Host    config.Host
-	Path    string
-	Name    string
-	Tracked bool
-	Index   int // 1-based display index
+	Host    config.Host `json:"host"`
+	Path    string      `json:"path"`
+	Name    string      `json:"name"`
+	Tracked bool        `json:"tracked"`
+	Index   int         `json:"index"` // 1-based display index
 }
 
 // Discover lists unique repos from sync sources, marking already tracked ones.
@@ -155,6 +155,40 @@ func ApplySelection(cands []Candidate, selected []int, existing []config.Project
 		projects = append(projects, p)
 	}
 	return projects, nil
+}
+
+// ApplySelectionByRefs replaces projects with candidates matching host+path refs.
+// Unknown refs return an error. Empty refs yields an empty project list.
+func ApplySelectionByRefs(cands []Candidate, refs []RepoRef, existing []config.Project) ([]config.Project, error) {
+	byKey := map[string]Candidate{}
+	for _, c := range cands {
+		byKey[trackKey(c.Host, c.Path)] = c
+	}
+	var indices []int
+	seen := map[int]struct{}{}
+	for i, ref := range refs {
+		host := config.Host(strings.ToLower(strings.TrimSpace(string(ref.Host))))
+		path := strings.Trim(ref.Path, "/")
+		if host == "" || path == "" {
+			return nil, fmt.Errorf("refs[%d]: host and path required", i)
+		}
+		c, ok := byKey[trackKey(host, path)]
+		if !ok {
+			return nil, fmt.Errorf("refs[%d]: unknown candidate %s %s", i, host, path)
+		}
+		if _, dup := seen[c.Index]; dup {
+			continue
+		}
+		seen[c.Index] = struct{}{}
+		indices = append(indices, c.Index)
+	}
+	return ApplySelection(cands, indices, existing)
+}
+
+// RepoRef is a host+path pair used by ApplySelectionByRefs.
+type RepoRef struct {
+	Host config.Host
+	Path string
 }
 
 // AddProject appends or updates a project by host+path.

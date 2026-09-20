@@ -1346,6 +1346,161 @@ a { color: var(--link); }
   width: min(36rem, 100%);
 }
 
+.modal--manage {
+  width: min(44rem, 100%);
+}
+
+.modal-body.modal-body--rich {
+  white-space: normal;
+}
+
+.view-switcher {
+  display: inline-flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  align-items: center;
+  max-width: 22rem;
+  justify-content: flex-end;
+}
+
+.view-tab {
+  appearance: none;
+  border: 1px solid rgba(154, 167, 181, 0.35);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.3rem 0.55rem;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.view-tab:hover {
+  color: var(--text);
+  border-color: rgba(154, 167, 181, 0.6);
+}
+
+.view-tab[aria-selected="true"] {
+  color: var(--text);
+  border-color: var(--link);
+  background: rgba(124, 183, 255, 0.12);
+}
+
+.manage-tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.manage-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.manage-tab[aria-selected="true"] {
+  color: var(--text);
+  border-color: rgba(154, 167, 181, 0.45);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.manage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: min(60vh, 28rem);
+  overflow: auto;
+}
+
+.manage-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(154, 167, 181, 0.15);
+  font-size: 0.88rem;
+}
+
+.manage-row:last-child {
+  border-bottom: none;
+}
+
+.manage-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.manage-row-meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+}
+
+.manage-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.manage-empty {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+.manage-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.55rem;
+}
+
+.manage-field label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.manage-field input,
+.manage-field textarea {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid rgba(154, 167, 181, 0.35);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+}
+
+.manage-view-block {
+  border: 1px solid rgba(154, 167, 181, 0.2);
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+  margin-bottom: 0.55rem;
+}
+
+.manage-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
+.manage-check-list label {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
 .modal-title {
   margin: 0;
   font-size: 1.05rem;

@@ -58,17 +58,18 @@ After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with
 ## Dashboard behavior
 
 - Project list order (UI): attention first (failed CI, conflicts, open review, dirty, prune hint, behind-only vs origin), then A–Z by label. Active search keeps relevance first, then the same attention / A–Z tiebreak. Config `projects` order is not the board order.
+- **Views:** config `views` are named subsets of tracked project ids (membership may overlap). `GET /api/dashboard?view=<id>` forge-loads only that subset. Empty/omitted `views` synthesizes an implicit `default` view over all projects. The UI switcher persists the active view in localStorage. There is no “load everything” control in v1.
 - Branches column: remote heads from the forge (up to 20); default + open PR/MR first, then by recency. Each row has its own latest CI. CI-only refs do not invent branch rows. Empty `ui.hide_branches` shows all; `path.Match` patterns hide matching names from the board only (forge prune data unchanged), including UI “local only” rows synthesized from local checkouts. After hide, `open_items` and the Open review chip / attention rank count only still-visible `open_review` branches.
 - Local status beside each remote branch (checked out, dirty, ↑/↓ vs origin). Ahead/behind uses `git fetch --prune origin` (TTL: `local.fetch_seconds`, default 120; `?fresh=1` bypasses) then compares local heads to `origin/<branch>`. Behind + clean → **pull** is ff-only (`git pull --ff-only`, or `git fetch origin branch:branch` when not checked out), then `git submodule update --init --recursive` on the checked-out worktree so nested pins (for example `.cursor/packs/shared`) match the new tip. Stale submodule checkouts that only look dirty are synced before pull refuses a dirty tree. Each local appearance (checkout/submodule) with behind-only + clean also gets its own pull control; pulls start immediately (no confirm) and may run in parallel. If `index.lock` is older than 30s, pull and safe-remove return HTTP 409 `stale_index_lock` so the UI can ask to remove the lock and retry with `clear_index_lock`; a fresher lock is refused (another git process may still be running). **Prune hints** (remote head gone + clean + no open PR/MR): **safe** when the forge has a merged PR/MR for that branch name (recent merged list or a per-branch lookup), or local tip content already matches default (`origin/<default>` preferred; ancestor or identical trees, covering squash merges). **likely** only after a per-branch merged lookup confirms there is no matching PR/MR; a missing page of recent merges is not enough. Missing forge data shows no hint. A branch still listed in the UI Branches column (or with an open review) never gets a prune hint, even if content-on-default would otherwise say safe. Investigate uses the same content-on-default check so unique SHAs alone do not force keep after squash. **Safe prune** on the main worktree updates the default branch from origin before switching onto it and deleting the merged branch (ff-only when possible; if default is not checked out and has diverged, the local default tip is moved to `origin/<default>`, discarding local-only commits on that tip). Worktrees with no remote head are “local only”. Detached HEAD that matches a tag exactly shows the tag name (SHA in tooltip), not only `detached <sha>`. Submodule worktree paths resolve to the checkout (`git rev-parse --show-toplevel`), not the `.git/modules` git dir.
-- `gitboard sync` writes config; a running `serve` reloads the full config file when its mtime advances and clears the forge + origin-fetch TTL caches when the tracked project set changes (no restart required for add/remove or `ui.hide_branches` edits).
+- `gitboard sync` and the board **Manage** UI write config; a running `serve` reloads the full config file when its mtime advances and clears the forge + origin-fetch TTL caches when the tracked project set or view membership changes (no restart required for add/remove, views, or `ui.hide_branches` edits).
 
 ## HTTP API
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/health` | Liveness |
-| `GET` | `/api/meta` | Server meta (`poll_interval_seconds`, `ui.hide_branches`) |
-| `GET` | `/api/dashboard` | Aggregated rows (`?fresh=1` forces refresh); includes `ui.hide_branches` |
+| `GET` | `/api/meta` | Server meta (`poll_interval_seconds`, `ui.hide_branches`, `views`) |
+| `GET` | `/api/dashboard` | Aggregated rows for one view (`?view=` required for non-default; `?fresh=1` forces refresh); includes `ui`, `views`, `active_view` |
 | `GET` | `/api/failures?project=&run_id=` | Failed jobs |
 | `POST` | `/api/triage` | AI log analysis |
 | `POST` | `/api/prune/safe` | Re-check hints; remove a safe local checkout (`clear_index_lock` after 409 `stale_index_lock`) |
@@ -77,5 +78,10 @@ After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with
 | `POST` | `/api/agents/prune/investigate` | Likely-removable branch evidence + session card |
 | `GET` | `/api/agents/sessions/:id` | Session meta, card, turns |
 | `GET` | `/api/agents/sessions/:id/failure` | Failure dump when present |
+| `GET` | `/api/sync/candidates` | Discover forge repos from `sync` sources (`?host=`) |
+| `POST` | `/api/sync/projects` | Add or remove a tracked project (`action` add/remove) |
+| `PUT` | `/api/sync/selection` | Replace tracked set from selected host/path refs |
+| `GET`/`PUT` | `/api/sync/sources` | Read/update GitHub orgs and GitLab groups |
+| `GET`/`PUT` | `/api/views` | Read sync state / replace named view definitions |
 
 **Review skills (on request):** `review-go-code`, `review-go-smells`, `review-go-architecture`, `review-go-cli`, `review-member-visibility`.

@@ -83,7 +83,10 @@ func TestCollectWithFakeForge(t *testing.T) {
 			{ID: "gl-lib", Label: "Lib", Host: config.HostGitLab, Path: "acme/lib"},
 		},
 	}
-	out := s.Collect(context.Background(), doc, true)
+	out, err := s.Collect(context.Background(), doc, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !out.Tooling.GitHub.Installed || !out.Tooling.GitHub.Authed {
 		t.Fatalf("github tooling: %+v", out.Tooling.GitHub)
 	}
@@ -119,7 +122,10 @@ func TestCollectHideBranches(t *testing.T) {
 			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
 		},
 	}
-	out := s.Collect(context.Background(), doc, true)
+	out, err := s.Collect(context.Background(), doc, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out.Projects) != 1 {
 		t.Fatalf("projects: %d", len(out.Projects))
 	}
@@ -167,7 +173,10 @@ func TestCollectHideBranchesClearsOpenItems(t *testing.T) {
 			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
 		},
 	}
-	out := s.Collect(context.Background(), doc, true)
+	out, err := s.Collect(context.Background(), doc, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out.Projects) != 1 {
 		t.Fatalf("projects: %d", len(out.Projects))
 	}
@@ -193,7 +202,10 @@ func TestCollectNilClients(t *testing.T) {
 			{ID: "gl", Host: config.HostGitLab, Path: "acme/lib"},
 		},
 	}
-	out := s.Collect(context.Background(), doc, true)
+	out, err := s.Collect(context.Background(), doc, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out.Projects) != 2 {
 		t.Fatalf("projects: %d", len(out.Projects))
 	}
@@ -201,6 +213,33 @@ func TestCollectNilClients(t *testing.T) {
 		if p.Error == "" {
 			t.Fatalf("want client-missing error for %s", p.ID)
 		}
+	}
+}
+
+func TestCollectViewFiltersProjects(t *testing.T) {
+	fx := dualHostFake()
+	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	doc := config.File{
+		Projects: []config.Project{
+			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+			{ID: "gl-lib", Label: "Lib", Host: config.HostGitLab, Path: "acme/lib"},
+		},
+		Views: []config.View{
+			{ID: "work", Label: "Work", Projects: []string{"gh-app"}},
+		},
+	}
+	out, err := s.Collect(context.Background(), doc, true, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ActiveView != "work" || len(out.Projects) != 1 || out.Projects[0].ID != "gh-app" {
+		t.Fatalf("view filter: active=%s projects=%+v", out.ActiveView, out.Projects)
+	}
+	if len(out.Views) != 1 || out.Views[0].Count != 1 {
+		t.Fatalf("views summary: %+v", out.Views)
+	}
+	if _, err := s.Collect(context.Background(), doc, true, "missing"); err == nil {
+		t.Fatal("expected unknown view error")
 	}
 }
 

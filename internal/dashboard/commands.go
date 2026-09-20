@@ -1,6 +1,6 @@
 package dashboard
 
-// Commands wraps Service for mutating operations: prune and pull.
+// Commands wraps Service for mutating operations: prune, pull, and sync/views config.
 // Read operations (Collect, ClearCaches) remain on Service.
 type Commands struct {
 	*Service

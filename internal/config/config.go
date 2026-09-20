@@ -79,6 +79,16 @@ type SyncSources struct {
 	GitLab GitLabSync `yaml:"gitlab"`
 }
 
+// DefaultViewID is the synthetic view used when config omits views.
+const DefaultViewID = "default"
+
+// View is a named subset of tracked project ids for board loading.
+type View struct {
+	ID       string   `yaml:"id" json:"id"`
+	Label    string   `yaml:"label" json:"label"`
+	Projects []string `yaml:"projects" json:"projects"`
+}
+
 // UI holds dashboard presentation settings.
 type UI struct {
 	// PollSeconds is the browser auto-refresh interval in seconds.
@@ -106,6 +116,7 @@ type File struct {
 	Upstream      Upstream      `yaml:"upstream"`
 	Local         Local         `yaml:"local"`
 	Sync          SyncSources   `yaml:"sync"`
+	Views         []View        `yaml:"views,omitempty"`
 	Projects      []Project     `yaml:"projects"`
 }
 
@@ -151,6 +162,13 @@ sync:
     orgs: []
   gitlab:
     groups: []
+
+# Named board views (subsets of projects). Empty / omitted → implicit "default"
+# view containing every tracked project. Membership may overlap across views.
+# views:
+#   - id: work
+#     label: Work
+#     projects: [demo]
 
 # Curated by: gitboard sync
 # Optional per project: local_path: ~/code/my-clone
@@ -246,6 +264,9 @@ func Load(path string) (File, error) {
 	}
 	normalizeSync(&doc.Sync)
 	normalizeLocal(&doc.Local)
+	if err := normalizeViews(&doc); err != nil {
+		return File{}, err
+	}
 	return doc, nil
 }
 
@@ -259,6 +280,9 @@ func Save(path string, doc File) error {
 		}
 		doc.Projects[i].Host = Host(strings.ToLower(string(p.Host)))
 		doc.Projects[i].LocalPath = strings.TrimSpace(p.LocalPath)
+	}
+	if err := normalizeViews(&doc); err != nil {
+		return err
 	}
 	raw, err := yaml.Marshal(&doc)
 	if err != nil {
@@ -299,6 +323,134 @@ func normalizeSync(s *SyncSources) {
 
 func normalizeLocal(l *Local) {
 	l.Roots = trimNonEmpty(l.Roots)
+}
+
+func normalizeViews(doc *File) error {
+	if doc == nil {
+		return nil
+	}
+	known := make(map[string]struct{}, len(doc.Projects))
+	for _, p := range doc.Projects {
+		known[p.ID] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	var out []View
+	for i, v := range doc.Views {
+		id := strings.TrimSpace(v.ID)
+		label := strings.TrimSpace(v.Label)
+		if id == "" {
+			return fmt.Errorf("views[%d]: missing id", i)
+		}
+		if label == "" {
+			return fmt.Errorf("views[%d]: missing label", i)
+		}
+		key := strings.ToLower(id)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("views[%d]: duplicate id %q", i, id)
+		}
+		seen[key] = struct{}{}
+		members := trimNonEmpty(v.Projects)
+		var kept []string
+		memberSeen := map[string]struct{}{}
+		for _, pid := range members {
+			if _, ok := known[pid]; !ok {
+				continue // drop orphans
+			}
+			if _, ok := memberSeen[pid]; ok {
+				continue
+			}
+			memberSeen[pid] = struct{}{}
+			kept = append(kept, pid)
+		}
+		out = append(out, View{ID: id, Label: label, Projects: kept})
+	}
+	doc.Views = out
+	return nil
+}
+
+// EffectiveViews returns configured views, or a single default view over all projects
+// when views is empty/omitted.
+func (f File) EffectiveViews() []View {
+	if len(f.Views) > 0 {
+		out := make([]View, len(f.Views))
+		copy(out, f.Views)
+		return out
+	}
+	ids := make([]string, 0, len(f.Projects))
+	for _, p := range f.Projects {
+		ids = append(ids, p.ID)
+	}
+	return []View{{
+		ID:       DefaultViewID,
+		Label:    "Default",
+		Projects: ids,
+	}}
+}
+
+// ResolveView returns the view for id (case-sensitive match on configured id).
+// Empty viewID selects the first effective view.
+func (f File) ResolveView(viewID string) (View, error) {
+	views := f.EffectiveViews()
+	viewID = strings.TrimSpace(viewID)
+	if viewID == "" {
+		return views[0], nil
+	}
+	for _, v := range views {
+		if v.ID == viewID {
+			return v, nil
+		}
+	}
+	return View{}, fmt.Errorf("unknown view %q", viewID)
+}
+
+// ProjectsForView returns tracked projects that belong to the resolved view,
+// preserving config project order.
+func (f File) ProjectsForView(viewID string) ([]Project, View, error) {
+	view, err := f.ResolveView(viewID)
+	if err != nil {
+		return nil, View{}, err
+	}
+	want := make(map[string]struct{}, len(view.Projects))
+	for _, id := range view.Projects {
+		want[id] = struct{}{}
+	}
+	var out []Project
+	for _, p := range f.Projects {
+		if _, ok := want[p.ID]; ok {
+			out = append(out, p)
+		}
+	}
+	return out, view, nil
+}
+
+// PruneViewMembership drops project ids that are no longer tracked.
+func PruneViewMembership(views []View, projects []Project) []View {
+	known := make(map[string]struct{}, len(projects))
+	for _, p := range projects {
+		known[p.ID] = struct{}{}
+	}
+	out := make([]View, 0, len(views))
+	for _, v := range views {
+		var kept []string
+		seen := map[string]struct{}{}
+		for _, id := range v.Projects {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := known[id]; !ok {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			kept = append(kept, id)
+		}
+		v.Projects = kept
+		out = append(out, v)
+	}
+	return out
 }
 
 func trimNonEmpty(in []string) []string {
