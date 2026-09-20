@@ -20,6 +20,11 @@ type Service struct {
 	Local       LocalGit
 	Cache       *remotegit.TTLCache
 	OriginFetch *localgit.OriginFetchCache
+
+	scanMu   sync.Mutex
+	scanKey  string
+	scanAt   time.Time
+	scanDisc localgit.Discovery
 }
 
 // New returns a dashboard service with in-memory upstream and origin-fetch caches.
@@ -33,7 +38,7 @@ func New(gh *remotegit.GitHub, gl *remotegit.GitLab, local LocalGit) *Service {
 	}
 }
 
-// ClearCaches drops forge and origin-fetch TTL state (for example after sync changes projects).
+// ClearCaches drops forge, origin-fetch, and local scan TTL state (for example after sync changes projects).
 func (s *Service) ClearCaches() {
 	if s == nil {
 		return
@@ -44,18 +49,40 @@ func (s *Service) ClearCaches() {
 	if s.OriginFetch != nil {
 		s.OriginFetch.Clear()
 	}
+	s.scanMu.Lock()
+	s.scanKey = ""
+	s.scanAt = time.Time{}
+	s.scanDisc = localgit.Discovery{}
+	s.scanMu.Unlock()
 }
 
-// Collect builds the dashboard for all configured projects.
+// CollectOpts controls dashboard aggregation.
+type CollectOpts struct {
+	Fresh  bool
+	ViewID string
+}
+
+// Collect builds the dashboard for projects in the resolved view.
 // When fresh is true, forge and origin-fetch TTL caches are bypassed for this request.
-func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) board.Dashboard {
+// Empty viewID selects the first effective view. Unknown viewID returns an error.
+func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool, viewID string) (board.Dashboard, error) {
+	return s.CollectWith(ctx, doc, CollectOpts{Fresh: fresh, ViewID: viewID})
+}
+
+// CollectWith builds the dashboard using CollectOpts.
+func (s *Service) CollectWith(ctx context.Context, doc config.File, opts CollectOpts) (board.Dashboard, error) {
 	out := board.Dashboard{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Views:       ViewSummaries(doc),
 	}
+	projects, view, err := doc.ProjectsForView(opts.ViewID)
+	if err != nil {
+		return out, err
+	}
+	out.ActiveView = view.ID
 	if s == nil {
-		return out
+		return out, nil
 	}
-	projects := doc.Projects
 	if s.GitHub != nil {
 		installed, authed, detail := s.GitHub.AuthStatus(ctx)
 		out.Tooling.GitHub.Installed = installed
@@ -71,12 +98,13 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) boar
 
 	var disc localgit.Discovery
 	if s.Local != nil && len(doc.Local.Roots) > 0 {
-		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
+		scanTTL := time.Duration(doc.EffectiveFetchSeconds()) * time.Second
+		disc = s.scanRootsCached(ctx, doc.Local.Roots, scanTTL, opts.Fresh)
 	}
 	labelByKey := projectLabelsByKey(doc.Projects)
 
-	opts := remotegit.SummaryOpts{
-		Fresh:     fresh,
+	summaryOpts := remotegit.SummaryOpts{
+		Fresh:     opts.Fresh,
 		Cache:     s.Cache,
 		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
 		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
@@ -98,10 +126,10 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) boar
 			if ctx.Err() != nil {
 				return
 			}
-			row := s.summarize(ctx, p, opts)
-			row.Local = s.attachLocal(ctx, p, disc, labelByKey, fresh, fetchTTL)
+			row := s.summarize(ctx, p, summaryOpts)
+			row.Local = s.attachLocal(ctx, p, disc, labelByKey, opts.Fresh, fetchTTL)
 			s.annotateContentOnDefault(ctx, &row)
-			s.confirmMergedForCandidates(ctx, p, &row, opts)
+			s.confirmMergedForCandidates(ctx, p, &row, summaryOpts)
 			remotegit.EnrichPruneHints(&row)
 			row.Branches = filterHiddenBranches(row.Branches, doc.UI.HideBranches)
 			syncOpenItemsToVisibleBranches(&row)
@@ -110,7 +138,39 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool) boar
 	}
 	wg.Wait()
 	out.Projects = rows
-	return out
+	return out, nil
+}
+
+func rootsCacheKey(roots []string) string {
+	return strings.Join(roots, "\x00")
+}
+
+// scanRootsCached returns a TTL-gated Discovery for local roots.
+// fresh bypasses the cache; a successful scan always replaces the entry.
+func (s *Service) scanRootsCached(ctx context.Context, roots []string, ttl time.Duration, fresh bool) localgit.Discovery {
+	if s == nil || s.Local == nil || len(roots) == 0 {
+		return localgit.Discovery{}
+	}
+	key := rootsCacheKey(roots)
+	if !fresh && ttl > 0 {
+		s.scanMu.Lock()
+		hit := s.scanKey == key && !s.scanAt.IsZero() && time.Since(s.scanAt) < ttl
+		disc := s.scanDisc
+		s.scanMu.Unlock()
+		if hit {
+			return disc
+		}
+	}
+	disc := s.Local.ScanRoots(ctx, roots)
+	if ctx.Err() != nil {
+		return disc
+	}
+	s.scanMu.Lock()
+	s.scanKey = key
+	s.scanAt = time.Now()
+	s.scanDisc = disc
+	s.scanMu.Unlock()
+	return disc
 }
 
 func projectLabelsByKey(projects []config.Project) map[string]string {

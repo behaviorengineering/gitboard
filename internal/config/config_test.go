@@ -239,3 +239,77 @@ func TestEffectiveUpstreamSeconds(t *testing.T) {
 		t.Fatalf("fetch negative=%d", got)
 	}
 }
+
+func TestEffectiveViewsImplicitDefault(t *testing.T) {
+	doc := config.File{
+		Projects: []config.Project{
+			{ID: "a", Label: "A", Host: config.HostGitHub, Path: "o/a"},
+			{ID: "b", Label: "B", Host: config.HostGitHub, Path: "o/b"},
+		},
+	}
+	views := doc.EffectiveViews()
+	if len(views) != 1 || views[0].ID != config.DefaultViewID {
+		t.Fatalf("views: %+v", views)
+	}
+	if len(views[0].Projects) != 2 {
+		t.Fatalf("membership: %+v", views[0].Projects)
+	}
+}
+
+func TestProjectsForViewFilters(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	doc := config.File{
+		Projects: []config.Project{
+			{ID: "a", Label: "A", Host: config.HostGitHub, Path: "o/a"},
+			{ID: "b", Label: "B", Host: config.HostGitHub, Path: "o/b"},
+			{ID: "c", Label: "C", Host: config.HostGitHub, Path: "o/c"},
+		},
+		Views: []config.View{
+			{ID: "work", Label: "Work", Projects: []string{"a", "c", "missing"}},
+		},
+	}
+	if err := config.Save(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Views[0].Projects) != 2 {
+		t.Fatalf("orphans should drop: %+v", loaded.Views[0].Projects)
+	}
+	projects, view, err := loaded.ProjectsForView("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.ID != "work" || len(projects) != 2 || projects[0].ID != "a" || projects[1].ID != "c" {
+		t.Fatalf("got projects=%+v view=%+v", projects, view)
+	}
+	if _, _, err := loaded.ProjectsForView("nope"); err == nil {
+		t.Fatal("expected unknown view error")
+	}
+}
+
+func TestLoadRejectsDuplicateViewIDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`projects:
+  - id: a
+    label: A
+    host: github
+    path: o/a
+views:
+  - id: work
+    label: Work
+    projects: [a]
+  - id: work
+    label: Other
+    projects: [a]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path); err == nil {
+		t.Fatal("expected duplicate view id error")
+	}
+}

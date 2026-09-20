@@ -185,11 +185,21 @@ type UIConfig struct {
 	HideBranches []string `json:"hide_branches"`
 }
 
+// ViewSummary is a named board view for the switcher (no forge data).
+type ViewSummary struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Count    int    `json:"count"`
+	Implicit bool   `json:"implicit,omitempty"`
+}
+
 // Dashboard is the aggregated pane payload.
 type Dashboard struct {
 	GeneratedAt         string           `json:"generated_at"`
 	PollIntervalSeconds int              `json:"poll_interval_seconds"`
 	UI                  UIConfig         `json:"ui"`
+	Views               []ViewSummary    `json:"views"`
+	ActiveView          string           `json:"active_view"`
 	Tooling             Tooling          `json:"tooling"`
 	Projects            []ProjectSummary `json:"projects"`
 }

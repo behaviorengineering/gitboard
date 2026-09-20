@@ -233,6 +233,10 @@ func TestHealthAndMeta(t *testing.T) {
 	if len(hb) != 0 {
 		t.Fatalf("want empty hide_branches, got %+v", hb)
 	}
+	views, ok := meta["views"].([]any)
+	if !ok || len(views) != 1 {
+		t.Fatalf("views: %+v", meta["views"])
+	}
 }
 
 func TestMethodNotAllowed(t *testing.T) {

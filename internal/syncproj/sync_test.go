@@ -3,6 +3,7 @@ package syncproj_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -12,15 +13,27 @@ import (
 )
 
 type fakeLister struct {
-	gh map[string][]remotegit.RepoRef
-	gl map[string][]remotegit.RepoRef
+	gh    map[string][]remotegit.RepoRef
+	gl    map[string][]remotegit.RepoRef
+	ghErr map[string]error
+	glErr map[string]error
 }
 
 func (f fakeLister) ListGitHub(_ context.Context, org string) ([]remotegit.RepoRef, error) {
+	if f.ghErr != nil {
+		if err := f.ghErr[org]; err != nil {
+			return nil, err
+		}
+	}
 	return f.gh[org], nil
 }
 
 func (f fakeLister) ListGitLab(_ context.Context, group string) ([]remotegit.RepoRef, error) {
+	if f.glErr != nil {
+		if err := f.glErr[group]; err != nil {
+			return nil, err
+		}
+	}
 	return f.gl[group], nil
 }
 
@@ -47,9 +60,13 @@ func TestDiscoverAndApplySelection(t *testing.T) {
 			},
 		},
 	}
-	cands, err := syncproj.Discover(context.Background(), lister, doc, "")
+	res, err := syncproj.Discover(context.Background(), lister, doc, "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	cands := res.Candidates
+	if len(res.Warnings) != 0 {
+		t.Fatalf("warnings=%v", res.Warnings)
 	}
 	if len(cands) != 3 {
 		t.Fatalf("candidates=%d want 3", len(cands))
@@ -158,11 +175,71 @@ func TestDiscoverHostFilter(t *testing.T) {
 			"acme": {{Host: config.HostGitLab, Path: "acme/b", Name: "b"}},
 		},
 	}
-	cands, err := syncproj.Discover(context.Background(), lister, doc, "github")
+	res, err := syncproj.Discover(context.Background(), lister, doc, "github")
 	if err != nil {
 		t.Fatal(err)
 	}
+	cands := res.Candidates
 	if len(cands) != 1 || cands[0].Host != config.HostGitHub {
 		t.Fatalf("%+v", cands)
+	}
+}
+
+func TestDiscoverPartialSourceFailure(t *testing.T) {
+	doc := config.File{
+		Sync: config.SyncSources{
+			GitHub: config.GitHubSync{Orgs: []string{"acme"}},
+			GitLab: config.GitLabSync{Groups: []string{"broken"}},
+		},
+	}
+	lister := fakeLister{
+		gh: map[string][]remotegit.RepoRef{
+			"acme": {{Host: config.HostGitHub, Path: "acme/a", Name: "a"}},
+		},
+		glErr: map[string]error{
+			"broken": errors.New("signal: killed"),
+		},
+	}
+	res, err := syncproj.Discover(context.Background(), lister, doc, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Candidates) != 1 || res.Candidates[0].Path != "acme/a" {
+		t.Fatalf("candidates=%+v", res.Candidates)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "gitlab group broken") {
+		t.Fatalf("warnings=%v", res.Warnings)
+	}
+}
+
+func TestApplySelectionByRefs(t *testing.T) {
+	cands := []syncproj.Candidate{
+		{Host: config.HostGitHub, Path: "acme/a", Name: "a", Index: 1},
+		{Host: config.HostGitHub, Path: "acme/b", Name: "b", Index: 2},
+	}
+	existing := []config.Project{{
+		ID: "a", Label: "a", Host: config.HostGitHub, Path: "acme/a", LocalPath: "~/code/a",
+	}}
+	projects, err := syncproj.ApplySelectionByRefs(cands, []syncproj.RepoRef{
+		{Host: config.HostGitHub, Path: "acme/b"},
+		{Host: config.HostGitHub, Path: "acme/a"},
+	}, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 2 {
+		t.Fatalf("projects=%d", len(projects))
+	}
+	byPath := map[string]config.Project{}
+	for _, p := range projects {
+		byPath[p.Path] = p
+	}
+	if byPath["acme/a"].LocalPath != "~/code/a" {
+		t.Fatalf("local_path lost: %+v", byPath["acme/a"])
+	}
+	if _, err := syncproj.ApplySelectionByRefs(cands, []syncproj.RepoRef{
+		{Host: config.HostGitHub, Path: "acme/missing"},
+	}, existing); err == nil {
+		t.Fatal("expected unknown ref error")
 	}
 }

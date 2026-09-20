@@ -69,13 +69,34 @@ function setButtonIdle(btn, { svg, label, title } = {}) {
 
 /** @type {null | ((ok: boolean) => void)} */
 let modalResolve = null;
+/** @type {null | ((ok: boolean) => boolean | Promise<boolean>)} */
+let modalBeforeClose = null;
 
 function closeModal(ok) {
+  void closeModalAsync(ok);
+}
+
+async function closeModalAsync(ok) {
+  if (modalBeforeClose) {
+    let allow = true;
+    try {
+      allow = await modalBeforeClose(Boolean(ok));
+    } catch (_) {
+      allow = false;
+    }
+    if (!allow) return;
+  }
+  modalBeforeClose = null;
   const root = document.getElementById('modal-root');
   const modal = root?.querySelector('.modal');
   const cancelBtn = document.getElementById('modal-cancel');
   if (root) root.hidden = true;
-  if (modal) modal.classList.remove('modal--wide');
+  if (modal) {
+    modal.classList.remove('modal--wide');
+    modal.classList.remove('modal--manage');
+  }
+  const body = document.getElementById('modal-body');
+  if (body) body.classList.remove('modal-body--rich');
   if (cancelBtn) cancelBtn.hidden = false;
   document.removeEventListener('keydown', onModalKeydown);
   const resolve = modalResolve;
@@ -87,15 +108,26 @@ function onModalKeydown(ev) {
   if (ev.key === 'Escape') {
     ev.preventDefault();
     closeModal(false);
+    return;
   }
-  if (ev.key === 'Enter') {
-    const confirmBtn = document.getElementById('modal-confirm');
-    const danger = confirmBtn?.classList.contains('modal-btn--danger');
-    // Enter confirms only non-destructive dialogs.
-    if (danger) return;
-    ev.preventDefault();
-    closeModal(true);
+  if (ev.key !== 'Enter') return;
+  const confirmBtn = document.getElementById('modal-confirm');
+  const danger = confirmBtn?.classList.contains('modal-btn--danger');
+  // Enter confirms only non-destructive dialogs.
+  if (danger) return;
+  // Manage is a multi-field editor; Enter must not dismiss it (textarea newlines, path fields).
+  const modal = document.querySelector('#modal-root .modal');
+  if (modal?.classList.contains('modal--manage')) return;
+  const target = ev.target;
+  if (
+    target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || (target instanceof HTMLInputElement && target.type !== 'button' && target.type !== 'submit')
+  ) {
+    return;
   }
+  ev.preventDefault();
+  closeModal(true);
 }
 
 function safeHref(url) {
@@ -142,7 +174,7 @@ function setModalDetailText(text) {
 
 /**
  * Theme confirm dialog. Resolves true when confirmed.
- * @param {{ title: string, body?: string, bodyNode?: Node, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, info?: boolean, wide?: boolean }} opts
+ * @param {{ title: string, body?: string, bodyNode?: Node, detail?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, info?: boolean, wide?: boolean, manage?: boolean, beforeClose?: (ok: boolean) => boolean | Promise<boolean> }} opts
  */
 function confirmDialog(opts) {
   const root = document.getElementById('modal-root');
@@ -164,10 +196,18 @@ function confirmDialog(opts) {
   } else {
     setModalBodyContent(opts.body || '');
   }
+  if (opts.manage || opts.bodyNode instanceof Node) {
+    body.classList.add('modal-body--rich');
+  } else {
+    body.classList.remove('modal-body--rich');
+  }
   setModalDetailText(opts.detail || '');
 
   cancelBtn.hidden = info;
-  if (modal) modal.classList.toggle('modal--wide', info || Boolean(opts.wide));
+  if (modal) {
+    modal.classList.toggle('modal--wide', info || Boolean(opts.wide) || Boolean(opts.manage));
+    modal.classList.toggle('modal--manage', Boolean(opts.manage));
+  }
 
   const danger = info ? false : opts.danger !== false;
   confirmBtn.className = `modal-btn ${danger ? 'modal-btn--danger' : 'modal-btn--ok'}`;
@@ -175,6 +215,8 @@ function confirmDialog(opts) {
     setButtonLabel(cancelBtn, ICONS.x, opts.cancelLabel || 'Cancel');
   }
   setButtonLabel(confirmBtn, danger ? ICONS.trash : ICONS.check, opts.confirmLabel || (info ? 'Close' : 'Confirm'));
+
+  modalBeforeClose = typeof opts.beforeClose === 'function' ? opts.beforeClose : null;
 
   root.hidden = false;
   document.addEventListener('keydown', onModalKeydown);
@@ -1070,6 +1112,19 @@ let allProjects = [];
 
 /** @type {string[]} Active ui.hide_branches patterns from the last dashboard payload. */
 let hideBranchPatterns = [];
+
+const VIEW_STORAGE_KEY = 'gitboard.activeView';
+/** @type {string} */
+let activeViewId = '';
+/** @type {{ id: string, label: string, count: number, implicit?: boolean }[]} */
+let boardViews = [];
+
+try {
+  activeViewId = String(localStorage.getItem(VIEW_STORAGE_KEY) || '').trim();
+} catch (_) {
+  activeViewId = '';
+}
+
 const filters = {
   q: '',
   /** @type {Set<string>} empty = all host/org scopes */
@@ -1240,20 +1295,24 @@ function projectBehind(row) {
   const local = row.local;
   if (!local?.mapped) return false;
   const syncBehind = (sync) => Boolean(sync?.behind) && !sync?.ahead;
-  for (const sync of local.origin_sync || []) {
-    if (syncBehind(sync)) return true;
-  }
-  if (syncBehind({ ahead: local.ahead, behind: local.behind })) return true;
-  for (const app of local.appearances || []) {
-    if (syncBehind({ ahead: app.ahead, behind: app.behind })) return true;
-    for (const sync of app.origin_sync || []) {
+  // Detached pins (common for submodules) often have origin_sync rows for
+  // unrelated local branches; only count behind on a real pull candidate.
+  if (!local.detached) {
+    for (const sync of local.origin_sync || []) {
       if (syncBehind(sync)) return true;
     }
+    if (syncBehind({ ahead: local.ahead, behind: local.behind })) return true;
+  }
+  for (const app of local.appearances || []) {
+    const sync = appearanceBranchSync(app);
+    if (syncBehind(sync)) return true;
     for (const wt of app.worktrees || []) {
+      if (wt.bare || wt.detached) continue;
       if (syncBehind({ ahead: wt.ahead, behind: wt.behind })) return true;
     }
   }
   for (const wt of local.worktrees || []) {
+    if (wt.bare || wt.detached) continue;
     if (syncBehind({ ahead: wt.ahead, behind: wt.behind })) return true;
   }
   return false;
@@ -1667,6 +1726,10 @@ let loading = false;
 let dashboardGen = 0;
 /** @type {AbortController | null} */
 let dashboardAbort = null;
+/** Last successful dashboard payload per view id (instant paint on switch). */
+const viewPayloadCache = new Map();
+/** View id whose tab shows a busy spinner while its dashboard fetch is in flight. */
+let loadingViewId = '';
 
 function updatePollLabel() {
   const label = document.getElementById('poll-label');
@@ -1690,14 +1753,118 @@ function schedulePoll() {
   }, pollSeconds * 1000);
 }
 
+function dashboardURL(fresh) {
+  const params = new URLSearchParams();
+  if (activeViewId) params.set('view', activeViewId);
+  if (fresh) params.set('fresh', '1');
+  const q = params.toString();
+  return q ? `/api/dashboard?${q}` : '/api/dashboard';
+}
+
+function persistActiveView(id) {
+  activeViewId = String(id || '').trim();
+  try {
+    if (activeViewId) localStorage.setItem(VIEW_STORAGE_KEY, activeViewId);
+    else localStorage.removeItem(VIEW_STORAGE_KEY);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+/**
+ * Paint board UI from a dashboard JSON payload (live or cached).
+ * @param {object} data
+ * @param {{ fresh?: boolean, fromCache?: boolean }} [opts]
+ */
+function paintDashboardData(data, { fresh = false, fromCache = false } = {}) {
+  const status = document.getElementById('status');
+  if (typeof data.poll_interval_seconds === 'number') {
+    const next = data.poll_interval_seconds;
+    if (next !== pollSeconds) {
+      pollSeconds = next;
+      updatePollLabel();
+      schedulePoll();
+    }
+  }
+  renderConfigInfo(data.ui);
+  if (Array.isArray(data.views)) {
+    const active = String(data.active_view || '').trim();
+    if (!fromCache && active && active !== activeViewId) persistActiveView(active);
+    renderViewSwitcher(data.views, activeViewId || active);
+  }
+  if (fresh) {
+    recentPulled.clear();
+    pullBoardDirty = false;
+  } else if (pullBoardDirty) {
+    schedulePullFlush();
+  } else if (!fromCache) {
+    recentPulled.clear();
+  }
+  renderTooling(data.tooling);
+  allProjects = Array.isArray(data.projects) ? data.projects : [];
+  rebuildScopeMenu();
+  applyBoard();
+  if (status) {
+    if (fromCache) {
+      status.textContent = `Cached ${data.generated_at || ''}…`;
+    } else {
+      status.textContent = `Updated ${data.generated_at || ''}`;
+    }
+  }
+  const cacheKey = String(data.active_view || activeViewId || '').trim();
+  if (cacheKey && !fromCache) {
+    viewPayloadCache.set(cacheKey, data);
+  }
+}
+
+function renderViewSwitcher(views, active) {
+  const root = document.getElementById('view-switcher');
+  if (!root) return;
+  boardViews = Array.isArray(views) ? views : [];
+  root.replaceChildren();
+  if (boardViews.length === 0) return;
+  for (const v of boardViews) {
+    const btn = el('button', 'view-tab');
+    btn.type = 'button';
+    btn.setAttribute('role', 'tab');
+    const label = v.label || v.id;
+    const selected = v.id === active;
+    btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+    btn.title = `${label} (${v.count ?? 0})`;
+    if (loadingViewId && v.id === loadingViewId) {
+      setButtonBusy(btn, label, `Loading ${label}`);
+      btn.setAttribute('aria-selected', 'true');
+    } else {
+      btn.textContent = label;
+    }
+    btn.addEventListener('click', () => {
+      if (v.id === activeViewId) return;
+      persistActiveView(v.id);
+      loadingViewId = v.id;
+      const cached = viewPayloadCache.get(v.id);
+      if (cached) {
+        paintDashboardData(cached, { fromCache: true });
+        void loadDashboard({ quiet: false, fresh: false, viewBusy: true });
+        return;
+      }
+      renderViewSwitcher(boardViews, v.id);
+      void loadDashboard({ quiet: false, fresh: false, viewBusy: true });
+    });
+    root.appendChild(btn);
+  }
+}
+
 /**
  * Fetch and paint the board. Returns true when this generation painted successfully.
- * @param {{ quiet?: boolean, fresh?: boolean }} [opts]
+ * @param {{ quiet?: boolean, fresh?: boolean, viewBusy?: boolean }} [opts]
  */
-async function loadDashboard({ quiet = false, fresh = false } = {}) {
+async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } = {}) {
   // Do not let a quiet poll abort a post-pull / Refresh fresh load mid-flight.
   if (!fresh && dashboardFreshInFlight) {
     return false;
+  }
+  if (!viewBusy && loadingViewId) {
+    loadingViewId = '';
   }
   const gen = ++dashboardGen;
   if (dashboardAbort) {
@@ -1709,42 +1876,42 @@ async function loadDashboard({ quiet = false, fresh = false } = {}) {
   const trackingFresh = fresh;
   if (trackingFresh) dashboardFreshInFlight = true;
   const status = document.getElementById('status');
-  if (!quiet) status.textContent = 'Refreshing…';
+  if (viewBusy && loadingViewId && boardViews.length) {
+    renderViewSwitcher(boardViews, loadingViewId);
+  }
+  if (!quiet) {
+    status.textContent = loadingViewId ? 'Loading…' : 'Refreshing…';
+  }
   try {
-    const url = fresh ? '/api/dashboard?fresh=1' : '/api/dashboard';
+    const url = dashboardURL(fresh);
     const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
     if (gen !== dashboardGen) return false;
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 400 && activeViewId) {
+        persistActiveView('');
+        loadingViewId = '';
+        if (gen === dashboardGen) {
+          loading = false;
+          if (dashboardAbort === ac) dashboardAbort = null;
+          if (trackingFresh) dashboardFreshInFlight = false;
+        }
+        return loadDashboard({ quiet, fresh });
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
     const data = await res.json();
     if (gen !== dashboardGen) return false;
-    if (typeof data.poll_interval_seconds === 'number') {
-      const next = data.poll_interval_seconds;
-      if (next !== pollSeconds) {
-        pollSeconds = next;
-        updatePollLabel();
-        schedulePoll();
-      }
-    }
-    renderConfigInfo(data.ui);
-    if (fresh) {
-      recentPulled.clear();
-      pullBoardDirty = false;
-    } else if (pullBoardDirty) {
-      // A stale poll painted; keep ephemeral pull state and force a fresh follow-up.
-      schedulePullFlush();
-    } else {
-      recentPulled.clear();
-    }
-    renderTooling(data.tooling);
-    allProjects = Array.isArray(data.projects) ? data.projects : [];
-    rebuildScopeMenu();
-    applyBoard();
-    status.textContent = `Updated ${data.generated_at || ''}`;
+    loadingViewId = '';
+    paintDashboardData(data, { fresh });
     return true;
   } catch (err) {
     if (gen !== dashboardGen) return false;
     if (err && typeof err === 'object' && /** @type {{ name?: string }} */ (err).name === 'AbortError') {
       return false;
+    }
+    if (loadingViewId) {
+      loadingViewId = '';
+      renderViewSwitcher(boardViews, activeViewId);
     }
     status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
     return false;
@@ -2227,6 +2394,714 @@ async function runTriage(project, job, runID, button) {
   }
 }
 
+async function apiJSON(url, opts = {}) {
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    ...opts,
+  });
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      data = null;
+    }
+  }
+  if (!res.ok) {
+    const msg = (data && (data.error || data.message)) || text || `HTTP ${res.status}`;
+    throw new Error(typeof msg === 'string' ? msg : `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+async function openManageSync() {
+  const state = {
+    tab: 'tracked',
+    /** Host key for Tracked subtabs (github, gitlab, …). */
+    trackedHost: '',
+    payload: null,
+    candidates: null,
+    /** @type {{ id: string, label: string, projects: string[] }[] | null} */
+    viewDraft: null,
+    /** @type {{ orgs: string, groups: string } | null} */
+    sourcesDraft: null,
+    /** @type {{ roots: string } | null} */
+    localDraft: null,
+    dirty: false,
+    status: '',
+  };
+
+  const root = el('div', 'manage-root');
+  const tabs = el('div', 'manage-tabs');
+  const panel = el('div', 'manage-panel');
+  const statusEl = el('p', 'manage-empty');
+  root.appendChild(tabs);
+  root.appendChild(statusEl);
+  root.appendChild(panel);
+
+  const setStatus = (msg) => {
+    state.status = msg || '';
+    statusEl.textContent = state.status;
+    statusEl.hidden = !state.status;
+  };
+
+  const markDirty = () => {
+    state.dirty = true;
+  };
+
+  const clearDirty = () => {
+    state.dirty = false;
+  };
+
+  const cloneViewDefs = (defs) => defs.map((v) => ({
+    id: String(v.id || ''),
+    label: String(v.label || ''),
+    projects: Array.isArray(v.projects) ? [...v.projects] : [],
+  }));
+
+  const ensureViewDraft = () => {
+    if (state.viewDraft) return state.viewDraft;
+    const projects = Array.isArray(state.payload?.projects) ? state.payload.projects : [];
+    let defs = Array.isArray(state.payload?.view_defs)
+      ? cloneViewDefs(state.payload.view_defs)
+      : [];
+    if (defs.length === 0) {
+      defs = [{
+        id: 'default',
+        label: 'Default',
+        projects: projects.map((p) => p.id),
+      }];
+    }
+    state.viewDraft = defs;
+    return state.viewDraft;
+  };
+
+  const ensureSourcesDraft = () => {
+    if (state.sourcesDraft) return state.sourcesDraft;
+    const sync = state.payload?.sync || {};
+    state.sourcesDraft = {
+      orgs: (sync.github_orgs || []).join(', '),
+      groups: (sync.gitlab_groups || []).join(', '),
+    };
+    return state.sourcesDraft;
+  };
+
+  const ensureLocalDraft = () => {
+    if (state.localDraft) return state.localDraft;
+    const roots = Array.isArray(state.payload?.local?.roots) ? state.payload.local.roots : [];
+    state.localDraft = { roots: roots.join('\n') };
+    return state.localDraft;
+  };
+
+  const refreshState = async () => {
+    setStatus('Loading…');
+    state.payload = await apiJSON('/api/views');
+    setStatus('');
+    renderPanel();
+  };
+
+  const tabDefs = [
+    { id: 'tracked', label: 'Tracked' },
+    { id: 'discover', label: 'Discover' },
+    { id: 'views', label: 'Views' },
+    { id: 'local', label: 'Local' },
+    { id: 'sources', label: 'Sources' },
+  ];
+
+  const renderTabs = () => {
+    tabs.replaceChildren();
+    for (const t of tabDefs) {
+      const btn = el('button', 'manage-tab');
+      btn.type = 'button';
+      btn.setAttribute('aria-selected', t.id === state.tab ? 'true' : 'false');
+      btn.textContent = t.label;
+      btn.addEventListener('click', () => {
+        state.tab = t.id;
+        renderTabs();
+        renderPanel();
+      });
+      tabs.appendChild(btn);
+    }
+  };
+
+  const renderTracked = () => {
+    panel.replaceChildren();
+    const projects = Array.isArray(state.payload?.projects) ? state.payload.projects : [];
+    if (projects.length === 0) {
+      panel.appendChild(el('p', 'manage-empty', 'No tracked projects yet. Use Discover or add sources first.'));
+      return;
+    }
+
+    /** @type {Map<string, typeof projects>} */
+    const byHost = new Map();
+    for (const p of projects) {
+      const host = String(p.host || '').toLowerCase() || 'unknown';
+      let group = byHost.get(host);
+      if (!group) {
+        group = [];
+        byHost.set(host, group);
+      }
+      group.push(p);
+    }
+    const hosts = [...byHost.keys()].sort((a, b) => a.localeCompare(b));
+    if (!state.trackedHost || !byHost.has(state.trackedHost)) {
+      state.trackedHost = hosts[0];
+    }
+
+    const subtabs = el('div', 'manage-subtabs');
+    subtabs.setAttribute('role', 'tablist');
+    subtabs.setAttribute('aria-label', 'Tracked by host');
+    for (const host of hosts) {
+      const btn = el('button', 'manage-subtab');
+      btn.type = 'button';
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', host === state.trackedHost ? 'true' : 'false');
+      const n = byHost.get(host)?.length ?? 0;
+      btn.textContent = `${hostLabel(host)} (${n})`;
+      btn.addEventListener('click', () => {
+        if (host === state.trackedHost) return;
+        state.trackedHost = host;
+        renderTracked();
+      });
+      subtabs.appendChild(btn);
+    }
+    panel.appendChild(subtabs);
+
+    const list = el('div', 'manage-tracked-list');
+    const group = [...(byHost.get(state.trackedHost) || [])].sort((a, b) => {
+      const la = String(a.label || a.id || '').toLowerCase();
+      const lb = String(b.label || b.id || '').toLowerCase();
+      return la.localeCompare(lb);
+    });
+
+    /** Serialize local_path saves so rapid edits do not race. */
+    let localPathChain = Promise.resolve();
+
+    const saveLocalPath = async (projectId, localPath, busyBtn) => {
+      if (busyBtn) setButtonBusy(busyBtn, 'saving…');
+      try {
+        state.payload = await apiJSON('/api/sync/projects', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'set_local_path',
+            id: projectId,
+            local_path: localPath,
+          }),
+        });
+        setStatus(localPath ? `Local path set for ${projectId}` : `Local path cleared for ${projectId}`);
+        renderPanel();
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+        throw err;
+      } finally {
+        if (busyBtn) setButtonIdle(busyBtn, { label: busyBtn.dataset.idleLabel || 'Save path' });
+      }
+    };
+
+    for (const p of group) {
+      const row = el('div', 'manage-row manage-row--local');
+      const main = el('div', 'manage-row-main');
+      main.appendChild(el('div', '', p.label || p.id));
+      main.appendChild(el('div', 'manage-row-meta', `${p.host} · ${p.path}`));
+
+      const pathField = el('div', 'manage-field manage-field--inline');
+      pathField.appendChild(el('label', '', 'Local path'));
+      const pathInput = document.createElement('input');
+      pathInput.type = 'text';
+      pathInput.placeholder = '~/code/repo or leave empty to use scan roots';
+      pathInput.value = p.local_path || '';
+      pathField.appendChild(pathInput);
+      main.appendChild(pathField);
+
+      const actions = el('div', 'manage-actions');
+      const savePath = el('button', 'modal-btn modal-btn--ghost');
+      savePath.type = 'button';
+      savePath.dataset.idleLabel = 'Save path';
+      setButtonLabel(savePath, null, 'Save path');
+      savePath.addEventListener('click', () => {
+        if (savePath.disabled) return;
+        const next = pathInput.value.trim();
+        localPathChain = localPathChain.then(
+          () => saveLocalPath(p.id, next, savePath),
+          () => saveLocalPath(p.id, next, savePath),
+        );
+      });
+      pathInput.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
+        savePath.click();
+      });
+
+      const clearPath = el('button', 'modal-btn modal-btn--ghost');
+      clearPath.type = 'button';
+      clearPath.dataset.idleLabel = 'Clear path';
+      setButtonLabel(clearPath, null, 'Clear path');
+      clearPath.disabled = !String(p.local_path || '').trim();
+      clearPath.addEventListener('click', () => {
+        if (clearPath.disabled) return;
+        pathInput.value = '';
+        localPathChain = localPathChain.then(
+          () => saveLocalPath(p.id, '', clearPath),
+          () => saveLocalPath(p.id, '', clearPath),
+        );
+      });
+
+      const rm = el('button', 'modal-btn modal-btn--ghost');
+      rm.type = 'button';
+      setButtonLabel(rm, null, 'Remove');
+      rm.addEventListener('click', async () => {
+        if (rm.disabled) return;
+        setButtonBusy(rm, 'removing…', `Removing ${p.id}`);
+        try {
+          state.payload = await apiJSON('/api/sync/projects', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'remove', id: p.id }),
+          });
+          if (state.viewDraft) {
+            for (const v of state.viewDraft) {
+              v.projects = v.projects.filter((id) => id !== p.id);
+            }
+          }
+          setStatus(`Removed ${p.id}`);
+          renderPanel();
+        } catch (err) {
+          setButtonIdle(rm, { label: 'Remove' });
+          setStatus(err instanceof Error ? err.message : String(err));
+        }
+      });
+      actions.appendChild(savePath);
+      actions.appendChild(clearPath);
+      actions.appendChild(rm);
+      row.appendChild(main);
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+  };
+
+  const renderDiscover = () => {
+    panel.replaceChildren();
+    const actions = el('div', 'manage-actions');
+    const loadBtn = el('button', 'modal-btn modal-btn--ok');
+    loadBtn.type = 'button';
+    setButtonLabel(loadBtn, null, 'Load candidates');
+    actions.appendChild(loadBtn);
+    panel.appendChild(actions);
+    const list = el('div', 'manage-check-list');
+    panel.appendChild(list);
+
+    const trackKey = (host, path) => `${String(host || '').toLowerCase()}|${String(path || '').replace(/^\/+|\/+$/g, '')}`;
+
+    const findTracked = (host, path) => {
+      const key = trackKey(host, path);
+      const projects = Array.isArray(state.payload?.projects) ? state.payload.projects : [];
+      return projects.find((p) => trackKey(p.host || p.Host, p.path || p.Path) === key) || null;
+    };
+
+    const setCandidateTracked = (host, path, tracked) => {
+      if (!Array.isArray(state.candidates)) return;
+      const key = trackKey(host, path);
+      for (const c of state.candidates) {
+        if (trackKey(c.Host || c.host, c.Path || c.path) === key) {
+          c.Tracked = tracked;
+          c.tracked = tracked;
+        }
+      }
+    };
+
+    /** Serialize checkbox saves so rapid toggles do not race config writes. */
+    let saveChain = Promise.resolve();
+
+    const paintCandidates = () => {
+      list.replaceChildren();
+      const cands = Array.isArray(state.candidates) ? state.candidates : [];
+      if (cands.length === 0) {
+        list.appendChild(el('p', 'manage-empty', 'No candidates. Configure sync sources, then load.'));
+        return;
+      }
+      for (const c of cands) {
+        const host = c.Host || c.host || '';
+        const path = c.Path || c.path || '';
+        const lab = el('label', '');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = Boolean(c.Tracked || c.tracked);
+        cb.dataset.host = host;
+        cb.dataset.path = path;
+        cb.addEventListener('change', () => {
+          const wantTracked = cb.checked;
+          cb.disabled = true;
+          saveChain = saveChain.then(async () => {
+            try {
+              if (wantTracked) {
+                state.payload = await apiJSON('/api/sync/projects', {
+                  method: 'POST',
+                  body: JSON.stringify({ action: 'add', host, path }),
+                });
+                setCandidateTracked(host, path, true);
+                setStatus(`Tracked ${host} ${path}`);
+              } else {
+                const proj = findTracked(host, path);
+                if (!proj?.id) {
+                  throw new Error(`not tracked: ${host} ${path}`);
+                }
+                state.payload = await apiJSON('/api/sync/projects', {
+                  method: 'POST',
+                  body: JSON.stringify({ action: 'remove', id: proj.id }),
+                });
+                if (state.viewDraft) {
+                  for (const v of state.viewDraft) {
+                    v.projects = v.projects.filter((id) => id !== proj.id);
+                  }
+                }
+                setCandidateTracked(host, path, false);
+                setStatus(`Untracked ${host} ${path}`);
+              }
+            } catch (err) {
+              cb.checked = !wantTracked;
+              setStatus(err instanceof Error ? err.message : String(err));
+            } finally {
+              cb.disabled = false;
+            }
+          });
+        });
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(`${host} ${path}`));
+        list.appendChild(lab);
+      }
+    };
+
+    loadBtn.addEventListener('click', async () => {
+      if (loadBtn.disabled) return;
+      setButtonBusy(loadBtn, 'loading…', 'Discovering forge repositories');
+      try {
+        const data = await apiJSON('/api/sync/candidates');
+        state.candidates = data.candidates || [];
+        const warnings = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+        let msg = `${state.candidates.length} candidates`;
+        if (warnings.length) {
+          msg += `; ${warnings.join(' · ')}`;
+        }
+        setStatus(msg);
+        paintCandidates();
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        setButtonIdle(loadBtn, { label: 'Load candidates', title: '' });
+      }
+    });
+
+    paintCandidates();
+  };
+
+  const renderViews = () => {
+    panel.replaceChildren();
+    const projects = Array.isArray(state.payload?.projects) ? state.payload.projects : [];
+    const defs = ensureViewDraft();
+
+    const list = el('div', '');
+    panel.appendChild(list);
+
+    /** Serialize view PUTs so rapid toggles do not race config writes. */
+    let viewsSaveChain = Promise.resolve();
+    let viewsDebounceTimer = 0;
+
+    const syncDefsFromPayload = () => {
+      const next = cloneViewDefs(state.payload?.view_defs || defs);
+      defs.splice(0, defs.length, ...next);
+      state.viewDraft = defs;
+    };
+
+    const persistViews = async (busyBtn, busyLabel) => {
+      for (const v of defs) {
+        if (!String(v.id || '').trim() || !String(v.label || '').trim()) {
+          setStatus('View id and label required');
+          return;
+        }
+      }
+      if (busyBtn) setButtonBusy(busyBtn, busyLabel || 'saving…');
+      try {
+        state.payload = await apiJSON('/api/views', {
+          method: 'PUT',
+          body: JSON.stringify({ views: defs }),
+        });
+        syncDefsFromPayload();
+        setStatus('Views saved');
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+        throw err;
+      } finally {
+        if (busyBtn) setButtonIdle(busyBtn, { label: busyBtn.dataset.idleLabel || 'Delete view' });
+      }
+    };
+
+    const queueViewsSave = (busyBtn, busyLabel) => {
+      viewsSaveChain = viewsSaveChain.then(
+        () => persistViews(busyBtn, busyLabel),
+        () => persistViews(busyBtn, busyLabel),
+      );
+      return viewsSaveChain;
+    };
+
+    const scheduleViewsSave = () => {
+      window.clearTimeout(viewsDebounceTimer);
+      viewsDebounceTimer = window.setTimeout(() => {
+        void queueViewsSave();
+      }, 400);
+    };
+
+    const paint = () => {
+      list.replaceChildren();
+      defs.forEach((view, idx) => {
+        const block = el('div', 'manage-view-block');
+        const fields = el('div', 'manage-field-row');
+
+        const idField = el('div', 'manage-field');
+        const idLab = el('label', '', 'View id');
+        const idInput = document.createElement('input');
+        idInput.value = view.id;
+        idInput.addEventListener('input', () => {
+          defs[idx].id = idInput.value.trim();
+          scheduleViewsSave();
+        });
+        idInput.addEventListener('blur', () => {
+          window.clearTimeout(viewsDebounceTimer);
+          void queueViewsSave();
+        });
+        idField.appendChild(idLab);
+        idField.appendChild(idInput);
+        fields.appendChild(idField);
+
+        const labelField = el('div', 'manage-field');
+        const labelLab = el('label', '', 'Label');
+        const labelInput = document.createElement('input');
+        labelInput.value = view.label;
+        labelInput.addEventListener('input', () => {
+          defs[idx].label = labelInput.value.trim();
+          scheduleViewsSave();
+        });
+        labelInput.addEventListener('blur', () => {
+          window.clearTimeout(viewsDebounceTimer);
+          void queueViewsSave();
+        });
+        labelField.appendChild(labelLab);
+        labelField.appendChild(labelInput);
+        fields.appendChild(labelField);
+        block.appendChild(fields);
+
+        const checks = el('div', 'manage-check-list');
+        for (const p of projects) {
+          const lab = el('label', '');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = view.projects.includes(p.id);
+          cb.addEventListener('change', () => {
+            const want = cb.checked;
+            const set = new Set(defs[idx].projects);
+            if (want) set.add(p.id);
+            else set.delete(p.id);
+            defs[idx].projects = [...set];
+            cb.disabled = true;
+            void queueViewsSave().then(
+              () => { cb.disabled = false; },
+              () => {
+                cb.checked = !want;
+                cb.disabled = false;
+              },
+            );
+          });
+          lab.appendChild(cb);
+          lab.appendChild(document.createTextNode(`${p.label || p.id} (${p.path})`));
+          checks.appendChild(lab);
+        }
+        block.appendChild(checks);
+
+        const rm = el('button', 'modal-btn modal-btn--ghost manage-view-delete');
+        rm.type = 'button';
+        rm.dataset.idleLabel = 'Delete view';
+        setButtonLabel(rm, null, 'Delete view');
+        rm.addEventListener('click', () => {
+          if (rm.disabled) return;
+          if (defs.length <= 1) {
+            setStatus('Keep at least one view');
+            return;
+          }
+          const removed = defs.splice(idx, 1)[0];
+          void queueViewsSave(rm, 'deleting…').then(
+            () => paint(),
+            () => {
+              defs.splice(idx, 0, removed);
+              paint();
+            },
+          );
+        });
+        block.appendChild(rm);
+        list.appendChild(block);
+      });
+    };
+
+    const actions = el('div', 'manage-actions manage-actions--footer');
+    const addBtn = el('button', 'modal-btn modal-btn--ghost');
+    addBtn.type = 'button';
+    addBtn.dataset.idleLabel = 'Add view';
+    setButtonLabel(addBtn, null, 'Add view');
+    addBtn.addEventListener('click', () => {
+      if (addBtn.disabled) return;
+      defs.push({ id: `view-${defs.length + 1}`, label: 'New view', projects: [] });
+      void queueViewsSave(addBtn, 'saving…').then(
+        () => paint(),
+        () => paint(),
+      );
+    });
+    actions.appendChild(addBtn);
+    panel.appendChild(actions);
+    paint();
+  };
+
+  const renderSources = () => {
+    panel.replaceChildren();
+    const draft = ensureSourcesDraft();
+    const orgField = el('div', 'manage-field');
+    orgField.appendChild(el('label', '', 'GitHub orgs (comma-separated)'));
+    const orgInput = document.createElement('input');
+    orgInput.value = draft.orgs;
+    orgInput.addEventListener('input', () => {
+      draft.orgs = orgInput.value;
+      markDirty();
+    });
+    orgField.appendChild(orgInput);
+    const groupField = el('div', 'manage-field');
+    groupField.appendChild(el('label', '', 'GitLab groups (comma-separated)'));
+    const groupInput = document.createElement('input');
+    groupInput.value = draft.groups;
+    groupInput.addEventListener('input', () => {
+      draft.groups = groupInput.value;
+      markDirty();
+    });
+    groupField.appendChild(groupInput);
+    const saveBtn = el('button', 'modal-btn modal-btn--ok');
+    saveBtn.type = 'button';
+    setButtonLabel(saveBtn, null, 'Save sources');
+    saveBtn.addEventListener('click', async () => {
+      if (saveBtn.disabled) return;
+      const split = (s) => String(s || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+      setButtonBusy(saveBtn, 'saving…', 'Saving sync sources');
+      try {
+        const data = await apiJSON('/api/sync/sources', {
+          method: 'PUT',
+          body: JSON.stringify({
+            github_orgs: split(orgInput.value),
+            gitlab_groups: split(groupInput.value),
+          }),
+        });
+        if (state.payload) {
+          state.payload.sync = {
+            github_orgs: data.github_orgs || [],
+            gitlab_groups: data.gitlab_groups || [],
+          };
+        }
+        state.sourcesDraft = {
+          orgs: (data.github_orgs || []).join(', '),
+          groups: (data.gitlab_groups || []).join(', '),
+        };
+        clearDirty();
+        setStatus('Sources saved');
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        setButtonIdle(saveBtn, { label: 'Save sources', title: '' });
+      }
+    });
+    const actions = el('div', 'manage-actions manage-actions--footer');
+    actions.appendChild(saveBtn);
+    panel.appendChild(orgField);
+    panel.appendChild(groupField);
+    panel.appendChild(actions);
+  };
+
+  const renderLocal = () => {
+    panel.replaceChildren();
+    const draft = ensureLocalDraft();
+    panel.appendChild(el('p', 'manage-empty', 'Directories scanned for git checkouts (one path per line). Match is via origin remote.'));
+    const rootsField = el('div', 'manage-field');
+    rootsField.appendChild(el('label', '', 'Scan roots'));
+    const rootsInput = document.createElement('textarea');
+    rootsInput.rows = 6;
+    rootsInput.value = draft.roots;
+    rootsInput.addEventListener('input', () => {
+      draft.roots = rootsInput.value;
+      markDirty();
+    });
+    rootsField.appendChild(rootsInput);
+    const saveBtn = el('button', 'modal-btn modal-btn--ok');
+    saveBtn.type = 'button';
+    setButtonLabel(saveBtn, null, 'Save roots');
+    saveBtn.addEventListener('click', async () => {
+      if (saveBtn.disabled) return;
+      const roots = String(rootsInput.value || '')
+        .split(/\n+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      setButtonBusy(saveBtn, 'saving…', 'Saving local scan roots');
+      try {
+        const data = await apiJSON('/api/local/roots', {
+          method: 'PUT',
+          body: JSON.stringify({ roots }),
+        });
+        if (state.payload) {
+          state.payload.local = { roots: data.roots || [] };
+        }
+        state.localDraft = { roots: (data.roots || []).join('\n') };
+        clearDirty();
+        setStatus(`Saved ${(data.roots || []).length} scan root(s)`);
+      } catch (err) {
+        setStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        setButtonIdle(saveBtn, { label: 'Save roots', title: '' });
+      }
+    });
+    const actions = el('div', 'manage-actions manage-actions--footer');
+    actions.appendChild(saveBtn);
+    panel.appendChild(rootsField);
+    panel.appendChild(actions);
+  };
+
+  const renderPanel = () => {
+    if (state.tab === 'tracked') renderTracked();
+    else if (state.tab === 'discover') renderDiscover();
+    else if (state.tab === 'views') renderViews();
+    else if (state.tab === 'local') renderLocal();
+    else renderSources();
+  };
+
+  renderTabs();
+  try {
+    await refreshState();
+  } catch (err) {
+    setStatus(err instanceof Error ? err.message : String(err));
+    renderPanel();
+  }
+
+  await infoDialog({
+    title: 'Manage projects and views',
+    bodyNode: root,
+    manage: true,
+    confirmLabel: 'Done',
+    beforeClose: () => {
+      if (!state.dirty) return true;
+      return window.confirm('You have unsaved changes. Discard them and close?');
+    },
+  });
+  viewPayloadCache.clear();
+  await loadDashboard({ fresh: true });
+}
+
+document.getElementById('manage-sync')?.addEventListener('click', () => {
+  void openManageSync();
+});
+
 document.getElementById('refresh').addEventListener('click', () => {
   const btn = document.getElementById('refresh');
   setButtonBusy(btn, 'refreshing…', 'Bypass upstream cache and reload');
@@ -2359,4 +3234,42 @@ bindModal();
 bindBoardActions();
 updatePollLabel();
 schedulePoll();
-void loadDashboard();
+
+/**
+ * Paint the view tab strip from /api/meta (cheap), then load the active view.
+ * Keeps the board chrome visible while Collect runs.
+ */
+async function bootstrapBoard() {
+  const status = document.getElementById('status');
+  try {
+    const res = await fetch('/api/meta', { cache: 'no-store' });
+    if (res.ok) {
+      const meta = await res.json();
+      if (typeof meta.poll_interval_seconds === 'number') {
+        const next = meta.poll_interval_seconds;
+        if (next !== pollSeconds) {
+          pollSeconds = next;
+          updatePollLabel();
+          schedulePoll();
+        }
+      }
+      if (meta.ui) renderConfigInfo(meta.ui);
+      const views = Array.isArray(meta.views) ? meta.views : [];
+      if (views.length) {
+        let active = activeViewId;
+        if (!active || !views.some((v) => v.id === active)) {
+          active = String(views[0].id || '').trim();
+          if (active) persistActiveView(active);
+        }
+        loadingViewId = active;
+        renderViewSwitcher(views, active);
+        if (status) status.textContent = 'Loading…';
+      }
+    }
+  } catch (_) {
+    /* Dashboard fetch still runs below. */
+  }
+  await loadDashboard({ quiet: false, fresh: false, viewBusy: Boolean(loadingViewId) });
+}
+
+void bootstrapBoard();

@@ -112,15 +112,27 @@ func TestConfigLiveKeepsLastGoodOnBadReload(t *testing.T) {
 	}
 }
 
-func TestProjectsChanged(t *testing.T) {
-	a := []config.Project{{ID: "a", Host: config.HostGitHub, Path: "o/a"}}
-	b := []config.Project{{ID: "a", Host: config.HostGitHub, Path: "o/a"}}
-	if projectsChanged(a, b) {
-		t.Fatal("same set")
+func TestViewsChanged(t *testing.T) {
+	a := []config.View{{ID: "work", Label: "Work", Projects: []string{"a"}}}
+	b := []config.View{{ID: "work", Label: "Work", Projects: []string{"a"}}}
+	if viewsChanged(a, b) {
+		t.Fatal("same views")
 	}
-	b = append(b, config.Project{ID: "b", Host: config.HostGitHub, Path: "o/b"})
-	if !projectsChanged(a, b) {
-		t.Fatal("added project")
+	b[0].Projects = []string{"a", "b"}
+	if !viewsChanged(a, b) {
+		t.Fatal("membership change")
+	}
+}
+
+func TestLocalRootsChanged(t *testing.T) {
+	if localRootsChanged([]string{"a"}, []string{"a"}) {
+		t.Fatal("same roots")
+	}
+	if !localRootsChanged([]string{"a"}, []string{"a", "b"}) {
+		t.Fatal("len change")
+	}
+	if !localRootsChanged([]string{"a"}, []string{"b"}) {
+		t.Fatal("membership change")
 	}
 }
 

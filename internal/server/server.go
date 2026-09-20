@@ -93,6 +93,7 @@ func NewMux(opts Options) http.Handler {
 		writeJSON(w, map[string]any{
 			"poll_interval_seconds": poll,
 			"ui":                    boardUIConfig(doc),
+			"views":                 dashboard.ViewSummaries(doc),
 		})
 	})
 
@@ -106,10 +107,15 @@ func NewMux(opts Options) http.Handler {
 			return
 		}
 		fresh := r.URL.Query().Get("fresh") == "1" || strings.EqualFold(r.URL.Query().Get("fresh"), "true")
+		viewID := strings.TrimSpace(r.URL.Query().Get("view"))
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 		doc, poll := live.snapshot()
-		payload := opts.Dash.Collect(ctx, doc, fresh)
+		payload, err := opts.Dash.Collect(ctx, doc, fresh, viewID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		payload.PollIntervalSeconds = poll
 		payload.UI = boardUIConfig(doc)
 		if err := ctx.Err(); err != nil {
@@ -118,6 +124,8 @@ func NewMux(opts Options) http.Handler {
 		}
 		writeJSON(w, payload)
 	})
+
+	registerSyncRoutes(mux, live, opts)
 
 	mux.HandleFunc("/api/failures", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

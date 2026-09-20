@@ -14,7 +14,7 @@ help:
 	@echo "  make ci          tidy + gofmt + vet + race tests + build"
 	@echo "  make init        Create $(CONFIG) if missing"
 	@echo "  make sync        Discover repos and select tracked projects"
-	@echo "  make serve       process-compose TUI (:1325); rebuilds on file changes"
+	@echo "  make serve       process-compose TUI (:1325); creates config if missing; rebuilds on file changes"
 	@echo "  make serve-down  Stop this Gitboard process-compose project"
 
 build:

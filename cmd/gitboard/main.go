@@ -105,7 +105,7 @@ Usage:
 Commands:
   init     Create config if missing (never overwrite)
   sync     Discover repos and select tracked projects
-  serve    Run the local dashboard (default :1325)
+  serve    Run the local dashboard (default :1325); creates config if missing
   version  Print the build version
 
 Sync flags:
@@ -116,7 +116,7 @@ Sync flags:
   -dry-run              Discover / print without writing
 
 Serve flags:
-  -config path          Config file
+  -config path          Config file (created if missing; never overwritten)
   -projects path        Legacy alias for -config
   -addr host:port       Listen address (default 127.0.0.1:1325)
   -allow-non-localhost  Allow bind outside loopback
@@ -161,9 +161,16 @@ func runServe(args []string) error {
 	if !*allowNonLocalhost && !strings.HasPrefix(*addr, "127.0.0.1:") && !strings.HasPrefix(*addr, "localhost:") {
 		return fmt.Errorf("refuse to bind outside localhost (use -allow-non-localhost to override)")
 	}
+	created, err := config.Init(path)
+	if err != nil {
+		return fmt.Errorf("ensure config: %w", err)
+	}
+	if created {
+		log.Printf("gitboard: created config %s (use Manage or gitboard sync to add projects)", path)
+	}
 	doc, err := config.Load(path)
 	if err != nil {
-		return fmt.Errorf("%w\nrun: gitboard init && gitboard sync", err)
+		return err
 	}
 	oi := doc.EffectiveOpenInference()
 	oiEnabled := oi.Enabled != nil && *oi.Enabled
@@ -363,11 +370,18 @@ func runSync(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	cands, err := syncproj.Discover(ctx, lister, doc, *hostFilter)
+	res, err := syncproj.Discover(ctx, lister, doc, *hostFilter)
 	if err != nil {
 		return err
 	}
+	for _, w := range res.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	cands := res.Candidates
 	if len(cands) == 0 {
+		if len(res.Warnings) > 0 {
+			return fmt.Errorf("no repositories found; %d sync source(s) failed", len(res.Warnings))
+		}
 		return fmt.Errorf("no repositories found for configured sync sources")
 	}
 

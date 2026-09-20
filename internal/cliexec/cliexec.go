@@ -3,6 +3,7 @@ package cliexec
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -66,10 +67,35 @@ func (r *Runner) Run(ctx context.Context, name string, args ...string) ([]byte, 
 		if msg == "" {
 			msg = strings.TrimSpace(stdout.String())
 		}
-		if msg == "" {
-			msg = err.Error()
+		cause := clarifyProcessError(runCtx, timeout, err)
+		if msg == "" || msg == err.Error() {
+			return nil, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), cause)
 		}
-		return nil, fmt.Errorf("%s %s: %s: %w", name, strings.Join(args, " "), msg, err)
+		return nil, fmt.Errorf("%s %s: %s: %w", name, strings.Join(args, " "), msg, cause)
 	}
 	return stdout.Bytes(), nil
+}
+
+func clarifyProcessError(runCtx context.Context, timeout time.Duration, err error) error {
+	if err == nil {
+		return nil
+	}
+	if runCtx != nil && runCtx.Err() != nil {
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("timed out after %s: %w", timeout, err)
+		}
+		return fmt.Errorf("canceled: %w", err)
+	}
+	if isSignalKilled(err) {
+		return fmt.Errorf("process killed (timeout, cancel, or OOM): %w", err)
+	}
+	return err
+}
+
+func isSignalKilled(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "signal: killed")
 }

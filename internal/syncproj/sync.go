@@ -40,17 +40,24 @@ func (f ForgeLister) ListGitLab(ctx context.Context, group string) ([]remotegit.
 
 // Candidate is one selectable repository.
 type Candidate struct {
-	Host    config.Host
-	Path    string
-	Name    string
-	Tracked bool
-	Index   int // 1-based display index
+	Host    config.Host `json:"host"`
+	Path    string      `json:"path"`
+	Name    string      `json:"name"`
+	Tracked bool        `json:"tracked"`
+	Index   int         `json:"index"` // 1-based display index
+}
+
+// DiscoverResult is forge discovery output with optional per-source warnings.
+type DiscoverResult struct {
+	Candidates []Candidate
+	Warnings   []string
 }
 
 // Discover lists unique repos from sync sources, marking already tracked ones.
-func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter string) ([]Candidate, error) {
+// A failing org or group is recorded in Warnings; other sources still contribute.
+func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter string) (DiscoverResult, error) {
 	if lister == nil {
-		return nil, fmt.Errorf("lister missing")
+		return DiscoverResult{}, fmt.Errorf("lister missing")
 	}
 	hostFilter = strings.ToLower(strings.TrimSpace(hostFilter))
 	tracked := map[string]struct{}{}
@@ -60,21 +67,30 @@ func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter st
 
 	seen := map[string]struct{}{}
 	var refs []remotegit.RepoRef
+	var warnings []string
 
 	if hostFilter == "" || hostFilter == "github" {
 		for _, org := range doc.Sync.GitHub.Orgs {
+			if err := ctx.Err(); err != nil {
+				return DiscoverResult{}, err
+			}
 			list, err := lister.ListGitHub(ctx, org)
 			if err != nil {
-				return nil, fmt.Errorf("github org %s: %w", org, err)
+				warnings = append(warnings, fmt.Sprintf("github org %s: %v", org, err))
+				continue
 			}
 			refs = append(refs, list...)
 		}
 	}
 	if hostFilter == "" || hostFilter == "gitlab" {
 		for _, group := range doc.Sync.GitLab.Groups {
+			if err := ctx.Err(); err != nil {
+				return DiscoverResult{}, err
+			}
 			list, err := lister.ListGitLab(ctx, group)
 			if err != nil {
-				return nil, fmt.Errorf("gitlab group %s: %w", group, err)
+				warnings = append(warnings, fmt.Sprintf("gitlab group %s: %v", group, err))
+				continue
 			}
 			refs = append(refs, list...)
 		}
@@ -105,7 +121,7 @@ func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter st
 	for i := range out {
 		out[i].Index = i + 1
 	}
-	return out, nil
+	return DiscoverResult{Candidates: out, Warnings: warnings}, nil
 }
 
 // ProjectFromRef builds a config project from a forge repo.
@@ -155,6 +171,40 @@ func ApplySelection(cands []Candidate, selected []int, existing []config.Project
 		projects = append(projects, p)
 	}
 	return projects, nil
+}
+
+// ApplySelectionByRefs replaces projects with candidates matching host+path refs.
+// Unknown refs return an error. Empty refs yields an empty project list.
+func ApplySelectionByRefs(cands []Candidate, refs []RepoRef, existing []config.Project) ([]config.Project, error) {
+	byKey := map[string]Candidate{}
+	for _, c := range cands {
+		byKey[trackKey(c.Host, c.Path)] = c
+	}
+	var indices []int
+	seen := map[int]struct{}{}
+	for i, ref := range refs {
+		host := config.Host(strings.ToLower(strings.TrimSpace(string(ref.Host))))
+		path := strings.Trim(ref.Path, "/")
+		if host == "" || path == "" {
+			return nil, fmt.Errorf("refs[%d]: host and path required", i)
+		}
+		c, ok := byKey[trackKey(host, path)]
+		if !ok {
+			return nil, fmt.Errorf("refs[%d]: unknown candidate %s %s", i, host, path)
+		}
+		if _, dup := seen[c.Index]; dup {
+			continue
+		}
+		seen[c.Index] = struct{}{}
+		indices = append(indices, c.Index)
+	}
+	return ApplySelection(cands, indices, existing)
+}
+
+// RepoRef is a host+path pair used by ApplySelectionByRefs.
+type RepoRef struct {
+	Host config.Host
+	Path string
 }
 
 // AddProject appends or updates a project by host+path.
