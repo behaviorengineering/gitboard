@@ -20,6 +20,11 @@ type Service struct {
 	Local       LocalGit
 	Cache       *remotegit.TTLCache
 	OriginFetch *localgit.OriginFetchCache
+
+	scanMu   sync.Mutex
+	scanKey  string
+	scanAt   time.Time
+	scanDisc localgit.Discovery
 }
 
 // New returns a dashboard service with in-memory upstream and origin-fetch caches.
@@ -33,7 +38,7 @@ func New(gh *remotegit.GitHub, gl *remotegit.GitLab, local LocalGit) *Service {
 	}
 }
 
-// ClearCaches drops forge and origin-fetch TTL state (for example after sync changes projects).
+// ClearCaches drops forge, origin-fetch, and local scan TTL state (for example after sync changes projects).
 func (s *Service) ClearCaches() {
 	if s == nil {
 		return
@@ -44,6 +49,11 @@ func (s *Service) ClearCaches() {
 	if s.OriginFetch != nil {
 		s.OriginFetch.Clear()
 	}
+	s.scanMu.Lock()
+	s.scanKey = ""
+	s.scanAt = time.Time{}
+	s.scanDisc = localgit.Discovery{}
+	s.scanMu.Unlock()
 }
 
 // CollectOpts controls dashboard aggregation.
@@ -88,7 +98,8 @@ func (s *Service) CollectWith(ctx context.Context, doc config.File, opts Collect
 
 	var disc localgit.Discovery
 	if s.Local != nil && len(doc.Local.Roots) > 0 {
-		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
+		scanTTL := time.Duration(doc.EffectiveFetchSeconds()) * time.Second
+		disc = s.scanRootsCached(ctx, doc.Local.Roots, scanTTL, opts.Fresh)
 	}
 	labelByKey := projectLabelsByKey(doc.Projects)
 
@@ -128,6 +139,38 @@ func (s *Service) CollectWith(ctx context.Context, doc config.File, opts Collect
 	wg.Wait()
 	out.Projects = rows
 	return out, nil
+}
+
+func rootsCacheKey(roots []string) string {
+	return strings.Join(roots, "\x00")
+}
+
+// scanRootsCached returns a TTL-gated Discovery for local roots.
+// fresh bypasses the cache; a successful scan always replaces the entry.
+func (s *Service) scanRootsCached(ctx context.Context, roots []string, ttl time.Duration, fresh bool) localgit.Discovery {
+	if s == nil || s.Local == nil || len(roots) == 0 {
+		return localgit.Discovery{}
+	}
+	key := rootsCacheKey(roots)
+	if !fresh && ttl > 0 {
+		s.scanMu.Lock()
+		hit := s.scanKey == key && !s.scanAt.IsZero() && time.Since(s.scanAt) < ttl
+		disc := s.scanDisc
+		s.scanMu.Unlock()
+		if hit {
+			return disc
+		}
+	}
+	disc := s.Local.ScanRoots(ctx, roots)
+	if ctx.Err() != nil {
+		return disc
+	}
+	s.scanMu.Lock()
+	s.scanKey = key
+	s.scanAt = time.Now()
+	s.scanDisc = disc
+	s.scanMu.Unlock()
+	return disc
 }
 
 func projectLabelsByKey(projects []config.Project) map[string]string {

@@ -47,10 +47,17 @@ type Candidate struct {
 	Index   int         `json:"index"` // 1-based display index
 }
 
+// DiscoverResult is forge discovery output with optional per-source warnings.
+type DiscoverResult struct {
+	Candidates []Candidate
+	Warnings   []string
+}
+
 // Discover lists unique repos from sync sources, marking already tracked ones.
-func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter string) ([]Candidate, error) {
+// A failing org or group is recorded in Warnings; other sources still contribute.
+func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter string) (DiscoverResult, error) {
 	if lister == nil {
-		return nil, fmt.Errorf("lister missing")
+		return DiscoverResult{}, fmt.Errorf("lister missing")
 	}
 	hostFilter = strings.ToLower(strings.TrimSpace(hostFilter))
 	tracked := map[string]struct{}{}
@@ -60,21 +67,30 @@ func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter st
 
 	seen := map[string]struct{}{}
 	var refs []remotegit.RepoRef
+	var warnings []string
 
 	if hostFilter == "" || hostFilter == "github" {
 		for _, org := range doc.Sync.GitHub.Orgs {
+			if err := ctx.Err(); err != nil {
+				return DiscoverResult{}, err
+			}
 			list, err := lister.ListGitHub(ctx, org)
 			if err != nil {
-				return nil, fmt.Errorf("github org %s: %w", org, err)
+				warnings = append(warnings, fmt.Sprintf("github org %s: %v", org, err))
+				continue
 			}
 			refs = append(refs, list...)
 		}
 	}
 	if hostFilter == "" || hostFilter == "gitlab" {
 		for _, group := range doc.Sync.GitLab.Groups {
+			if err := ctx.Err(); err != nil {
+				return DiscoverResult{}, err
+			}
 			list, err := lister.ListGitLab(ctx, group)
 			if err != nil {
-				return nil, fmt.Errorf("gitlab group %s: %w", group, err)
+				warnings = append(warnings, fmt.Sprintf("gitlab group %s: %v", group, err))
+				continue
 			}
 			refs = append(refs, list...)
 		}
@@ -105,7 +121,7 @@ func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter st
 	for i := range out {
 		out[i].Index = i + 1
 	}
-	return out, nil
+	return DiscoverResult{Candidates: out, Warnings: warnings}, nil
 }
 
 // ProjectFromRef builds a config project from a forge repo.

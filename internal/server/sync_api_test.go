@@ -179,3 +179,69 @@ func TestSyncSourcesPut(t *testing.T) {
 		t.Fatalf("sync: %+v", got.Sync)
 	}
 }
+
+func TestLocalRootsAndProjectLocalPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	doc := config.File{
+		Projects: []config.Project{
+			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+		},
+	}
+	if err := config.Save(path, doc); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dash := dashboard.New(remotegit.NewGitHub(testFake()), remotegit.NewGitLab(testFake()), nil)
+	mux := server.NewMux(server.Options{
+		ConfigPath: path,
+		Doc:        loaded,
+		Dash:       dash,
+		Commands:   dashboard.NewCommands(dash),
+	})
+
+	res := httptest.NewRequest(http.MethodPut, "/api/local/roots", bytes.NewBufferString(`{"roots":["~/code","~/code","~/work"]}`))
+	res.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("roots: %d %s", rec.Code, rec.Body.String())
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Local.Roots) != 2 {
+		t.Fatalf("roots: %+v", got.Local.Roots)
+	}
+
+	res = httptest.NewRequest(http.MethodPost, "/api/sync/projects", bytes.NewBufferString(`{"action":"set_local_path","id":"gh-app","local_path":"~/code/app"}`))
+	res.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("local_path: %d %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	projects, _ := payload["projects"].([]any)
+	if len(projects) != 1 {
+		t.Fatalf("projects: %+v", projects)
+	}
+	row, _ := projects[0].(map[string]any)
+	if row["local_path"] != "~/code/app" {
+		t.Fatalf("payload local_path: %+v", row)
+	}
+	got, err = config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Projects[0].LocalPath != "~/code/app" {
+		t.Fatalf("saved local_path: %+v", got.Projects[0])
+	}
+}

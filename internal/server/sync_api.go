@@ -27,7 +27,7 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 		hostFilter := strings.TrimSpace(r.URL.Query().Get("host"))
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 		defer cancel()
-		cands, err := opts.Commands.DiscoverCandidates(ctx, doc, hostFilter)
+		res, err := opts.Commands.DiscoverCandidates(ctx, doc, hostFilter)
 		if err != nil {
 			if dashboard.IsBadRequest(err) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -36,7 +36,10 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, map[string]any{"candidates": cands})
+		writeJSON(w, map[string]any{
+			"candidates": res.Candidates,
+			"warnings":   res.Warnings,
+		})
 	})
 
 	mux.HandleFunc("/api/sync/projects", func(w http.ResponseWriter, r *http.Request) {
@@ -53,10 +56,11 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 			return
 		}
 		var body struct {
-			Action string      `json:"action"`
-			Host   config.Host `json:"host"`
-			Path   string      `json:"path"`
-			ID     string      `json:"id"`
+			Action    string      `json:"action"`
+			Host      config.Host `json:"host"`
+			Path      string      `json:"path"`
+			ID        string      `json:"id"`
+			LocalPath string      `json:"local_path"`
 		}
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			return
@@ -69,8 +73,10 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 			doc, err = opts.Commands.AddTrackedProject(doc, body.Host, body.Path)
 		case "remove":
 			doc, err = opts.Commands.RemoveTrackedProject(doc, body.ID)
+		case "set_local_path":
+			doc, err = opts.Commands.SetProjectLocalPath(doc, body.ID, body.LocalPath)
 		default:
-			http.Error(w, `action must be "add" or "remove"`, http.StatusBadRequest)
+			http.Error(w, `action must be "add", "remove", or "set_local_path"`, http.StatusBadRequest)
 			return
 		}
 		if err != nil {
@@ -176,6 +182,43 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 		}
 	})
 
+	mux.HandleFunc("/api/local/roots", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			doc, _ := live.snapshot()
+			writeJSON(w, map[string]any{"roots": doc.Local.Roots})
+		case http.MethodPut:
+			if opts.Commands == nil {
+				http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
+				return
+			}
+			if !live.writable() {
+				http.Error(w, errConfigNotWritable, http.StatusServiceUnavailable)
+				return
+			}
+			var body struct {
+				Roots []string `json:"roots"`
+			}
+			if err := decodeJSONBody(w, r, &body); err != nil {
+				return
+			}
+			doc, _ := live.snapshot()
+			doc, err := opts.Commands.SetLocalRoots(doc, body.Roots)
+			if err != nil {
+				writeSyncError(w, err)
+				return
+			}
+			if err := live.replace(doc); err != nil {
+				writeSyncError(w, err)
+				return
+			}
+			doc, _ = live.snapshot()
+			writeJSON(w, map[string]any{"roots": doc.Local.Roots})
+		default:
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
+		}
+	})
+
 	mux.HandleFunc("/api/views", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -242,6 +285,9 @@ func syncStatePayload(doc config.File) map[string]any {
 		"sync": map[string]any{
 			"github_orgs":   doc.Sync.GitHub.Orgs,
 			"gitlab_groups": doc.Sync.GitLab.Groups,
+		},
+		"local": map[string]any{
+			"roots": doc.Local.Roots,
 		},
 	}
 }

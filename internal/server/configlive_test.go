@@ -124,6 +124,18 @@ func TestViewsChanged(t *testing.T) {
 	}
 }
 
+func TestLocalRootsChanged(t *testing.T) {
+	if localRootsChanged([]string{"a"}, []string{"a"}) {
+		t.Fatal("same roots")
+	}
+	if !localRootsChanged([]string{"a"}, []string{"a", "b"}) {
+		t.Fatal("len change")
+	}
+	if !localRootsChanged([]string{"a"}, []string{"b"}) {
+		t.Fatal("membership change")
+	}
+}
+
 func writeConfig(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {

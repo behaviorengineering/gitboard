@@ -34,18 +34,19 @@ func (c *Commands) forgeLister() syncproj.ForgeLister {
 }
 
 // DiscoverCandidates lists forge repos from configured sync sources.
-func (c *Commands) DiscoverCandidates(ctx context.Context, doc config.File, hostFilter string) ([]syncproj.Candidate, error) {
+// Per-source forge failures are returned in DiscoverResult.Warnings.
+func (c *Commands) DiscoverCandidates(ctx context.Context, doc config.File, hostFilter string) (syncproj.DiscoverResult, error) {
 	if c == nil {
-		return nil, badRequest("sync commands unavailable")
+		return syncproj.DiscoverResult{}, badRequest("sync commands unavailable")
 	}
 	if !doc.Sync.HasSyncSources() {
-		return nil, badRequest("no sync sources configured")
+		return syncproj.DiscoverResult{}, badRequest("no sync sources configured")
 	}
-	cands, err := syncproj.Discover(ctx, c.forgeLister(), doc, hostFilter)
+	res, err := syncproj.Discover(ctx, c.forgeLister(), doc, hostFilter)
 	if err != nil {
-		return nil, fmt.Errorf("dashboard.DiscoverCandidates: %w", err)
+		return syncproj.DiscoverResult{}, fmt.Errorf("dashboard.DiscoverCandidates: %w", err)
 	}
-	return cands, nil
+	return res, nil
 }
 
 // AddTrackedProject appends or updates a project by host+path and prunes view orphans.
@@ -88,11 +89,11 @@ func (c *Commands) ApplySyncSelection(ctx context.Context, doc config.File, host
 	if !doc.Sync.HasSyncSources() {
 		return doc, badRequest("no sync sources configured")
 	}
-	cands, err := syncproj.Discover(ctx, c.forgeLister(), doc, hostFilter)
+	res, err := syncproj.Discover(ctx, c.forgeLister(), doc, hostFilter)
 	if err != nil {
 		return doc, fmt.Errorf("dashboard.ApplySyncSelection discover: %w", err)
 	}
-	projects, err := syncproj.ApplySelectionByRefs(cands, refs, doc.Projects)
+	projects, err := syncproj.ApplySelectionByRefs(res.Candidates, refs, doc.Projects)
 	if err != nil {
 		return doc, badRequest(err.Error())
 	}
@@ -123,5 +124,54 @@ func (c *Commands) SetViews(doc config.File, views []config.View) (config.File, 
 		return doc, badRequest("views must not be empty")
 	}
 	doc.Views = config.PruneViewMembership(views, doc.Projects)
+	return doc, nil
+}
+
+// SetLocalRoots replaces directories scanned for git checkouts.
+// Empty roots are allowed (local mapping then relies on per-project local_path only).
+func (c *Commands) SetLocalRoots(doc config.File, roots []string) (config.File, error) {
+	if c == nil {
+		return doc, badRequest("sync commands unavailable")
+	}
+	cleaned := make([]string, 0, len(roots))
+	seen := map[string]struct{}{}
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if _, ok := seen[r]; ok {
+			continue
+		}
+		seen[r] = struct{}{}
+		cleaned = append(cleaned, r)
+	}
+	doc.Local.Roots = cleaned
+	return doc, nil
+}
+
+// SetProjectLocalPath sets or clears an explicit checkout path for a tracked project.
+// Empty localPath clears the override so scan roots can map the repo again.
+func (c *Commands) SetProjectLocalPath(doc config.File, id, localPath string) (config.File, error) {
+	if c == nil {
+		return doc, badRequest("sync commands unavailable")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return doc, badRequest("project id required")
+	}
+	localPath = strings.TrimSpace(localPath)
+	found := false
+	for i := range doc.Projects {
+		if doc.Projects[i].ID != id {
+			continue
+		}
+		doc.Projects[i].LocalPath = localPath
+		found = true
+		break
+	}
+	if !found {
+		return doc, badRequest("unknown project")
+	}
 	return doc, nil
 }

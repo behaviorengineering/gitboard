@@ -12,8 +12,8 @@ import (
 )
 
 // configLive reloads config from disk when the file mtime advances.
-// When the tracked project set or view membership changes, it clears forge and
-// origin-fetch TTL caches so the board reflects sync/UI edits without a restart.
+// When the tracked project set, view membership, or local.roots change, it clears
+// forge / origin-fetch / scan TTL caches so the board reflects edits without a restart.
 type configLive struct {
 	mu          sync.Mutex
 	path        string
@@ -68,7 +68,7 @@ func (c *configLive) snapshotLocked() (config.File, int) {
 		log.Printf("gitboard: config reload failed path=%s: %v", c.path, err)
 		return c.doc, c.poll
 	}
-	if projectsChanged(c.doc.Projects, doc.Projects) || viewsChanged(c.doc.Views, doc.Views) {
+	if projectsChanged(c.doc.Projects, doc.Projects) || viewsChanged(c.doc.Views, doc.Views) || localRootsChanged(c.doc.Local.Roots, doc.Local.Roots) {
 		if c.clearCaches != nil {
 			c.clearCaches()
 		}
@@ -107,7 +107,7 @@ func (c *configLive) replace(doc config.File) error {
 	if err != nil {
 		return fmt.Errorf("configlive.replace stat: %w", err)
 	}
-	if projectsChanged(prev.Projects, loaded.Projects) || viewsChanged(prev.Views, loaded.Views) {
+	if projectsChanged(prev.Projects, loaded.Projects) || viewsChanged(prev.Views, loaded.Views) || localRootsChanged(prev.Local.Roots, loaded.Local.Roots) {
 		if c.clearCaches != nil {
 			c.clearCaches()
 		}
@@ -144,6 +144,22 @@ func viewsChanged(a, b []config.View) bool {
 	}
 	for _, v := range b {
 		if _, ok := seen[viewFingerprint(v)]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
+func localRootsChanged(a, b []string) bool {
+	if len(a) != len(b) {
+		return true
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, r := range a {
+		seen[r] = struct{}{}
+	}
+	for _, r := range b {
+		if _, ok := seen[r]; !ok {
 			return true
 		}
 	}

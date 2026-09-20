@@ -19,13 +19,12 @@ gh auth login
 3. Run:
 
 ```bash
-gitboard init
-# edit ~/.config/gitboard/config.yaml llm section if needed
-gitboard sync
 gitboard serve
 ```
 
-Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/). Each GitHub Release includes notes for what changed since the previous tag.
+On first run this creates `~/.config/gitboard/config.yaml` if missing (never overwrites). Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/), then use **Manage** (or `gitboard sync`) to add projects. Optional: edit the `llm` section for AI triage.
+
+Each GitHub Release includes notes for what changed since the previous tag.
 
 `process-compose` is only needed for the from-source `make serve` TUI below.
 
@@ -37,13 +36,10 @@ glab auth login
 gh auth login
 git clone https://github.com/behaviorengineering/gitboard.git
 cd gitboard
-make init
-# edit ~/.config/gitboard/config.yaml llm section if needed
-make sync
 make serve
 ```
 
-Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/). Stop with `make serve-down`.
+Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/). Stop with `make serve-down`. `make serve` and `gitboard serve` both create the config file if it is missing.
 
 `make serve` runs a **process-compose** TUI. The CLI `gitboard serve` still works for one-off runs without the TUI.
 
@@ -58,6 +54,7 @@ User config lives at `~/.config/gitboard/config.yaml` (or `$XDG_CONFIG_HOME/gitb
 | `local` | Disk roots to scan for checkouts / worktrees (`roots`) |
 | `sync` | GitHub orgs and GitLab groups to discover |
 | `projects` | Curated tracked repos (written by `sync`; optional `local_path`) |
+| `views` | Named board subsets of project ids (optional; omit for one default view over all projects) |
 
 `ui` fields:
 
