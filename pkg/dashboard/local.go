@@ -13,7 +13,9 @@ type LocalGit interface {
 	InspectPath(ctx context.Context, path string) localgit.Status
 	EnrichOriginSync(ctx context.Context, st *localgit.Status)
 	CommonGitDir(ctx context.Context, repoPath string) (string, error)
+	ListLocalHeads(ctx context.Context, repoPath string) ([]string, error)
 	FetchOriginCached(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *localgit.OriginFetchCache) error
+	FetchOriginSmart(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *localgit.OriginFetchCache, branches []string) error
 	OriginRemote(ctx context.Context, dir string) (string, error)
 	PullFFOnly(ctx context.Context, repoPath, branch string) error
 	RemoveSafeCheckout(ctx context.Context, worktreePath, branch, defaultBranch string) error

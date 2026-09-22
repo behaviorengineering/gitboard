@@ -8,8 +8,8 @@ import (
 	"github.com/behaviorengineering/gitboard/pkg/board"
 )
 
-func githubHappyExec() *FakeExec {
-	return &FakeExec{
+func githubHappyExec() *fakeExec {
+	return &fakeExec{
 		Responses: map[string][]byte{
 			"auth status":         []byte(""),
 			"repos/acme/app --jq": []byte(`{"default":"main"}`),
@@ -34,8 +34,8 @@ func githubHappyExec() *FakeExec {
 	}
 }
 
-func gitlabHappyExec() *FakeExec {
-	return &FakeExec{
+func gitlabHappyExec() *fakeExec {
+	return &fakeExec{
 		Responses: map[string][]byte{
 			"auth status":                     []byte(""),
 			"projects/acme%2Fapp?simple=true": []byte(`{"default_branch":"main"}`),
@@ -181,7 +181,7 @@ func TestGithubHasConflict(t *testing.T) {
 }
 
 func TestGitHubMergedForBranch(t *testing.T) {
-	fk := &FakeExec{
+	fk := &fakeExec{
 		Responses: map[string][]byte{
 			"--head feat/old":     []byte(`[{"number":7,"headRefName":"feat/old","url":"https://example/pr/7","mergedAt":"2026-01-01T12:00:00Z"}]`),
 			"--head feat/missing": []byte(`[]`),
@@ -203,7 +203,7 @@ func TestGitHubMergedForBranch(t *testing.T) {
 }
 
 func TestGitLabMergedForBranch(t *testing.T) {
-	fk := &FakeExec{
+	fk := &fakeExec{
 		Responses: map[string][]byte{
 			"--source-branch feat/done":    []byte(`[{"iid":2,"source_branch":"feat/done","web_url":"https://gitlab.example/mr/2","merged_at":"2026-01-01T12:00:00Z"}]`),
 			"--source-branch feat/missing": []byte(`[]`),
@@ -220,8 +220,8 @@ func TestGitLabMergedForBranch(t *testing.T) {
 	}
 }
 
-func azureHappyExec() *FakeExec {
-	return &FakeExec{
+func azureHappyExec() *fakeExec {
+	return &fakeExec{
 		Responses: map[string][]byte{
 			"account show": []byte(`{"id":"sub"}`),
 			"repos show":   []byte(`{"defaultBranch":"refs/heads/main"}`),
@@ -252,7 +252,7 @@ func TestAzureDevOpsProjectSummaryHappy(t *testing.T) {
 
 func TestBitbucketAuthAndSeedHeads(t *testing.T) {
 	t.Setenv("BITBUCKET_TOKEN", "test-token")
-	fk := &FakeExec{
+	fk := &fakeExec{
 		Responses: map[string][]byte{
 			"repositories/acme/app/refs/branches": []byte(`{"values":[
 				{"name":"main","target":{"date":"2026-01-01T00:00:00Z"}},

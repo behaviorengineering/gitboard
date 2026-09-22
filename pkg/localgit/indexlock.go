@@ -22,6 +22,9 @@ var ErrStaleIndexLock = errors.New("stale index.lock")
 // be running, so the board must not delete it.
 var ErrIndexLockBusy = errors.New("index.lock in use")
 
+// ErrInspectorMissing is returned when an Inspector method is called on a nil receiver.
+var ErrInspectorMissing = errors.New("inspector missing")
+
 // StaleIndexLockError carries paths and age for a confirm-to-clear response.
 type StaleIndexLockError struct {
 	RepoPath string
@@ -71,7 +74,7 @@ func (in *Inspector) EnsureWritableIndex(ctx context.Context, repoPath string, c
 // EnsureWritableIndexAge is EnsureWritableIndex with an explicit stale threshold.
 func (in *Inspector) EnsureWritableIndexAge(ctx context.Context, repoPath string, clearStale bool, staleAfter time.Duration) error {
 	if in == nil {
-		return fmt.Errorf("inspector missing")
+		return ErrInspectorMissing
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()

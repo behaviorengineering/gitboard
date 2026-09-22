@@ -41,8 +41,8 @@ func (c *Commands) forgeLister() syncproj.ForgeLister {
 // DiscoverCandidates lists forge repos from configured sync sources.
 // Per-source forge failures are returned in DiscoverResult.Warnings.
 func (c *Commands) DiscoverCandidates(ctx context.Context, doc config.File, hostFilter string) (syncproj.DiscoverResult, error) {
-	if c == nil {
-		return syncproj.DiscoverResult{}, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return syncproj.DiscoverResult{}, badRequestCause("", err)
 	}
 	if !doc.Sync.HasSyncSources() {
 		return syncproj.DiscoverResult{}, badRequest("no sync sources configured")
@@ -56,8 +56,8 @@ func (c *Commands) DiscoverCandidates(ctx context.Context, doc config.File, host
 
 // AddTrackedProject appends or updates a project by host+path and prunes view orphans.
 func (c *Commands) AddTrackedProject(doc config.File, host config.Host, path string) (config.File, error) {
-	if c == nil {
-		return doc, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return doc, badRequestCause("", err)
 	}
 	host = config.Host(strings.ToLower(strings.TrimSpace(string(host))))
 	switch host {
@@ -67,7 +67,7 @@ func (c *Commands) AddTrackedProject(doc config.File, host config.Host, path str
 	}
 	updated, err := syncproj.AddProject(doc.Projects, host, path)
 	if err != nil {
-		return doc, badRequest(err.Error())
+		return doc, badRequestCause("", err)
 	}
 	doc.Projects = updated
 	doc.Views = config.PruneViewMembership(doc.Views, doc.Projects)
@@ -76,8 +76,8 @@ func (c *Commands) AddTrackedProject(doc config.File, host config.Host, path str
 
 // RemoveTrackedProject drops a project by id and prunes view membership.
 func (c *Commands) RemoveTrackedProject(doc config.File, id string) (config.File, error) {
-	if c == nil {
-		return doc, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return doc, badRequestCause("", err)
 	}
 	updated, found := syncproj.RemoveProject(doc.Projects, id)
 	if !found {
@@ -90,8 +90,8 @@ func (c *Commands) RemoveTrackedProject(doc config.File, id string) (config.File
 
 // ApplySyncSelection replaces the tracked set from host/path refs after rediscovery.
 func (c *Commands) ApplySyncSelection(ctx context.Context, doc config.File, hostFilter string, refs []syncproj.RepoRef) (config.File, error) {
-	if c == nil {
-		return doc, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return doc, badRequestCause("", err)
 	}
 	if !doc.Sync.HasSyncSources() {
 		return doc, badRequest("no sync sources configured")
@@ -102,7 +102,7 @@ func (c *Commands) ApplySyncSelection(ctx context.Context, doc config.File, host
 	}
 	projects, err := syncproj.ApplySelectionByRefs(res.Candidates, refs, doc.Projects)
 	if err != nil {
-		return doc, badRequest(err.Error())
+		return doc, badRequestCause("", err)
 	}
 	doc.Projects = projects
 	doc.Views = config.PruneViewMembership(doc.Views, doc.Projects)
@@ -111,8 +111,8 @@ func (c *Commands) ApplySyncSelection(ctx context.Context, doc config.File, host
 
 // SetSyncSources updates forge discovery orgs/groups/workspaces.
 func (c *Commands) SetSyncSources(doc config.File, githubOrgs, gitlabGroups, azureOrgs, bitbucketWorkspaces []string) (config.File, error) {
-	if c == nil {
-		return doc, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return doc, badRequestCause("", err)
 	}
 	doc.Sync.GitHub.Orgs = githubOrgs
 	doc.Sync.GitLab.Groups = gitlabGroups
@@ -126,8 +126,8 @@ func (c *Commands) SetSyncSources(doc config.File, githubOrgs, gitlabGroups, azu
 
 // SetViews replaces named view definitions (must be non-empty).
 func (c *Commands) SetViews(doc config.File, views []config.View) (config.File, error) {
-	if c == nil {
-		return doc, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return doc, badRequestCause("", err)
 	}
 	if len(views) == 0 {
 		return doc, badRequest("views must not be empty")
@@ -139,8 +139,8 @@ func (c *Commands) SetViews(doc config.File, views []config.View) (config.File, 
 // SetLocalRoots replaces directories scanned for git checkouts.
 // Empty roots are allowed (local mapping then relies on per-project local_path only).
 func (c *Commands) SetLocalRoots(doc config.File, roots []string) (config.File, error) {
-	if c == nil {
-		return doc, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return doc, badRequestCause("", err)
 	}
 	cleaned := make([]string, 0, len(roots))
 	seen := map[string]struct{}{}
@@ -162,8 +162,8 @@ func (c *Commands) SetLocalRoots(doc config.File, roots []string) (config.File, 
 // SetProjectLocalPath sets or clears an explicit checkout path for a tracked project.
 // Empty localPath clears the override so scan roots can map the repo again.
 func (c *Commands) SetProjectLocalPath(doc config.File, id, localPath string) (config.File, error) {
-	if c == nil {
-		return doc, badRequest("sync commands unavailable")
+	if err := c.requireService(); err != nil {
+		return doc, badRequestCause("", err)
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {

@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,7 +32,7 @@ func (s *Service) InvalidateOrigin(commonDir string) {
 // attachLocal (no origin fetch, no EnrichOriginSync). Uses cached scan when possible.
 func (s *Service) mappedPathAllowlist(ctx context.Context, doc config.File, p config.Project, abs string) (bool, error) {
 	if s == nil || s.Local == nil {
-		return false, fmt.Errorf("local git inspector missing")
+		return false, ErrLocalInspectorMissing
 	}
 	abs = filepath.Clean(abs)
 	explicit := strings.TrimSpace(p.LocalPath)

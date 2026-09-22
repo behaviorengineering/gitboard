@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +46,15 @@ func (f *syncLocalFake) CommonGitDir(_ context.Context, path string) (string, er
 	return path, nil
 }
 
+func (f *syncLocalFake) ListLocalHeads(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 func (f *syncLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) error {
+	return nil
+}
+
+func (f *syncLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) error {
 	return nil
 }
 
@@ -269,6 +279,105 @@ func TestDashboardHappy(t *testing.T) {
 	}
 }
 
+func TestDashboardStream(t *testing.T) {
+	fx := &fakeExec{
+		responses: map[string][]byte{
+			"auth status":         []byte(""),
+			"repos/acme/app --jq": []byte(`{"default":"main"}`),
+			"repos/acme/app/branches": []byte(`[
+				{"name":"main","commit":{"commit":{"committer":{"date":"2026-01-01T00:00:00Z"}}}}
+			]`),
+			"run list":       []byte(`[]`),
+			"--state open":   []byte(`[]`),
+			"--state merged": []byte(`[]`),
+		},
+	}
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
+	mux := server.NewMux(server.Options{
+		Doc: config.File{
+			Projects: []config.Project{
+				{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+			},
+		},
+		Dash:        dash,
+		Commands:    dashboard.NewCommands(dash),
+		PollSeconds: 30,
+	})
+	res := httptest.NewRequest(http.MethodGet, "/api/dashboard?stream=1&fresh=1", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	}
+	ct := rec.Header().Get("Content-Type")
+	if !strings.Contains(ct, "ndjson") {
+		t.Fatalf("content-type: %q", ct)
+	}
+	var types []string
+	var shellProjects int
+	var sawProjectID string
+	dec := json.NewDecoder(bytes.NewReader(rec.Body.Bytes()))
+	for {
+		var ev map[string]any
+		if err := dec.Decode(&ev); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+		}
+		typ, _ := ev["type"].(string)
+		types = append(types, typ)
+		switch typ {
+		case "shell":
+			dashObj, _ := ev["dashboard"].(map[string]any)
+			projects, _ := dashObj["projects"].([]any)
+			shellProjects = len(projects)
+			for _, p := range projects {
+				row, _ := p.(map[string]any)
+				if br, ok := row["branches"]; ok && br != nil {
+					if list, ok := br.([]any); ok && len(list) > 0 {
+						t.Fatalf("shell branches not empty: %+v", br)
+					}
+				}
+			}
+		case "project":
+			proj, _ := ev["project"].(map[string]any)
+			sawProjectID, _ = proj["id"].(string)
+			branches, _ := proj["branches"].([]any)
+			if len(branches) == 0 {
+				t.Fatalf("project event missing branches: %+v", proj)
+			}
+		case "done":
+			if _, ok := ev["tooling"]; !ok {
+				t.Fatal("done missing tooling")
+			}
+			if _, ok := ev["generated_at"]; !ok {
+				t.Fatal("done missing generated_at")
+			}
+		case "error":
+			t.Fatalf("stream error: %+v", ev)
+		}
+	}
+	if len(types) < 3 || types[0] != "shell" || types[len(types)-1] != "done" {
+		t.Fatalf("event types: %v", types)
+	}
+	if shellProjects != 1 {
+		t.Fatalf("shell projects: %d", shellProjects)
+	}
+	if sawProjectID != "gh-app" {
+		t.Fatalf("project id: %q", sawProjectID)
+	}
+	projectCount := 0
+	for _, typ := range types {
+		if typ == "project" {
+			projectCount++
+		}
+	}
+	if projectCount != 1 {
+		t.Fatalf("project events: %d types=%v", projectCount, types)
+	}
+}
+
 func TestFailuresUnknownProject(t *testing.T) {
 	mux := testMux(t, nil, nil)
 	res := httptest.NewRequest(http.MethodGet, "/api/failures?project=missing&run_id=99", nil)
@@ -326,6 +435,52 @@ func TestPruneSafeValidation(t *testing.T) {
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 validation, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+type timedPullLocalFake struct {
+	syncLocalFake
+	phases localgit.PullPhases
+}
+
+func (f *timedPullLocalFake) PullFFOnlyWithPhases(context.Context, string, string) (localgit.PullPhases, error) {
+	return f.phases, nil
+}
+
+func TestPullFFEmitsPhaseTimings(t *testing.T) {
+	path := t.TempDir()
+	local := &timedPullLocalFake{phases: localgit.PullPhases{FetchMs: 11, MergeMs: 5}}
+	projects := []config.Project{{
+		ID:        "gh-app",
+		Label:     "App",
+		Host:      config.HostGitHub,
+		Path:      "acme/app",
+		LocalPath: path,
+	}}
+	fx := testFake()
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), local)
+	mux := server.NewMux(server.Options{
+		Doc:      config.File{Projects: projects},
+		Dash:     dash,
+		Commands: dashboard.NewCommands(dash),
+	})
+	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"main","repo_path":%q}`, path)
+	res := httptest.NewRequest(http.MethodPost, "/api/pull/ff", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	}
+	var got dashboard.PullFFResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.FetchMs != 11 || got.MergeMs != 5 {
+		t.Fatalf("phases: %+v", got)
+	}
+	st := rec.Header().Get("Server-Timing")
+	if !strings.Contains(st, "pull_fetch") || !strings.Contains(st, "pull_merge") {
+		t.Fatalf("server-timing: %q", st)
 	}
 }
 

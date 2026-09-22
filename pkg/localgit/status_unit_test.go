@@ -2,6 +2,7 @@ package localgit
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -134,8 +135,8 @@ func TestEnrichOriginSyncWithFakeExec(t *testing.T) {
 
 func TestFetchOriginNilInspector(t *testing.T) {
 	var in *Inspector
-	if err := in.FetchOrigin(context.Background(), filepath.Join(t.TempDir(), "repo")); err == nil {
-		t.Fatal("want inspector missing error")
+	if err := in.FetchOrigin(context.Background(), filepath.Join(t.TempDir(), "repo")); !errors.Is(err, ErrInspectorMissing) {
+		t.Fatalf("want ErrInspectorMissing, got %v", err)
 	}
 }
 

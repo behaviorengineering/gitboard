@@ -14,7 +14,7 @@ import (
 // Fail closed: git command failures yield ok=false with a reason; only validation returns err.
 func (in *Inspector) ContentOnDefault(ctx context.Context, repoPath, branch, defaultBranch string) (ok bool, reason string, err error) {
 	if in == nil {
-		return false, "", fmt.Errorf("inspector missing")
+		return false, "", ErrInspectorMissing
 	}
 	branch = strings.TrimSpace(branch)
 	defaultBranch = strings.TrimSpace(defaultBranch)

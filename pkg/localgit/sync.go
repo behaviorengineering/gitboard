@@ -38,7 +38,7 @@ type SyncInspection struct {
 func (in *Inspector) InspectSync(ctx context.Context, repoPath, branch string) (SyncInspection, error) {
 	var out SyncInspection
 	if in == nil {
-		return out, fmt.Errorf("inspector missing")
+		return out, ErrInspectorMissing
 	}
 	branch = strings.TrimSpace(branch)
 	if err := ValidateBranchName(branch); err != nil {

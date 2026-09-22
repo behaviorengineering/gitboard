@@ -19,7 +19,7 @@ import (
 // Callers must re-check forge prune safety first. Branch names are validated; dirty trees refuse.
 func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branch, defaultBranch string) error {
 	if in == nil {
-		return fmt.Errorf("inspector missing")
+		return ErrInspectorMissing
 	}
 	branch = strings.TrimSpace(branch)
 	defaultBranch = strings.TrimSpace(defaultBranch)

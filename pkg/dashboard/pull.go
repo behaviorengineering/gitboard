@@ -22,9 +22,13 @@ type PullFFRequest struct {
 
 // PullFFResult is returned after a successful fast-forward.
 type PullFFResult struct {
-	OK     bool   `json:"ok"`
-	Branch string `json:"branch"`
-	Path   string `json:"path"`
+	OK              bool   `json:"ok"`
+	Branch          string `json:"branch"`
+	Path            string `json:"path"`
+	FetchMs         int64  `json:"fetch_ms,omitempty"`
+	SubmodulePreMs  int64  `json:"submodule_pre_ms,omitempty"`
+	MergeMs         int64  `json:"merge_ms,omitempty"`
+	SubmodulePostMs int64  `json:"submodule_post_ms,omitempty"`
 }
 
 // PullFF validates the mapped checkout, then fast-forwards the branch from origin.
@@ -33,9 +37,9 @@ type PullFFResult struct {
 // Validation uses a path allowlist (cached scan) instead of a full attachLocal forge refresh.
 func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFRequest) (PullFFResult, error) {
 	var zero PullFFResult
-	s := c.Service
-	if s == nil || s.Local == nil {
-		return zero, fmt.Errorf("local git inspector missing")
+	s, err := c.requireLocal()
+	if err != nil {
+		return zero, err
 	}
 	projectID := strings.TrimSpace(req.ProjectID)
 	branch := strings.TrimSpace(req.Branch)
@@ -44,7 +48,7 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 		return zero, badRequest("project_id, branch, and repo_path are required")
 	}
 	if err := localgit.ValidateBranchName(branch); err != nil {
-		return zero, badRequest(err.Error())
+		return zero, badRequestCause("", err)
 	}
 	p, ok := FindProject(doc.Projects, projectID)
 	if !ok {
@@ -53,7 +57,7 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 
 	abs, err := localgit.ExpandPath(repoPath)
 	if err != nil {
-		return zero, badRequest(fmt.Sprintf("repo path: %v", err))
+		return zero, badRequestCause(fmt.Sprintf("repo path: %v", err), err)
 	}
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = resolved
@@ -82,13 +86,20 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 		return zero, err
 	}
 
-	err = s.Local.PullFFOnly(ctx, abs, branch)
+	var phases localgit.PullPhases
+	err = s.pullFFOnlyTimed(ctx, abs, branch, &phases)
 	if err != nil && localgit.IsIndexLockError(err) {
 		if lockErr := c.ensureWritableIndex(ctx, abs, req.ClearIndexLock); lockErr != nil {
 			return zero, lockErr
 		}
 		if req.ClearIndexLock {
-			err = s.Local.PullFFOnly(ctx, abs, branch)
+			var retryPhases localgit.PullPhases
+			retryErr := s.pullFFOnlyTimed(ctx, abs, branch, &retryPhases)
+			phases.FetchMs += retryPhases.FetchMs
+			phases.SubmodulePreMs += retryPhases.SubmodulePreMs
+			phases.MergeMs += retryPhases.MergeMs
+			phases.SubmodulePostMs += retryPhases.SubmodulePostMs
+			err = retryErr
 		}
 	}
 	if err != nil {
@@ -97,19 +108,37 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 		if errors.Is(err, localgit.ErrUpToDate) {
 			s.InvalidateOrigin(common)
 			s.InvalidateProject(string(p.Host), p.Path)
-			return PullFFResult{OK: true, Branch: branch, Path: abs}, nil
+			return PullFFResult{OK: true, Branch: branch, Path: abs, FetchMs: phases.FetchMs, SubmodulePreMs: phases.SubmodulePreMs, MergeMs: phases.MergeMs, SubmodulePostMs: phases.SubmodulePostMs}, nil
 		}
 		if errors.Is(err, localgit.ErrInvalidBranch) ||
 			errors.Is(err, localgit.ErrMissingBranch) ||
 			errors.Is(err, localgit.ErrDirtyTree) ||
 			errors.Is(err, localgit.ErrDiverged) {
-			return zero, badRequest(err.Error())
+			return zero, badRequestCause("", err)
 		}
 		return zero, fmt.Errorf("pull ff-only: %w", err)
 	}
 	s.InvalidateOrigin(common)
 	s.InvalidateProject(string(p.Host), p.Path)
-	return PullFFResult{OK: true, Branch: branch, Path: abs}, nil
+	return PullFFResult{OK: true, Branch: branch, Path: abs, FetchMs: phases.FetchMs, SubmodulePreMs: phases.SubmodulePreMs, MergeMs: phases.MergeMs, SubmodulePostMs: phases.SubmodulePostMs}, nil
+}
+
+// pullFFOnlyTimed runs the timed pull when the local backend supports phases,
+// otherwise falls back to PullFFOnly without timings.
+func (s *Service) pullFFOnlyTimed(ctx context.Context, abs, branch string, phases *localgit.PullPhases) error {
+	if s == nil || s.Local == nil {
+		return ErrLocalInspectorMissing
+	}
+	if timed, ok := s.Local.(interface {
+		PullFFOnlyWithPhases(context.Context, string, string) (localgit.PullPhases, error)
+	}); ok {
+		got, err := timed.PullFFOnlyWithPhases(ctx, abs, branch)
+		if phases != nil {
+			*phases = got
+		}
+		return err
+	}
+	return s.Local.PullFFOnly(ctx, abs, branch)
 }
 
 func repoPathAllowed(local *board.LocalStatus, abs string) bool {
@@ -146,9 +175,9 @@ func repoPathAllowedCanon(local *board.LocalStatus, abs string, canon func(strin
 
 // RequireMappedPath expands path and ensures it belongs to the project's mapped checkouts.
 func (c *Commands) RequireMappedPath(ctx context.Context, doc config.File, projectID, repoPath string) (string, error) {
-	s := c.Service
-	if s == nil || s.Local == nil {
-		return "", fmt.Errorf("local git inspector missing")
+	s, err := c.requireLocal()
+	if err != nil {
+		return "", err
 	}
 	projectID = strings.TrimSpace(projectID)
 	repoPath = strings.TrimSpace(repoPath)
@@ -161,7 +190,7 @@ func (c *Commands) RequireMappedPath(ctx context.Context, doc config.File, proje
 	}
 	abs, err := localgit.ExpandPath(repoPath)
 	if err != nil {
-		return "", badRequest(fmt.Sprintf("path: %v", err))
+		return "", badRequestCause(fmt.Sprintf("path: %v", err), err)
 	}
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = resolved

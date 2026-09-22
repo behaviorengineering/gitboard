@@ -63,6 +63,9 @@ type ProjectSummary struct {
 	OpenItems OpenItems      `json:"open_items"`
 	Local     *LocalStatus   `json:"local,omitempty"`
 	Error     string         `json:"error,omitempty"`
+	// Capabilities advertises host actions the UI may offer. Missing or false
+	// failed_jobs means CI status/links only (no failed-job / AI-triage control).
+	Capabilities Capabilities `json:"capabilities"`
 
 	// RemoteNames is the full remote head set for prune matching (not sent to UI).
 	// Loaded via forge API calls; may be incomplete only when RemoteNamesOK is false.
@@ -75,6 +78,11 @@ type ProjectSummary struct {
 	// MergedChecked is true for source branches whose per-branch merged lookup
 	// succeeded (hit or confirmed miss). Likely prune requires this, not MergedOK alone.
 	MergedChecked map[string]bool `json:"-"`
+}
+
+// Capabilities lists optional forge actions available for a project row.
+type Capabilities struct {
+	FailedJobs bool `json:"failed_jobs"`
 }
 
 // LocalAppearance roles match localgit checkout roles.

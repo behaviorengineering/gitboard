@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -124,6 +125,20 @@ func TestIsBadRequest(t *testing.T) {
 	}
 }
 
+func TestBadRequestCauseUnwrap(t *testing.T) {
+	cause := ErrLocalInspectorMissing
+	err := badRequestCause("", cause)
+	if !IsBadRequest(err) {
+		t.Fatalf("want bad request, got %v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("want unwrap to %v, got %v", cause, err)
+	}
+	if err.Error() != cause.Error() {
+		t.Fatalf("want message %q, got %q", cause.Error(), err.Error())
+	}
+}
+
 func TestClientForNilInterface(t *testing.T) {
 	s := &Service{}
 	client := ClientFor(s, config.Project{Host: config.HostGitHub})
@@ -146,7 +161,7 @@ func TestPruneSafeValidation(t *testing.T) {
 	err := cmds.PruneSafe(t.Context(), config.File{}, PruneSafeRequest{
 		ProjectID: "p", Branch: "b", WorktreePath: "/tmp/x",
 	})
-	if err == nil || err.Error() != "local git inspector missing" {
+	if !errors.Is(err, ErrLocalInspectorMissing) {
 		t.Fatalf("got %v", err)
 	}
 
@@ -177,7 +192,7 @@ func TestPullFFValidation(t *testing.T) {
 	_, err := cmds.PullFF(t.Context(), config.File{}, PullFFRequest{
 		ProjectID: "p", Branch: "main", RepoPath: "/tmp/x",
 	})
-	if err == nil || err.Error() != "local git inspector missing" {
+	if !errors.Is(err, ErrLocalInspectorMissing) {
 		t.Fatalf("got %v", err)
 	}
 

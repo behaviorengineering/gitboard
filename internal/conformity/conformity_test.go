@@ -260,9 +260,9 @@ func TestFailClosedMerged(t *testing.T) {
 	}
 }
 
-func TestLiveOptInDocumented(t *testing.T) {
-	// Live mode is env-gated; this test documents the contract without requiring network.
-	if os.Getenv("GITBOARD_CONFORMITY_LIVE") == "" {
-		t.Log("set GITBOARD_CONFORMITY_LIVE=1 with logged-in forge CLIs to run live cases")
+func TestLiveDisabledByDefault(t *testing.T) {
+	if os.Getenv("GITBOARD_CONFORMITY_LIVE") == "1" {
+		t.Skip("live mode enabled; skip default-disabled assertion")
 	}
+	// Ordinary go test / make conformity must not require network credentials.
 }

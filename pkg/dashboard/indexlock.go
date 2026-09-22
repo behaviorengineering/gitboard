@@ -56,22 +56,22 @@ func mapIndexLockErr(err error) error {
 		}
 	}
 	if errors.Is(err, localgit.ErrIndexLockBusy) {
-		return badRequest(err.Error())
+		return badRequestCause("", err)
 	}
 	return nil
 }
 
 func (c *Commands) ensureWritableIndex(ctx context.Context, repoPath string, clearStale bool) error {
-	s := c.Service
-	if s == nil || s.Local == nil {
-		return fmt.Errorf("local git inspector missing")
+	s, err := c.requireLocal()
+	if err != nil {
+		return err
 	}
-	err := s.Local.EnsureWritableIndex(ctx, repoPath, clearStale)
+	err = s.Local.EnsureWritableIndex(ctx, repoPath, clearStale)
 	if err == nil {
 		return nil
 	}
 	if mapped := mapIndexLockErr(err); mapped != nil {
 		return mapped
 	}
-	return err
+	return fmt.Errorf("dashboard.ensureWritableIndex: %w", err)
 }

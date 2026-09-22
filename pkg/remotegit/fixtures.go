@@ -8,18 +8,18 @@ import (
 	"github.com/behaviorengineering/gitboard/pkg/cliexec"
 )
 
-// FakeExec returns canned CLI output matched by argv substrings (longest match wins).
+// fakeExec returns canned CLI output matched by argv substrings (longest match wins).
 // Used by package tests and internal/conformity.
-type FakeExec struct {
+type fakeExec struct {
 	Responses map[string][]byte
 	Errors    map[string]error
 }
 
-func (f *FakeExec) LookPath(name string) (string, error) {
+func (f *fakeExec) LookPath(name string) (string, error) {
 	return "/fake/" + name, nil
 }
 
-func (f *FakeExec) match(name string, args ...string) ([]byte, error) {
+func (f *fakeExec) match(name string, args ...string) ([]byte, error) {
 	key := name + " " + strings.Join(args, " ")
 	var best string
 	for substr := range f.Responses {
@@ -41,11 +41,11 @@ func (f *FakeExec) match(name string, args ...string) ([]byte, error) {
 	return f.Responses[best], nil
 }
 
-func (f *FakeExec) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+func (f *fakeExec) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	return f.match(name, args...)
 }
 
-func (f *FakeExec) RunJSON(ctx context.Context, name string, args ...string) ([]byte, error) {
+func (f *fakeExec) RunJSON(ctx context.Context, name string, args ...string) ([]byte, error) {
 	out, err := f.Run(ctx, name, args...)
 	if err != nil {
 		return nil, err
@@ -56,11 +56,11 @@ func (f *FakeExec) RunJSON(ctx context.Context, name string, args ...string) ([]
 	return out, nil
 }
 
-var _ cliexec.Exec = (*FakeExec)(nil)
+var _ cliexec.Exec = (*fakeExec)(nil)
 
 // ConformityGitHubExec returns a deterministic GitHub fake for conformity tests.
 func ConformityGitHubExec() cliexec.Exec {
-	return &FakeExec{Responses: map[string][]byte{
+	return &fakeExec{Responses: map[string][]byte{
 		"auth status":         []byte(""),
 		"repos/acme/app --jq": []byte(`{"default":"main"}`),
 		"repos/acme/app/branches": []byte(`[
@@ -81,7 +81,7 @@ func ConformityGitHubExec() cliexec.Exec {
 
 // ConformityGitLabExec returns a deterministic GitLab fake for conformity tests.
 func ConformityGitLabExec() cliexec.Exec {
-	return &FakeExec{Responses: map[string][]byte{
+	return &fakeExec{Responses: map[string][]byte{
 		"auth status":                     []byte(""),
 		"projects/acme%2Fapp?simple=true": []byte(`{"default_branch":"main"}`),
 		"repository/branches": []byte(`[
@@ -102,7 +102,7 @@ func ConformityGitLabExec() cliexec.Exec {
 
 // ConformityAzureExec returns a deterministic Azure DevOps fake for conformity tests.
 func ConformityAzureExec() cliexec.Exec {
-	return &FakeExec{Responses: map[string][]byte{
+	return &fakeExec{Responses: map[string][]byte{
 		"account show": []byte(`{"id":"sub"}`),
 		"repos show":   []byte(`{"defaultBranch":"refs/heads/main"}`),
 		"ref list": []byte(`[
@@ -117,7 +117,7 @@ func ConformityAzureExec() cliexec.Exec {
 // ConformityBitbucketExec returns a deterministic Bitbucket fake for conformity tests.
 // Callers must set BITBUCKET_TOKEN (or username/app password) for AuthStatus.
 func ConformityBitbucketExec() cliexec.Exec {
-	return &FakeExec{Responses: map[string][]byte{
+	return &fakeExec{Responses: map[string][]byte{
 		"repositories/acme/app/refs/branches": []byte(`{"values":[
 			{"name":"main","target":{"date":"2026-01-01T00:00:00Z"}},
 			{"name":"feat/b","target":{"date":"2026-01-02T00:00:00Z"}}

@@ -361,7 +361,7 @@ func (s *Service) gather(ctx context.Context, dir, branch, def string) (Evidence
 		ev.Notes = append(ev.Notes, "status: "+err.Error())
 	}
 
-	// Are branch and default related?
+	// Check whether branch and default share history.
 	if _, err := s.git(ctx, dir, "merge-base", def, branch); err != nil {
 		ev.RelatedHistories = false
 		ev.Notes = append(ev.Notes, "histories unrelated to "+def)

@@ -55,10 +55,8 @@ func resolveVersion(ldflag, moduleVersion string) string {
 func main() {
 	log.SetFlags(0)
 	if len(os.Args) < 2 {
-		if err := runServe(os.Args[1:]); err != nil {
-			log.Fatal(err)
-		}
-		return
+		printUsage(os.Stderr)
+		os.Exit(2)
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
@@ -76,14 +74,9 @@ func main() {
 	case "-h", "--help", "help":
 		printUsage(os.Stdout)
 	default:
-		// Backward compatible: treat unknown first arg as serve flags (e.g. -addr).
-		if strings.HasPrefix(cmd, "-") {
-			err = runServe(os.Args[1:])
-		} else {
-			fmt.Fprintf(os.Stderr, "gitboard: unknown command %q\n\n", cmd)
-			printUsage(os.Stderr)
-			os.Exit(2)
-		}
+		fmt.Fprintf(os.Stderr, "gitboard: unknown command %q\n\n", cmd)
+		printUsage(os.Stderr)
+		os.Exit(2)
 	}
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -94,7 +87,7 @@ func main() {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, `gitboard - GitLab + GitHub code-change board (gh + glab)
+	_, _ = fmt.Fprintf(w, `gitboard - GitLab + GitHub code-change board (gh + glab)
 
 Usage:
   gitboard init [-config path]
@@ -225,6 +218,7 @@ func runServe(args []string) error {
 		Triage:      &triage.Analyzer{LLM: llmClient},
 		Prune:       prune,
 		PollSeconds: doc.EffectivePollSeconds(),
+		Log:         observability.NewLogger().With("cmd", "serve"),
 	})
 	log.Printf("gitboard: %s (%d projects, config %s, poll %ds, heads cache %ds, merged cache %ds, fetch cache %ds)",
 		*addr, len(doc.Projects), path, doc.EffectivePollSeconds(),
@@ -310,11 +304,12 @@ func runSync(args []string) error {
 	}
 
 	if strings.TrimSpace(*removeID) != "" {
-		updated, found := syncproj.RemoveProject(doc.Projects, *removeID)
-		if !found {
-			return fmt.Errorf("project id %q not found", *removeID)
+		cmds := syncCommands()
+		updated, err := cmds.RemoveTrackedProject(doc, *removeID)
+		if err != nil {
+			return err
 		}
-		doc.Projects = updated
+		doc = updated
 		if *dryRun {
 			fmt.Printf("dry-run: would remove %s (%d projects left)\n", *removeID, len(doc.Projects))
 			return nil
@@ -328,16 +323,12 @@ func runSync(args []string) error {
 
 	if strings.TrimSpace(*addPath) != "" {
 		host := config.Host(strings.ToLower(strings.TrimSpace(*hostFilter)))
-		switch host {
-		case config.HostGitHub, config.HostGitLab, config.HostAzureDevOps, config.HostBitbucket:
-		default:
-			return fmt.Errorf("--add requires --host github|gitlab|azuredevops|bitbucket")
-		}
-		updated, err := syncproj.AddProject(doc.Projects, host, *addPath)
+		cmds := syncCommands()
+		updated, err := cmds.AddTrackedProject(doc, host, *addPath)
 		if err != nil {
 			return err
 		}
-		doc.Projects = updated
+		doc = updated
 		if *dryRun {
 			fmt.Printf("dry-run: would add %s %s (%d projects)\n", host, *addPath, len(doc.Projects))
 			return nil
@@ -369,18 +360,10 @@ func runSync(args []string) error {
 		fmt.Printf("saved sync sources to %s\n", path)
 	}
 
-	run := cliexec.New()
-	run.Timeout = 120 * time.Second
-	lister := syncproj.ForgeLister{
-		GitHub:      remotegit.NewGitHub(run),
-		GitLab:      remotegit.NewGitLab(run),
-		AzureDevOps: remotegit.NewAzureDevOps(run),
-		Bitbucket:   remotegit.NewBitbucket(run),
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-
-	res, err := syncproj.Discover(ctx, lister, doc, *hostFilter)
+	cmds := syncCommands()
+	res, err := cmds.DiscoverCandidates(ctx, doc, *hostFilter)
 	if err != nil {
 		return err
 	}
@@ -406,16 +389,43 @@ func runSync(args []string) error {
 	if err != nil {
 		return err
 	}
-	projects, err := syncproj.ApplySelection(cands, selected, doc.Projects)
+	refs := make([]syncproj.RepoRef, 0, len(selected))
+	byIndex := make(map[int]syncproj.Candidate, len(cands))
+	for _, c := range cands {
+		byIndex[c.Index] = c
+	}
+	for _, idx := range selected {
+		c, ok := byIndex[idx]
+		if !ok {
+			continue
+		}
+		refs = append(refs, syncproj.RepoRef{Host: c.Host, Path: c.Path})
+	}
+	projects, err := syncproj.ApplySelectionByRefs(cands, refs, doc.Projects)
 	if err != nil {
 		return err
 	}
 	doc.Projects = projects
+	doc.Views = config.PruneViewMembership(doc.Views, doc.Projects)
 	if err := config.Save(path, doc); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %d projects to %s\n", len(doc.Projects), path)
 	return nil
+}
+
+// syncCommands builds the same Commands surface the Manage API uses for sync mutations.
+func syncCommands() *dashboard.Commands {
+	run := cliexec.New()
+	run.Timeout = 120 * time.Second
+	dash := dashboard.New(
+		remotegit.NewGitHub(run),
+		remotegit.NewGitLab(run),
+		remotegit.NewAzureDevOps(run),
+		remotegit.NewBitbucket(run),
+		nil,
+	)
+	return dashboard.NewCommands(dash)
 }
 
 func fileExists(path string) bool {

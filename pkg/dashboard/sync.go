@@ -25,8 +25,8 @@ type SyncInvestigation struct {
 // InvestigateSync validates a mapped checkout, refreshes origin, and compares refs.
 func (c *Commands) InvestigateSync(ctx context.Context, doc config.File, req SyncInvestigationRequest) (SyncInvestigation, error) {
 	var zero SyncInvestigation
-	if c == nil || c.Service == nil || c.Local == nil {
-		return zero, fmt.Errorf("local git inspector missing")
+	if _, err := c.requireLocal(); err != nil {
+		return zero, err
 	}
 	projectID := strings.TrimSpace(req.ProjectID)
 	branch := strings.TrimSpace(req.Branch)
@@ -35,7 +35,7 @@ func (c *Commands) InvestigateSync(ctx context.Context, doc config.File, req Syn
 		return zero, badRequest("project_id, branch, and repo_path are required")
 	}
 	if err := localgit.ValidateBranchName(branch); err != nil {
-		return zero, badRequest(err.Error())
+		return zero, badRequestCause("", err)
 	}
 	abs, err := c.RequireMappedPath(ctx, doc, projectID, repoPath)
 	if err != nil {

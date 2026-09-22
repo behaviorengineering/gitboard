@@ -28,7 +28,15 @@ func (f *syncLocalFake) CommonGitDir(_ context.Context, path string) (string, er
 	return path, nil
 }
 
+func (f *syncLocalFake) ListLocalHeads(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 func (f *syncLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) error {
+	return nil
+}
+
+func (f *syncLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) error {
 	return nil
 }
 

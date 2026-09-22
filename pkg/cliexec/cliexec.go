@@ -17,14 +17,18 @@ type Exec interface {
 	RunJSON(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
-// Runner executes external CLIs with a timeout.
+// Runner executes external CLIs with a timeout and failsafe-go resilience.
 type Runner struct {
 	Timeout time.Duration
+	// attempt runs one CLI invocation. Tests may set it; nil uses exec.CommandContext.
+	attempt func(ctx context.Context, timeout time.Duration, name string, args ...string) ([]byte, error)
+	// resilience holds per-Runner retry/breaker state (nil until first Run).
+	resilience *runnerResilience
 }
 
 // New returns a runner with a sensible default timeout.
 func New() *Runner {
-	return &Runner{Timeout: 45 * time.Second}
+	return &Runner{Timeout: 45 * time.Second, resilience: newRunnerResilience()}
 }
 
 // LookPath reports whether name is on PATH.
@@ -46,6 +50,8 @@ func (r *Runner) RunJSON(ctx context.Context, name string, args ...string) ([]by
 }
 
 // Run executes a command and returns combined relevant output.
+// Requires ctx to have a deadline (fail closed). Transient kill/timeout failures
+// retry with exponential backoff; per-binary circuit breakers are scoped to this Runner.
 func (r *Runner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if r == nil {
 		r = New()
@@ -54,6 +60,16 @@ func (r *Runner) Run(ctx context.Context, name string, args ...string) ([]byte, 
 	if timeout <= 0 {
 		timeout = 45 * time.Second
 	}
+	attempt := r.attempt
+	if attempt == nil {
+		attempt = runAttempt
+	}
+	return r.runWithResilience(ctx, name, func() ([]byte, error) {
+		return attempt(ctx, timeout, name, args...)
+	})
+}
+
+func runAttempt(ctx context.Context, timeout time.Duration, name string, args ...string) ([]byte, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

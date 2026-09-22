@@ -63,6 +63,7 @@ func (s *Service) ClearCaches() {
 }
 
 // ToolingStatus returns forge CLI install/auth status for meta and Manage UI.
+// Only GitHub and GitLab are probed; Azure DevOps and Bitbucket stay off the UI surface for now.
 func (s *Service) ToolingStatus(ctx context.Context) board.Tooling {
 	var out board.Tooling
 	if s == nil {
@@ -77,16 +78,6 @@ func (s *Service) ToolingStatus(ctx context.Context) board.Tooling {
 	if s.GitLab != nil {
 		out.GitLab.Installed, out.GitLab.Authed, out.GitLab.Detail = auth.GetOrCheck("gitlab", func() (bool, bool, string) {
 			return s.GitLab.AuthStatus(ctx)
-		})
-	}
-	if s.AzureDevOps != nil {
-		out.AzureDevOps.Installed, out.AzureDevOps.Authed, out.AzureDevOps.Detail = auth.GetOrCheck("azuredevops", func() (bool, bool, string) {
-			return s.AzureDevOps.AuthStatus(ctx)
-		})
-	}
-	if s.Bitbucket != nil {
-		out.Bitbucket.Installed, out.Bitbucket.Authed, out.Bitbucket.Detail = auth.GetOrCheck("bitbucket", func() (bool, bool, string) {
-			return s.Bitbucket.AuthStatus(ctx)
 		})
 	}
 	return out
@@ -107,6 +98,13 @@ func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool, view
 
 // CollectWith builds the dashboard using CollectOpts.
 func (s *Service) CollectWith(ctx context.Context, doc config.File, opts CollectOpts) (board.Dashboard, error) {
+	return s.CollectStream(ctx, doc, opts, nil)
+}
+
+// CollectStream builds the dashboard like CollectWith. When onProject is set, it is
+// called as each project row finishes (completion order, may be concurrent).
+// The returned Dashboard.Projects slice is always in view membership order.
+func (s *Service) CollectStream(ctx context.Context, doc config.File, opts CollectOpts, onProject func(board.ProjectSummary)) (board.Dashboard, error) {
 	out := board.Dashboard{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Views:       ViewSummaries(doc),
@@ -172,6 +170,7 @@ func (s *Service) CollectWith(ctx context.Context, doc config.File, opts Collect
 	rows := make([]board.ProjectSummary, len(projects))
 	sem := make(chan struct{}, originFetchParallel)
 	var wg sync.WaitGroup
+	var emitMu sync.Mutex
 	for i, p := range projects {
 		if ctx.Err() != nil {
 			break
@@ -187,13 +186,19 @@ func (s *Service) CollectWith(ctx context.Context, doc config.File, opts Collect
 			rowCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			row := s.summarize(rowCtx, p, summaryOpts)
-			row.Local = s.attachLocal(ctx, p, disc, labelByKey, opts.Fresh, fetchTTL)
+			forgeBranches := filterHiddenBranches(row.Branches, doc.UI.HideBranches)
+			row.Local = s.attachLocal(ctx, p, disc, labelByKey, opts.Fresh, fetchTTL, forgeBranchNames(forgeBranches))
 			s.annotateContentOnDefault(ctx, &row)
 			s.confirmMergedForCandidates(ctx, p, &row, summaryOpts)
 			remotegit.EnrichPruneHints(&row)
-			row.Branches = filterHiddenBranches(row.Branches, doc.UI.HideBranches)
+			row.Branches = forgeBranches
 			syncOpenItemsToVisibleBranches(&row)
 			rows[i] = row
+			if onProject != nil {
+				emitMu.Lock()
+				onProject(row)
+				emitMu.Unlock()
+			}
 		}(i, p)
 	}
 	wg.Wait()
@@ -249,7 +254,7 @@ func projectLabelsByKey(projects []config.Project) map[string]string {
 	return out
 }
 
-func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string, fresh bool, fetchTTL time.Duration) *board.LocalStatus {
+func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string, fresh bool, fetchTTL time.Duration, forgeBranches []string) *board.LocalStatus {
 	if s.Local == nil {
 		return nil
 	}
@@ -288,7 +293,8 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 		}
 	}
 
-	fetchErrByCommon := s.refreshOrigins(ctx, inspectList, fresh, fetchTTL)
+	targetBranches := s.originFetchBranches(ctx, inspectList, forgeBranches)
+	fetchErrByCommon := s.refreshOrigins(ctx, inspectList, fresh, fetchTTL, targetBranches)
 
 	type inspected struct {
 		checkout localgit.Checkout
@@ -362,11 +368,13 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 	return primaryLocal
 }
 
-// refreshOrigins runs TTL-gated git fetch origin once per unique common git dir.
+// refreshOrigins runs TTL-gated origin refresh once per unique common git dir.
+// Fresh or expired full TTL uses `git fetch --prune origin`. Warm TTL uses a
+// targeted fetch of the supplied branches (empty list skips network).
 // At most originFetchParallel fetches run at once to bound network load.
 const originFetchParallel = 8
 
-func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Checkout, fresh bool, fetchTTL time.Duration) map[string]error {
+func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Checkout, fresh bool, fetchTTL time.Duration, branches []string) map[string]error {
 	out := map[string]error{}
 	if s.Local == nil || len(checkouts) == 0 {
 		return out
@@ -411,7 +419,7 @@ func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Check
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			err := s.Local.FetchOriginCached(ctx, j.path, fetchTTL, fresh, s.OriginFetch)
+			err := s.Local.FetchOriginSmart(ctx, j.path, fetchTTL, fresh, s.OriginFetch, branches)
 			if err == nil {
 				return
 			}
@@ -421,6 +429,55 @@ func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Check
 		}(j)
 	}
 	wg.Wait()
+	return out
+}
+
+func forgeBranchNames(branches []board.BranchRef) []string {
+	out := make([]string, 0, len(branches))
+	for _, b := range branches {
+		name := strings.TrimSpace(b.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// originFetchBranches unions visible forge branch names with local heads so
+// OriginSync and attention ranking stay accurate after a targeted fetch.
+func (s *Service) originFetchBranches(ctx context.Context, checkouts []localgit.Checkout, forgeBranches []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	for _, name := range forgeBranches {
+		add(name)
+	}
+	if s == nil || s.Local == nil {
+		return out
+	}
+	for _, c := range checkouts {
+		if c.Path == "" || ctx.Err() != nil {
+			continue
+		}
+		heads, err := s.Local.ListLocalHeads(ctx, c.Path)
+		if err != nil {
+			continue
+		}
+		for _, name := range heads {
+			add(name)
+		}
+	}
 	return out
 }
 
@@ -561,7 +618,7 @@ func (s *Service) summarize(ctx context.Context, p config.Project, opts remotegi
 	missing := func(client string) board.ProjectSummary {
 		return board.ProjectSummary{
 			ID: p.ID, Label: p.Label, Host: string(p.Host), Path: p.Path, Org: forgeOrg(p.Path),
-			OpenURL: p.OpenURL(), Error: client + " client missing",
+			OpenURL: p.OpenURL(), Capabilities: remotegit.HostCapabilities(p.Host), Error: client + " client missing",
 		}
 	}
 	switch p.Host {
@@ -592,7 +649,7 @@ func (s *Service) summarize(ctx context.Context, p config.Project, opts remotegi
 	default:
 		return board.ProjectSummary{
 			ID: p.ID, Label: p.Label, Host: string(p.Host), Path: p.Path, Org: forgeOrg(p.Path),
-			OpenURL: p.OpenURL(), Error: "unsupported host",
+			OpenURL: p.OpenURL(), Capabilities: remotegit.HostCapabilities(p.Host), Error: "unsupported host",
 		}
 	}
 }

@@ -32,7 +32,15 @@ func (f *pullLocalFake) CommonGitDir(_ context.Context, path string) (string, er
 	return path, nil
 }
 
+func (f *pullLocalFake) ListLocalHeads(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 func (f *pullLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) error {
+	return nil
+}
+
+func (f *pullLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) error {
 	return nil
 }
 
@@ -199,4 +207,77 @@ func (f *pullClearFake) EnsureWritableIndex(_ context.Context, _ string, clearSt
 		*f.cleared = true
 	}
 	return nil
+}
+
+type pullTimedFake struct {
+	pullLocalFake
+	phases localgit.PullPhases
+	err    error
+}
+
+func (f *pullTimedFake) PullFFOnlyWithPhases(context.Context, string, string) (localgit.PullPhases, error) {
+	return f.phases, f.err
+}
+
+func TestPullFFReturnsPhaseTimings(t *testing.T) {
+	path := filepath.Clean(t.TempDir())
+	fake := &pullTimedFake{
+		phases: localgit.PullPhases{FetchMs: 12, SubmodulePreMs: 3, MergeMs: 4, SubmodulePostMs: 5},
+	}
+	fake.pullErr = nil
+	service := New(nil, nil, nil, nil, fake)
+	commands := NewCommands(service)
+	doc := config.File{
+		Projects: []config.Project{{
+			ID:        "gh-app",
+			Host:      config.HostGitHub,
+			Path:      "acme/app",
+			LocalPath: path,
+		}},
+	}
+
+	got, err := commands.PullFF(context.Background(), doc, PullFFRequest{
+		ProjectID: "gh-app",
+		Branch:    "main",
+		RepoPath:  path,
+	})
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if !got.OK {
+		t.Fatalf("result: %+v", got)
+	}
+	if got.FetchMs != 12 || got.SubmodulePreMs != 3 || got.MergeMs != 4 || got.SubmodulePostMs != 5 {
+		t.Fatalf("phases: %+v", got)
+	}
+}
+
+func TestPullFFUpToDateKeepsPhaseTimings(t *testing.T) {
+	path := filepath.Clean(t.TempDir())
+	fake := &pullTimedFake{
+		phases: localgit.PullPhases{FetchMs: 7},
+		err:    fmt.Errorf("%w: %q", localgit.ErrUpToDate, "main"),
+	}
+	service := New(nil, nil, nil, nil, fake)
+	commands := NewCommands(service)
+	doc := config.File{
+		Projects: []config.Project{{
+			ID:        "gh-app",
+			Host:      config.HostGitHub,
+			Path:      "acme/app",
+			LocalPath: path,
+		}},
+	}
+
+	got, err := commands.PullFF(context.Background(), doc, PullFFRequest{
+		ProjectID: "gh-app",
+		Branch:    "main",
+		RepoPath:  path,
+	})
+	if err != nil {
+		t.Fatalf("up-to-date want success, got %v", err)
+	}
+	if !got.OK || got.FetchMs != 7 {
+		t.Fatalf("result: %+v", got)
+	}
 }

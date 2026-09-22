@@ -1,6 +1,7 @@
 package remotegit
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -193,7 +194,11 @@ func (c *TTLCache) GetOrLoadHeads(key string, ttl time.Duration, fresh bool, loa
 	if err != nil {
 		return HeadsSnapshot{}, err
 	}
-	return v.(HeadsSnapshot), nil
+	out, ok := v.(HeadsSnapshot)
+	if !ok {
+		return HeadsSnapshot{}, fmt.Errorf("ttlcache: unexpected heads type %T", v)
+	}
+	return out, nil
 }
 
 // GetOrLoadMerged returns cached merged reviews or calls load.
@@ -247,7 +252,11 @@ func (c *TTLCache) GetOrLoadMerged(key string, ttl time.Duration, fresh bool, lo
 	if err != nil {
 		return nil, false
 	}
-	return v.([]board.MergedReview), true
+	out, ok := v.([]board.MergedReview)
+	if !ok {
+		return nil, false
+	}
+	return out, true
 }
 
 // GetOrLoadOpen returns cached open reviews or calls load.
@@ -292,7 +301,11 @@ func (c *TTLCache) GetOrLoadOpen(key string, ttl time.Duration, fresh bool, load
 	if err != nil {
 		return OpenReviewsSnapshot{}, err
 	}
-	return v.(OpenReviewsSnapshot), nil
+	out, ok := v.(OpenReviewsSnapshot)
+	if !ok {
+		return OpenReviewsSnapshot{}, fmt.Errorf("ttlcache: unexpected open type %T", v)
+	}
+	return out, nil
 }
 
 // GetOrLoadCI returns cached CI or calls load.
@@ -337,7 +350,11 @@ func (c *TTLCache) GetOrLoadCI(key string, ttl time.Duration, fresh bool, load f
 	if err != nil {
 		return CISnapshot{}, err
 	}
-	return v.(CISnapshot), nil
+	out, ok := v.(CISnapshot)
+	if !ok {
+		return CISnapshot{}, fmt.Errorf("ttlcache: unexpected ci type %T", v)
+	}
+	return out, nil
 }
 
 // GetOrLoadMergedBranch returns a targeted merged lookup for one source branch.
@@ -403,7 +420,11 @@ func (c *TTLCache) GetOrLoadMergedBranch(key, branch string, negativeTTL time.Du
 	if v == nil {
 		return nil, true
 	}
-	return v.([]board.MergedReview), true
+	out, ok := v.([]board.MergedReview)
+	if !ok {
+		return nil, false
+	}
+	return out, true
 }
 
 // ForgetMergedBranch drops a sticky per-branch merged result (remote head returned).

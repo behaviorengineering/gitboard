@@ -418,6 +418,12 @@ body {
   height: 0.85rem;
 }
 
+.tool-row--pending .mark-icon--spin {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--link);
+}
+
 .project-host {
   display: inline-flex;
   align-items: center;
@@ -846,6 +852,24 @@ button.branch-inspect {
   color: var(--muted);
   font-size: 0.75rem;
   opacity: 0.7;
+}
+
+.branch-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.branch-pending .mark-icon--spin {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--link);
+}
+
+.branch-pending-label {
+  opacity: 0.85;
 }
 
 .branch-actions {

@@ -9,12 +9,25 @@ import (
 
 func baseSummary(p config.Project) board.ProjectSummary {
 	return board.ProjectSummary{
-		ID:      p.ID,
-		Label:   p.Label,
-		Host:    string(p.Host),
-		Path:    strings.Trim(p.Path, "/"),
-		Org:     pathOrg(p.Path),
-		OpenURL: p.OpenURL(),
+		ID:           p.ID,
+		Label:        p.Label,
+		Host:         string(p.Host),
+		Path:         strings.Trim(p.Path, "/"),
+		Org:          pathOrg(p.Path),
+		OpenURL:      p.OpenURL(),
+		Capabilities: HostCapabilities(p.Host),
+	}
+}
+
+// HostCapabilities returns the UI action surface for a forge host.
+// GitHub and GitLab support failed-job listing and AI triage; Azure DevOps and
+// Bitbucket expose CI status and links only until those adapters implement logs.
+func HostCapabilities(host config.Host) board.Capabilities {
+	switch host {
+	case config.HostGitHub, config.HostGitLab:
+		return board.Capabilities{FailedJobs: true}
+	default:
+		return board.Capabilities{FailedJobs: false}
 	}
 }
 

@@ -1,0 +1,86 @@
+name: Live Conformity
+
+on:
+  workflow_dispatch:
+    inputs:
+      github_path:
+        description: GitHub owner/repo for live Collect
+        required: false
+        type: string
+      gitlab_path:
+        description: GitLab group/project path
+        required: false
+        type: string
+      azure_path:
+        description: Azure DevOps org/project/repo path
+        required: false
+        type: string
+      bitbucket_path:
+        description: Bitbucket workspace/repo path
+        required: false
+        type: string
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install forge CLIs
+        run: |
+          set -euo pipefail
+          (type -p wget >/dev/null || (sudo apt-get update && sudo apt-get install -y wget))
+          sudo mkdir -p -m 755 /etc/apt/keyrings
+          out=$(wget -nv -O- https://cli.github.com/packages/githubcli-archive-keyring.gpg)
+          echo "$out" | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+          sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y gh
+          curl -sSL https://raw.githubusercontent.com/upciti/wakemeops/main/install | sudo sh
+          sudo apt-get install -y glab || true
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+      - name: Login forge CLIs
+        env:
+          GH_TOKEN: ${{ secrets.GITBOARD_LIVE_GH_TOKEN }}
+          GITLAB_TOKEN: ${{ secrets.GITBOARD_LIVE_GITLAB_TOKEN }}
+          AZURE_DEVOPS_EXT_PAT: ${{ secrets.GITBOARD_LIVE_AZURE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GH_TOKEN:-}" ]; then
+            echo "$GH_TOKEN" | gh auth login --with-token
+          else
+            echo "GH token unset; github live case will skip"
+          fi
+          if [ -n "${GITLAB_TOKEN:-}" ]; then
+            echo "$GITLAB_TOKEN" | glab auth login --stdin --hostname gitlab.com || true
+          else
+            echo "GitLab token unset; gitlab live case will skip"
+          fi
+          if [ -n "${AZURE_DEVOPS_EXT_PAT:-}" ]; then
+            echo "Azure PAT present for az devops"
+          else
+            echo "Azure PAT unset; azuredevops live case will skip"
+          fi
+
+      - name: Run live conformity
+        env:
+          GITBOARD_CONFORMITY_LIVE: "1"
+          GITBOARD_LIVE_GITHUB_PATH: ${{ inputs.github_path || vars.GITBOARD_LIVE_GITHUB_PATH }}
+          GITBOARD_LIVE_GITLAB_PATH: ${{ inputs.gitlab_path || vars.GITBOARD_LIVE_GITLAB_PATH }}
+          GITBOARD_LIVE_AZURE_PATH: ${{ inputs.azure_path || vars.GITBOARD_LIVE_AZURE_PATH }}
+          GITBOARD_LIVE_BITBUCKET_PATH: ${{ inputs.bitbucket_path || vars.GITBOARD_LIVE_BITBUCKET_PATH }}
+          BITBUCKET_TOKEN: ${{ secrets.GITBOARD_LIVE_BITBUCKET_TOKEN }}
+          AZURE_DEVOPS_EXT_PAT: ${{ secrets.GITBOARD_LIVE_AZURE_PAT }}
+        run: make conformity-live

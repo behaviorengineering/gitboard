@@ -14,16 +14,25 @@ import (
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
-// BadRequestError is a client/validation failure for prune APIs.
+// BadRequestError is a client/validation failure for command APIs.
 type BadRequestError struct {
-	Msg string
+	Msg   string
+	Cause error `json:"-"`
 }
 
 func (e BadRequestError) Error() string {
-	if e.Msg == "" {
-		return "bad request"
+	if e.Msg != "" {
+		return e.Msg
 	}
-	return e.Msg
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	return "bad request"
+}
+
+// Unwrap returns the underlying cause when present.
+func (e BadRequestError) Unwrap() error {
+	return e.Cause
 }
 
 // IsBadRequest reports whether err is a prune validation / not-safe failure.
@@ -36,6 +45,16 @@ func badRequest(msg string) error {
 	return BadRequestError{Msg: msg}
 }
 
+func badRequestCause(msg string, cause error) error {
+	if cause == nil {
+		return badRequest(msg)
+	}
+	if msg == "" {
+		return BadRequestError{Msg: cause.Error(), Cause: cause}
+	}
+	return BadRequestError{Msg: msg, Cause: cause}
+}
+
 // PruneSafeRequest identifies a local checkout marked safe to remove.
 type PruneSafeRequest struct {
 	ProjectID      string `json:"project_id"`
@@ -46,9 +65,9 @@ type PruneSafeRequest struct {
 
 // PruneSafe re-checks forge prune hints, then removes the local checkout when still safe.
 func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafeRequest) error {
-	s := c.Service
-	if s == nil || s.Local == nil {
-		return fmt.Errorf("local git inspector missing")
+	s, err := c.requireLocal()
+	if err != nil {
+		return err
 	}
 	projectID := strings.TrimSpace(req.ProjectID)
 	branch := strings.TrimSpace(req.Branch)
@@ -57,7 +76,7 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 		return badRequest("project_id, branch, and worktree_path are required")
 	}
 	if err := localgit.ValidateBranchName(branch); err != nil {
-		return badRequest(err.Error())
+		return badRequestCause("", err)
 	}
 	p, ok := FindProject(doc.Projects, projectID)
 	if !ok {
@@ -66,7 +85,7 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 
 	abs, err := localgit.ExpandPath(worktreePath)
 	if err != nil {
-		return badRequest(fmt.Sprintf("worktree path: %v", err))
+		return badRequestCause(fmt.Sprintf("worktree path: %v", err), err)
 	}
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = resolved
@@ -76,10 +95,10 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 	canon := func(p string) string { return canonicalCheckoutPath(ctx, s.Local, p) }
 
 	opts := remotegit.SummaryOpts{
-		Fresh:     true,
+		Fresh:     false,
 		Cache:     s.Cache,
-		HeadsTTL:  0,
-		MergedTTL: 0,
+		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
+		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
 	}
 	row := s.summarize(ctx, p, opts)
 	if !row.RemoteNamesOK {
@@ -89,7 +108,9 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 	if len(doc.Local.Roots) > 0 {
 		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
 	}
-	row.Local = s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects), true, time.Duration(doc.EffectiveFetchSeconds())*time.Second)
+	forgeBranches := filterHiddenBranches(row.Branches, doc.UI.HideBranches)
+	row.Local = s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects), false, time.Duration(doc.EffectiveFetchSeconds())*time.Second, forgeBranchNames(forgeBranches))
+	row.Branches = forgeBranches
 	if row.Local == nil || !row.Local.Mapped {
 		return badRequest("project has no mapped local checkout")
 	}
@@ -125,7 +146,7 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 			errors.Is(err, localgit.ErrDirtyTree) ||
 			errors.Is(err, localgit.ErrDiverged) ||
 			errors.Is(err, localgit.ErrMissingBranch) {
-			return badRequest(err.Error())
+			return badRequestCause("", err)
 		}
 		return fmt.Errorf("remove checkout: %w", err)
 	}
