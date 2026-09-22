@@ -14,8 +14,10 @@ import (
 type Host string
 
 const (
-	HostGitHub Host = "github"
-	HostGitLab Host = "gitlab"
+	HostGitHub      Host = "github"
+	HostGitLab      Host = "gitlab"
+	HostAzureDevOps Host = "azuredevops"
+	HostBitbucket   Host = "bitbucket"
 )
 
 // Project is one tracked repository.
@@ -35,6 +37,9 @@ type Local struct {
 	// FetchSeconds TTL-gates git fetch origin before local↔origin sync.
 	// nil → default 120; explicit 0 always fetches; negative → default.
 	FetchSeconds *int `yaml:"fetch_seconds"`
+	// ScanSeconds TTL-gates ScanRoots discovery under local.roots.
+	// nil → default 300; explicit 0 always rescans; negative → default.
+	ScanSeconds *int `yaml:"scan_seconds"`
 }
 
 // LLM holds optional AI triage settings.
@@ -73,10 +78,23 @@ type GitLabSync struct {
 	Groups []string `yaml:"groups"`
 }
 
+// AzureDevOpsSync lists Azure DevOps orgs (and optional projects) to discover.
+type AzureDevOpsSync struct {
+	Orgs     []string `yaml:"orgs"`
+	Projects []string `yaml:"projects"` // optional project-name filter within orgs
+}
+
+// BitbucketSync lists Bitbucket workspaces to discover.
+type BitbucketSync struct {
+	Workspaces []string `yaml:"workspaces"`
+}
+
 // SyncSources names upstreams used by gitboard sync.
 type SyncSources struct {
-	GitHub GitHubSync `yaml:"github"`
-	GitLab GitLabSync `yaml:"gitlab"`
+	GitHub      GitHubSync      `yaml:"github"`
+	GitLab      GitLabSync      `yaml:"gitlab"`
+	AzureDevOps AzureDevOpsSync `yaml:"azuredevops"`
+	Bitbucket   BitbucketSync   `yaml:"bitbucket"`
 }
 
 // DefaultViewID is the synthetic view used when config omits views.
@@ -153,15 +171,22 @@ upstream:
 # Optional: scan these trees for local checkouts (incl. git worktrees).
 # Match is via origin remote → project host/path. Override per project with local_path.
 # fetch_seconds TTL-gates git fetch origin before ↑/↓ sync (0 = always fetch).
+# scan_seconds TTL-gates root ScanRoots (0 = always rescan; default 300).
 local:
   roots: []
   fetch_seconds: 120
+  scan_seconds: 300
 
 sync:
   github:
     orgs: []
   gitlab:
     groups: []
+  azuredevops:
+    orgs: []
+    projects: []
+  bitbucket:
+    workspaces: []
 
 # Named board views (subsets of projects). Empty / omitted → implicit "default"
 # view containing every tracked project. Membership may overlap across views.
@@ -186,6 +211,9 @@ const DefaultMergedSeconds = 600
 
 // DefaultFetchSeconds caches git fetch origin when local.fetch_seconds is omitted.
 const DefaultFetchSeconds = 120
+
+// DefaultScanSeconds caches ScanRoots when local.scan_seconds is omitted.
+const DefaultScanSeconds = 300
 
 // Dir returns ~/.config/gitboard (or $XDG_CONFIG_HOME/gitboard).
 func Dir() string {
@@ -311,14 +339,20 @@ func Init(path string) (created bool, err error) {
 	return true, nil
 }
 
-// HasSyncSources reports whether any org or group is configured.
+// HasSyncSources reports whether any org, group, or workspace is configured.
 func (s SyncSources) HasSyncSources() bool {
-	return len(s.GitHub.Orgs) > 0 || len(s.GitLab.Groups) > 0
+	return len(s.GitHub.Orgs) > 0 ||
+		len(s.GitLab.Groups) > 0 ||
+		len(s.AzureDevOps.Orgs) > 0 ||
+		len(s.Bitbucket.Workspaces) > 0
 }
 
 func normalizeSync(s *SyncSources) {
 	s.GitHub.Orgs = trimNonEmpty(s.GitHub.Orgs)
 	s.GitLab.Groups = trimNonEmpty(s.GitLab.Groups)
+	s.AzureDevOps.Orgs = trimNonEmpty(s.AzureDevOps.Orgs)
+	s.AzureDevOps.Projects = trimNonEmpty(s.AzureDevOps.Projects)
+	s.Bitbucket.Workspaces = trimNonEmpty(s.Bitbucket.Workspaces)
 }
 
 func normalizeLocal(l *Local) {
@@ -478,18 +512,25 @@ func validateProject(p Project) error {
 	if strings.TrimSpace(p.Label) == "" {
 		return fmt.Errorf("missing label")
 	}
-	switch Host(strings.ToLower(string(p.Host))) {
-	case HostGitHub, HostGitLab:
+	host := Host(strings.ToLower(string(p.Host)))
+	switch host {
+	case HostGitHub, HostGitLab, HostAzureDevOps, HostBitbucket:
 	default:
-		return fmt.Errorf("host must be github or gitlab")
+		return fmt.Errorf("host must be github, gitlab, azuredevops, or bitbucket")
 	}
 	parts := strings.Split(strings.Trim(p.Path, "/"), "/")
-	if len(parts) < 2 {
-		return fmt.Errorf("path must be owner/repo")
+	minParts := 2
+	pathHint := "owner/repo"
+	if host == HostAzureDevOps {
+		minParts = 3
+		pathHint = "org/project/repo"
+	}
+	if len(parts) < minParts {
+		return fmt.Errorf("path must be %s", pathHint)
 	}
 	for _, part := range parts {
 		if part == "" {
-			return fmt.Errorf("path must be owner/repo")
+			return fmt.Errorf("path must be %s", pathHint)
 		}
 	}
 	return nil
@@ -501,6 +542,17 @@ func (p Project) OpenURL() string {
 	switch p.Host {
 	case HostGitHub:
 		return "https://github.com/" + path
+	case HostGitLab:
+		return "https://gitlab.com/" + path
+	case HostAzureDevOps:
+		parts := strings.Split(path, "/")
+		if len(parts) >= 3 {
+			org, project, repo := parts[0], parts[1], parts[len(parts)-1]
+			return fmt.Sprintf("https://dev.azure.com/%s/%s/_git/%s", org, project, repo)
+		}
+		return "https://dev.azure.com/" + path
+	case HostBitbucket:
+		return "https://bitbucket.org/" + path
 	default:
 		return "https://gitlab.com/" + path
 	}
@@ -584,6 +636,18 @@ func (f File) EffectiveFetchSeconds() int {
 		return DefaultFetchSeconds
 	}
 	return *f.Local.FetchSeconds
+}
+
+// EffectiveScanSeconds returns the local roots ScanRoots TTL in seconds.
+// Explicit 0 disables caching (always rescan). Negative values fall back to the default.
+func (f File) EffectiveScanSeconds() int {
+	if f.Local.ScanSeconds == nil {
+		return DefaultScanSeconds
+	}
+	if *f.Local.ScanSeconds < 0 {
+		return DefaultScanSeconds
+	}
+	return *f.Local.ScanSeconds
 }
 
 // AgentsDir is where agentsession stores sessions (<config Dir>/agents).

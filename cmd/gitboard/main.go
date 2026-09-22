@@ -17,17 +17,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/cliexec"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/llm"
-	"github.com/behaviorengineering/gitboard/internal/localgit"
 	"github.com/behaviorengineering/gitboard/internal/observability"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
-	"github.com/behaviorengineering/gitboard/internal/remotegit"
 	"github.com/behaviorengineering/gitboard/internal/server"
 	"github.com/behaviorengineering/gitboard/internal/syncproj"
 	"github.com/behaviorengineering/gitboard/internal/triage"
+	"github.com/behaviorengineering/gitboard/pkg/cliexec"
+	"github.com/behaviorengineering/gitboard/pkg/dashboard"
+	"github.com/behaviorengineering/gitboard/pkg/localgit"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 // version is set by GoReleaser / make build via -ldflags -X main.version=...
@@ -203,7 +203,13 @@ func runServe(args []string) error {
 	run := cliexec.New()
 	run.Timeout = 120 * time.Second
 	local := localgit.NewInspector(run)
-	dash := dashboard.New(remotegit.NewGitHub(run), remotegit.NewGitLab(run), local)
+	dash := dashboard.New(
+		remotegit.NewGitHub(run),
+		remotegit.NewGitLab(run),
+		remotegit.NewAzureDevOps(run),
+		remotegit.NewBitbucket(run),
+		local,
+	)
 	llmClient := llm.New(doc.EffectiveLLM())
 	prune, err := pruneagent.New(config.AgentsDir(), run, llmClient)
 	if err != nil {
@@ -284,7 +290,7 @@ func runSync(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	configPath := fs.String("config", config.DefaultPath(), "config file path")
-	hostFilter := fs.String("host", "", "limit discovery to github or gitlab")
+	hostFilter := fs.String("host", "", "limit discovery to github, gitlab, azuredevops, or bitbucket")
 	addPath := fs.String("add", "", "non-interactive: add owner/repo (requires -host)")
 	removeID := fs.String("remove", "", "non-interactive: remove project by id")
 	dryRun := fs.Bool("dry-run", false, "discover and print candidates without writing")
@@ -322,8 +328,10 @@ func runSync(args []string) error {
 
 	if strings.TrimSpace(*addPath) != "" {
 		host := config.Host(strings.ToLower(strings.TrimSpace(*hostFilter)))
-		if host != config.HostGitHub && host != config.HostGitLab {
-			return fmt.Errorf("--add requires --host github|gitlab")
+		switch host {
+		case config.HostGitHub, config.HostGitLab, config.HostAzureDevOps, config.HostBitbucket:
+		default:
+			return fmt.Errorf("--add requires --host github|gitlab|azuredevops|bitbucket")
 		}
 		updated, err := syncproj.AddProject(doc.Projects, host, *addPath)
 		if err != nil {
@@ -364,8 +372,10 @@ func runSync(args []string) error {
 	run := cliexec.New()
 	run.Timeout = 120 * time.Second
 	lister := syncproj.ForgeLister{
-		GitHub: remotegit.NewGitHub(run),
-		GitLab: remotegit.NewGitLab(run),
+		GitHub:      remotegit.NewGitHub(run),
+		GitLab:      remotegit.NewGitLab(run),
+		AzureDevOps: remotegit.NewAzureDevOps(run),
+		Bitbucket:   remotegit.NewBitbucket(run),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

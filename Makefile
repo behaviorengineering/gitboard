@@ -1,4 +1,4 @@
-.PHONY: help build test vet ci init sync serve serve-down
+.PHONY: help build test vet ci init sync serve serve-down conformity bench-net
 
 BINARY := bin/gitboard
 CONFIG ?= $(HOME)/.config/gitboard/config.yaml
@@ -12,6 +12,8 @@ help:
 	@echo "  make test        go test ./..."
 	@echo "  make vet         go vet ./..."
 	@echo "  make ci          tidy + gofmt + vet + race tests + build"
+	@echo "  make conformity  Network retrieval contract tests across forges"
+	@echo "  make bench-net   Network call-count / latency microbenchmarks"
 	@echo "  make init        Create $(CONFIG) if missing"
 	@echo "  make sync        Discover repos and select tracked projects"
 	@echo "  make serve       process-compose TUI (:1325); creates config if missing; rebuilds on file changes"
@@ -26,6 +28,12 @@ test:
 
 vet:
 	go vet ./...
+
+conformity:
+	go test ./internal/conformity/ -count=1 -v
+
+bench-net:
+	go test ./internal/benchnet/ -bench=. -benchmem -count=1
 
 ci:
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak

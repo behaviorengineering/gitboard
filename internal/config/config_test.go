@@ -37,7 +37,7 @@ func TestLoadRejectsBadHost(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`projects:
   - id: demo
     label: Demo
-    host: bitbucket
+    host: gitea
     path: org/repo
 `), 0o600); err != nil {
 		t.Fatal(err)
@@ -216,10 +216,14 @@ func TestEffectiveUpstreamSeconds(t *testing.T) {
 	if got := doc.EffectiveFetchSeconds(); got != config.DefaultFetchSeconds {
 		t.Fatalf("fetch default=%d", got)
 	}
+	if got := doc.EffectiveScanSeconds(); got != config.DefaultScanSeconds {
+		t.Fatalf("scan default=%d", got)
+	}
 	zero := 0
 	doc.Upstream.HeadsSeconds = &zero
 	doc.Upstream.MergedSeconds = &zero
 	doc.Local.FetchSeconds = &zero
+	doc.Local.ScanSeconds = &zero
 	if got := doc.EffectiveHeadsSeconds(); got != 0 {
 		t.Fatalf("heads explicit zero=%d", got)
 	}
@@ -229,14 +233,21 @@ func TestEffectiveUpstreamSeconds(t *testing.T) {
 	if got := doc.EffectiveFetchSeconds(); got != 0 {
 		t.Fatalf("fetch explicit zero=%d", got)
 	}
+	if got := doc.EffectiveScanSeconds(); got != 0 {
+		t.Fatalf("scan explicit zero=%d", got)
+	}
 	neg := -5
 	doc.Upstream.HeadsSeconds = &neg
 	doc.Local.FetchSeconds = &neg
+	doc.Local.ScanSeconds = &neg
 	if got := doc.EffectiveHeadsSeconds(); got != config.DefaultHeadsSeconds {
 		t.Fatalf("heads negative=%d", got)
 	}
 	if got := doc.EffectiveFetchSeconds(); got != config.DefaultFetchSeconds {
 		t.Fatalf("fetch negative=%d", got)
+	}
+	if got := doc.EffectiveScanSeconds(); got != config.DefaultScanSeconds {
+		t.Fatalf("scan negative=%d", got)
 	}
 }
 

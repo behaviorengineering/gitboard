@@ -1608,6 +1608,35 @@ a { color: var(--link); }
   margin: 0 0 0.45rem;
 }
 
+.manage-provider {
+  margin-bottom: 1.15rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+}
+
+.manage-provider:last-of-type {
+  border-bottom: none;
+}
+
+.manage-provider-title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.manage-provider-status {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.manage-provider-status--ok {
+  color: var(--ok, #2a7a3a);
+}
+
+.manage-provider-status--blocked {
+  color: var(--warn, #9a6b00);
+}
+
 .manage-field {
   display: flex;
   flex-direction: column;

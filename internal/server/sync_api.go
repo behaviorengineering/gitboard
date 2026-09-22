@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/syncproj"
+	"github.com/behaviorengineering/gitboard/pkg/dashboard"
 )
 
 const errConfigNotWritable = "config path not set; cannot mutate tracked projects"
@@ -143,8 +143,10 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 		case http.MethodGet:
 			doc, _ := live.snapshot()
 			writeJSON(w, map[string]any{
-				"github_orgs":   doc.Sync.GitHub.Orgs,
-				"gitlab_groups": doc.Sync.GitLab.Groups,
+				"github_orgs":          doc.Sync.GitHub.Orgs,
+				"gitlab_groups":        doc.Sync.GitLab.Groups,
+				"azuredevops_orgs":     doc.Sync.AzureDevOps.Orgs,
+				"bitbucket_workspaces": doc.Sync.Bitbucket.Workspaces,
 			})
 		case http.MethodPut:
 			if opts.Commands == nil {
@@ -156,14 +158,16 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 				return
 			}
 			var body struct {
-				GitHubOrgs   []string `json:"github_orgs"`
-				GitLabGroups []string `json:"gitlab_groups"`
+				GitHubOrgs          []string `json:"github_orgs"`
+				GitLabGroups        []string `json:"gitlab_groups"`
+				AzureDevOpsOrgs     []string `json:"azuredevops_orgs"`
+				BitbucketWorkspaces []string `json:"bitbucket_workspaces"`
 			}
 			if err := decodeJSONBody(w, r, &body); err != nil {
 				return
 			}
 			doc, _ := live.snapshot()
-			doc, err := opts.Commands.SetSyncSources(doc, body.GitHubOrgs, body.GitLabGroups)
+			doc, err := opts.Commands.SetSyncSources(doc, body.GitHubOrgs, body.GitLabGroups, body.AzureDevOpsOrgs, body.BitbucketWorkspaces)
 			if err != nil {
 				writeSyncError(w, err)
 				return
@@ -174,8 +178,10 @@ func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
 			}
 			doc, _ = live.snapshot()
 			writeJSON(w, map[string]any{
-				"github_orgs":   doc.Sync.GitHub.Orgs,
-				"gitlab_groups": doc.Sync.GitLab.Groups,
+				"github_orgs":          doc.Sync.GitHub.Orgs,
+				"gitlab_groups":        doc.Sync.GitLab.Groups,
+				"azuredevops_orgs":     doc.Sync.AzureDevOps.Orgs,
+				"bitbucket_workspaces": doc.Sync.Bitbucket.Workspaces,
 			})
 		default:
 			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
@@ -283,8 +289,10 @@ func syncStatePayload(doc config.File) map[string]any {
 		"views":     dashboard.ViewSummaries(doc),
 		"view_defs": effectiveViewDefs(doc),
 		"sync": map[string]any{
-			"github_orgs":   doc.Sync.GitHub.Orgs,
-			"gitlab_groups": doc.Sync.GitLab.Groups,
+			"github_orgs":          doc.Sync.GitHub.Orgs,
+			"gitlab_groups":        doc.Sync.GitLab.Groups,
+			"azuredevops_orgs":     doc.Sync.AzureDevOps.Orgs,
+			"bitbucket_workspaces": doc.Sync.Bitbucket.Workspaces,
 		},
 		"local": map[string]any{
 			"roots": doc.Local.Roots,

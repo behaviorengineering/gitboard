@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/cliexec"
 	"github.com/behaviorengineering/gitboard/internal/llm"
-	"github.com/behaviorengineering/gitboard/internal/localgit"
+	"github.com/behaviorengineering/gitboard/pkg/cliexec"
+	"github.com/behaviorengineering/gitboard/pkg/localgit"
 	"github.com/behaviorengineering/strop/agentsession"
 )
 

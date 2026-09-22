@@ -615,10 +615,10 @@ async function flushPullBatch() {
   if (pendingPulls.size > 0) return;
   const failures = pullFailures.splice(0, pullFailures.length);
   const status = document.getElementById('status');
-  // Prefer a fresh load so origin ahead/behind matches the pulls that just finished.
-  let ok = await loadDashboard({ quiet: true, fresh: true });
+  // Prefer a scoped reload: pull invalidates that repo's caches server-side.
+  let ok = await loadDashboard({ quiet: true, fresh: false });
   if (!ok && pullBoardDirty) {
-    ok = await loadDashboard({ quiet: true, fresh: true });
+    ok = await loadDashboard({ quiet: true, fresh: false });
   }
   if (!ok && pullBoardDirty) {
     // Keep "pulled" until a later fresh paint; do not clear recentPulled on abort races.
@@ -1104,6 +1104,8 @@ function renderTooling(tool) {
   root.innerHTML = '';
   root.appendChild(toolRow('github', 'gh', tool?.github || {}));
   root.appendChild(toolRow('gitlab', 'glab', tool?.gitlab || {}));
+  root.appendChild(toolRow('azure', 'az', tool?.azuredevops || {}));
+  root.appendChild(toolRow('bitbucket', 'bb', tool?.bitbucket || {}));
 }
 
 const CI_FAILED = new Set(['failed', 'failure', 'error', 'cancelled', 'canceled']);
@@ -2484,6 +2486,8 @@ async function openManageSync() {
     state.sourcesDraft = {
       orgs: (sync.github_orgs || []).join(', '),
       groups: (sync.gitlab_groups || []).join(', '),
+      azureOrgs: (sync.azuredevops_orgs || []).join(', '),
+      bitbucketWorkspaces: (sync.bitbucket_workspaces || []).join(', '),
     };
     return state.sourcesDraft;
   };
@@ -2498,6 +2502,12 @@ async function openManageSync() {
   const refreshState = async () => {
     setStatus('Loading…');
     state.payload = await apiJSON('/api/views');
+    try {
+      const meta = await apiJSON('/api/meta');
+      if (state.payload && meta?.tooling) state.payload.tooling = meta.tooling;
+    } catch (_) {
+      /* tooling optional for Sources panel */
+    }
     setStatus('');
     renderPanel();
   };
@@ -2963,24 +2973,79 @@ async function openManageSync() {
   const renderSources = () => {
     panel.replaceChildren();
     const draft = ensureSourcesDraft();
-    const orgField = el('div', 'manage-field');
-    orgField.appendChild(el('label', '', 'GitHub orgs (comma-separated)'));
-    const orgInput = document.createElement('input');
-    orgInput.value = draft.orgs;
-    orgInput.addEventListener('input', () => {
-      draft.orgs = orgInput.value;
-      markDirty();
-    });
-    orgField.appendChild(orgInput);
-    const groupField = el('div', 'manage-field');
-    groupField.appendChild(el('label', '', 'GitLab groups (comma-separated)'));
-    const groupInput = document.createElement('input');
-    groupInput.value = draft.groups;
-    groupInput.addEventListener('input', () => {
-      draft.groups = groupInput.value;
-      markDirty();
-    });
-    groupField.appendChild(groupInput);
+    const tooling = state.payload?.tooling || {};
+    const providers = [
+      {
+        key: 'github',
+        title: 'GitHub',
+        help: 'Install gh, run gh auth login, then list org names to discover.',
+        fieldKey: 'orgs',
+        label: 'Orgs (comma-separated)',
+        tool: tooling.github || {},
+        blockedHint: 'gh missing or not authenticated',
+      },
+      {
+        key: 'gitlab',
+        title: 'GitLab',
+        help: 'Install glab, run glab auth login, then list group paths to discover.',
+        fieldKey: 'groups',
+        label: 'Groups (comma-separated)',
+        tool: tooling.gitlab || {},
+        blockedHint: 'glab missing or not authenticated',
+      },
+      {
+        key: 'azuredevops',
+        title: 'Azure DevOps',
+        help: 'Install Azure CLI + DevOps extension, run az login (and az devops configure if needed), then list organization names.',
+        fieldKey: 'azureOrgs',
+        label: 'Organizations (comma-separated)',
+        tool: tooling.azuredevops || {},
+        blockedHint: 'az missing or not authenticated',
+      },
+      {
+        key: 'bitbucket',
+        title: 'Bitbucket',
+        help: 'Set BITBUCKET_TOKEN or BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD in the environment (or use a git credential helper), then list workspace slugs.',
+        fieldKey: 'bitbucketWorkspaces',
+        label: 'Workspaces (comma-separated)',
+        tool: tooling.bitbucket || {},
+        blockedHint: 'token or app password not configured',
+      },
+    ];
+
+    const inputs = {};
+    for (const p of providers) {
+      const block = el('div', 'manage-provider');
+      const heading = el('h3', 'manage-provider-title', p.title);
+      block.appendChild(heading);
+      const ready = Boolean(p.tool.installed && p.tool.authed);
+      const status = el(
+        'p',
+        ready ? 'manage-provider-status manage-provider-status--ok' : 'manage-provider-status manage-provider-status--blocked',
+        ready
+          ? 'Ready'
+          : `${p.blockedHint}${p.tool.detail ? `: ${p.tool.detail}` : ''}`,
+      );
+      block.appendChild(status);
+      block.appendChild(el('p', 'manage-empty', p.help));
+      const field = el('div', 'manage-field');
+      field.appendChild(el('label', '', p.label));
+      const input = document.createElement('input');
+      input.value = draft[p.fieldKey] || '';
+      input.disabled = !ready && !(draft[p.fieldKey] || '').trim();
+      if (!ready) input.title = p.blockedHint;
+      input.addEventListener('input', () => {
+        draft[p.fieldKey] = input.value;
+        markDirty();
+      });
+      // Keep fields editable so users can pre-fill sources before auth if they want.
+      input.disabled = false;
+      field.appendChild(input);
+      inputs[p.fieldKey] = input;
+      block.appendChild(field);
+      panel.appendChild(block);
+    }
+
     const saveBtn = el('button', 'modal-btn modal-btn--ok');
     saveBtn.type = 'button';
     setButtonLabel(saveBtn, null, 'Save sources');
@@ -2992,19 +3057,25 @@ async function openManageSync() {
         const data = await apiJSON('/api/sync/sources', {
           method: 'PUT',
           body: JSON.stringify({
-            github_orgs: split(orgInput.value),
-            gitlab_groups: split(groupInput.value),
+            github_orgs: split(inputs.orgs.value),
+            gitlab_groups: split(inputs.groups.value),
+            azuredevops_orgs: split(inputs.azureOrgs.value),
+            bitbucket_workspaces: split(inputs.bitbucketWorkspaces.value),
           }),
         });
         if (state.payload) {
           state.payload.sync = {
             github_orgs: data.github_orgs || [],
             gitlab_groups: data.gitlab_groups || [],
+            azuredevops_orgs: data.azuredevops_orgs || [],
+            bitbucket_workspaces: data.bitbucket_workspaces || [],
           };
         }
         state.sourcesDraft = {
           orgs: (data.github_orgs || []).join(', '),
           groups: (data.gitlab_groups || []).join(', '),
+          azureOrgs: (data.azuredevops_orgs || []).join(', '),
+          bitbucketWorkspaces: (data.bitbucket_workspaces || []).join(', '),
         };
         clearDirty();
         setStatus('Sources saved');
@@ -3016,8 +3087,6 @@ async function openManageSync() {
     });
     const actions = el('div', 'manage-actions manage-actions--footer');
     actions.appendChild(saveBtn);
-    panel.appendChild(orgField);
-    panel.appendChild(groupField);
     panel.appendChild(actions);
   };
 

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/remotegit"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {

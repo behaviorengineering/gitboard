@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/dashboard"
-	"github.com/behaviorengineering/gitboard/internal/remotegit"
 	"github.com/behaviorengineering/gitboard/internal/server"
+	"github.com/behaviorengineering/gitboard/pkg/dashboard"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 func TestDashboardViewQuery(t *testing.T) {
@@ -24,7 +24,7 @@ func TestDashboardViewQuery(t *testing.T) {
 	fx.responses["mr list -R acme/lib --output json"] = []byte(`[]`)
 	fx.responses["--merged"] = []byte(`[]`)
 
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
 	mux := server.NewMux(server.Options{
 		Doc: config.File{
 			Projects: []config.Project{
@@ -89,7 +89,7 @@ func TestSyncProjectAddRemoveAndViews(t *testing.T) {
 	}
 
 	fx := testFake()
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
 	mux := server.NewMux(server.Options{
 		ConfigPath:  path,
 		Doc:         loaded,
@@ -157,7 +157,7 @@ func TestSyncSourcesPut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dash := dashboard.New(remotegit.NewGitHub(testFake()), remotegit.NewGitLab(testFake()), nil)
+	dash := dashboard.New(remotegit.NewGitHub(testFake()), remotegit.NewGitLab(testFake()), remotegit.NewAzureDevOps(testFake()), remotegit.NewBitbucket(testFake()), nil)
 	mux := server.NewMux(server.Options{
 		ConfigPath: path,
 		Doc:        loaded,
@@ -195,7 +195,7 @@ func TestLocalRootsAndProjectLocalPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dash := dashboard.New(remotegit.NewGitHub(testFake()), remotegit.NewGitLab(testFake()), nil)
+	dash := dashboard.New(remotegit.NewGitHub(testFake()), remotegit.NewGitLab(testFake()), remotegit.NewAzureDevOps(testFake()), remotegit.NewBitbucket(testFake()), nil)
 	mux := server.NewMux(server.Options{
 		ConfigPath: path,
 		Doc:        loaded,

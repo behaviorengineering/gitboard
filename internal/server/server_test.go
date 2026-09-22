@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/llm"
-	"github.com/behaviorengineering/gitboard/internal/localgit"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
-	"github.com/behaviorengineering/gitboard/internal/remotegit"
 	"github.com/behaviorengineering/gitboard/internal/server"
 	"github.com/behaviorengineering/gitboard/internal/triage"
+	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/dashboard"
+	"github.com/behaviorengineering/gitboard/pkg/localgit"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 type fakeExec struct {
@@ -129,7 +129,7 @@ func testMux(t *testing.T, fx *fakeExec, triageA *triage.Analyzer) http.Handler 
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
 	return server.NewMux(server.Options{
 		Doc:         config.File{Projects: projects},
 		Dash:        dash,
@@ -156,7 +156,7 @@ func TestDashboardHidesBranchesFromInitialDoc(t *testing.T) {
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), nil)
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
 	mux := server.NewMux(server.Options{
 		Doc: config.File{
 			Projects: projects,
@@ -313,7 +313,7 @@ func TestPruneSafeValidation(t *testing.T) {
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
 		Doc:         config.File{Projects: projects},
 		Dash:        dash,
@@ -348,7 +348,7 @@ func TestLocalSyncInvestigate(t *testing.T) {
 		LocalPath: path,
 	}}
 	fx := testFake()
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), local)
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), local)
 	mux := server.NewMux(server.Options{
 		Doc:      config.File{Projects: projects},
 		Dash:     dash,
@@ -466,7 +466,7 @@ func TestPruneInvestigateLLM(t *testing.T) {
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
 		Doc:      config.File{Projects: projects},
 		Dash:     dash,
@@ -517,7 +517,7 @@ func TestPruneInvestigateLLMFallback(t *testing.T) {
 	projects := []config.Project{
 		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), localgit.NewInspector(fx))
+	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), localgit.NewInspector(fx))
 	mux := server.NewMux(server.Options{
 		Doc:      config.File{Projects: projects},
 		Dash:     dash,

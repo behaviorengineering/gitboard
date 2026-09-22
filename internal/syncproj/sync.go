@@ -9,19 +9,23 @@ import (
 	"strings"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/remotegit"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 // Lister discovers repositories from configured forges.
 type Lister interface {
 	ListGitHub(ctx context.Context, org string) ([]remotegit.RepoRef, error)
 	ListGitLab(ctx context.Context, group string) ([]remotegit.RepoRef, error)
+	ListAzureDevOps(ctx context.Context, org string) ([]remotegit.RepoRef, error)
+	ListBitbucket(ctx context.Context, workspace string) ([]remotegit.RepoRef, error)
 }
 
-// ForgeLister adapts GitHub and GitLab clients.
+// ForgeLister adapts forge clients for discovery.
 type ForgeLister struct {
-	GitHub *remotegit.GitHub
-	GitLab *remotegit.GitLab
+	GitHub      *remotegit.GitHub
+	GitLab      *remotegit.GitLab
+	AzureDevOps *remotegit.AzureDevOps
+	Bitbucket   *remotegit.Bitbucket
 }
 
 func (f ForgeLister) ListGitHub(ctx context.Context, org string) ([]remotegit.RepoRef, error) {
@@ -36,6 +40,20 @@ func (f ForgeLister) ListGitLab(ctx context.Context, group string) ([]remotegit.
 		return nil, fmt.Errorf("gitlab client missing")
 	}
 	return f.GitLab.ListGroupRepos(ctx, group)
+}
+
+func (f ForgeLister) ListAzureDevOps(ctx context.Context, org string) ([]remotegit.RepoRef, error) {
+	if f.AzureDevOps == nil {
+		return nil, fmt.Errorf("azuredevops client missing")
+	}
+	return f.AzureDevOps.ListOrgRepos(ctx, org)
+}
+
+func (f ForgeLister) ListBitbucket(ctx context.Context, workspace string) ([]remotegit.RepoRef, error) {
+	if f.Bitbucket == nil {
+		return nil, fmt.Errorf("bitbucket client missing")
+	}
+	return f.Bitbucket.ListWorkspaceRepos(ctx, workspace)
 }
 
 // Candidate is one selectable repository.
@@ -90,6 +108,48 @@ func Discover(ctx context.Context, lister Lister, doc config.File, hostFilter st
 			list, err := lister.ListGitLab(ctx, group)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf("gitlab group %s: %v", group, err))
+				continue
+			}
+			refs = append(refs, list...)
+		}
+	}
+	if hostFilter == "" || hostFilter == "azuredevops" {
+		projectFilter := map[string]struct{}{}
+		for _, p := range doc.Sync.AzureDevOps.Projects {
+			projectFilter[strings.ToLower(p)] = struct{}{}
+		}
+		for _, org := range doc.Sync.AzureDevOps.Orgs {
+			if err := ctx.Err(); err != nil {
+				return DiscoverResult{}, err
+			}
+			list, err := lister.ListAzureDevOps(ctx, org)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("azuredevops org %s: %v", org, err))
+				continue
+			}
+			if len(projectFilter) == 0 {
+				refs = append(refs, list...)
+				continue
+			}
+			for _, r := range list {
+				parts := strings.Split(strings.Trim(r.Path, "/"), "/")
+				if len(parts) < 2 {
+					continue
+				}
+				if _, ok := projectFilter[strings.ToLower(parts[1])]; ok {
+					refs = append(refs, r)
+				}
+			}
+		}
+	}
+	if hostFilter == "" || hostFilter == "bitbucket" {
+		for _, workspace := range doc.Sync.Bitbucket.Workspaces {
+			if err := ctx.Err(); err != nil {
+				return DiscoverResult{}, err
+			}
+			list, err := lister.ListBitbucket(ctx, workspace)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("bitbucket workspace %s: %v", workspace, err))
 				continue
 			}
 			refs = append(refs, list...)

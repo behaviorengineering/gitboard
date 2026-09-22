@@ -31,14 +31,14 @@ Use `checklist.md` for pattern-level checks.
 
 ### 2.1 Execution flow
 
-- Trace entry: `cmd/gitboard/main.go` → `runInit` / `runSync` / `runServe` → `internal/*`.
+- Trace entry: `cmd/gitboard/main.go` → `runInit` / `runSync` / `runServe` → `internal/*` and `pkg/*`.
 - Exit codes: success 0; usage/unknown command 2 where applicable; other errors non-zero.
-- Flag parsing stays in cmd; domain logic in `internal/*`.
+- Flag parsing stays in cmd; domain logic in `pkg/*` / `internal/*`.
 - Follow each error return; no silent success on partial failure.
 
 ### 2.2 Data and process flow
 
-- Forge/git process calls go through `internal/cliexec` or existing forge/localgit helpers.
+- Forge/git process calls go through `pkg/cliexec` or existing forge/localgit helpers.
 - Config paths respect `GITBOARD_CONFIG` / XDG defaults from `internal/config`.
 - Local paths: expand `~` consistently; do not assume cwd is a project root.
 

@@ -14,11 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/dashboard"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
+	"github.com/behaviorengineering/gitboard/internal/servertiming"
 	"github.com/behaviorengineering/gitboard/internal/triage"
+	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/dashboard"
 	"github.com/behaviorengineering/strop/agentsession"
 
 	"go.opentelemetry.io/otel"
@@ -90,11 +91,17 @@ func NewMux(opts Options) http.Handler {
 			return
 		}
 		doc, poll := live.snapshot()
-		writeJSON(w, map[string]any{
+		payload := map[string]any{
 			"poll_interval_seconds": poll,
 			"ui":                    boardUIConfig(doc),
 			"views":                 dashboard.ViewSummaries(doc),
-		})
+		}
+		if opts.Dash != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			payload["tooling"] = opts.Dash.ToolingStatus(ctx)
+		}
+		writeJSON(w, payload)
 	})
 
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +118,12 @@ func NewMux(opts Options) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 		doc, poll := live.snapshot()
-		payload, err := opts.Dash.Collect(ctx, doc, fresh, viewID)
+		timing := servertiming.New()
+		var payload board.Dashboard
+		var err error
+		timing.Track("collect", func() {
+			payload, err = opts.Dash.Collect(ctx, doc, fresh, viewID)
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -122,6 +134,12 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "dashboard timed out or canceled", http.StatusGatewayTimeout)
 			return
 		}
+		cacheDesc := "warm"
+		if fresh {
+			cacheDesc = "fresh"
+		}
+		timing.Add("cache", 0, cacheDesc)
+		timing.WriteHeader(w)
 		writeJSON(w, payload)
 	})
 
@@ -243,7 +261,12 @@ func NewMux(opts Options) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		doc, _ := live.snapshot()
-		result, err := opts.Commands.PullFF(ctx, doc, body)
+		timing := servertiming.New()
+		var result dashboard.PullFFResult
+		var err error
+		timing.Track("pull", func() {
+			result, err = opts.Commands.PullFF(ctx, doc, body)
+		})
 		if err != nil {
 			if writeCommandError(w, err) {
 				return
@@ -251,6 +274,7 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		timing.WriteHeader(w)
 		writeJSON(w, result)
 	})
 
