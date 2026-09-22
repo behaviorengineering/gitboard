@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/remotegit"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
@@ -43,8 +43,11 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := newConfigLive(path, doc, doc.EffectivePollSeconds(), cache.Clear)
-	got, _ := live.snapshot()
+	live := newConfigLive(path, doc, doc.EffectivePollSeconds(), cache.Clear, nil)
+	got, _, err := live.snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got.Projects) != 1 || got.Projects[0].ID != "a" {
 		t.Fatalf("initial: %+v", got.Projects)
 	}
@@ -64,7 +67,10 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, _ = live.snapshot()
+	got, _, err = live.snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got.Projects) != 2 {
 		t.Fatalf("after sync reload: %+v", got.Projects)
 	}
@@ -81,7 +87,7 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 	}
 }
 
-func TestConfigLiveKeepsLastGoodOnBadReload(t *testing.T) {
+func TestConfigLiveFailsFastOnBadReload(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	writeConfig(t, path, `projects:
@@ -98,7 +104,7 @@ func TestConfigLiveKeepsLastGoodOnBadReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := newConfigLive(path, doc, 30, nil)
+	live := newConfigLive(path, doc, 30, nil, nil)
 
 	if err := os.WriteFile(path, []byte("projects: [\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -106,9 +112,9 @@ func TestConfigLiveKeepsLastGoodOnBadReload(t *testing.T) {
 	if err := os.Chtimes(path, base.Add(time.Second), base.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := live.snapshot()
-	if len(got.Projects) != 1 || got.Projects[0].ID != "a" {
-		t.Fatalf("want last good snapshot, got %+v", got.Projects)
+	_, _, err = live.snapshot()
+	if err == nil {
+		t.Fatal("expected reload error on corrupt config")
 	}
 }
 

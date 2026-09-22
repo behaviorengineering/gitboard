@@ -8,15 +8,19 @@ import (
 	"testing"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/remotegit"
 	"github.com/behaviorengineering/gitboard/internal/syncproj"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 type fakeLister struct {
 	gh    map[string][]remotegit.RepoRef
 	gl    map[string][]remotegit.RepoRef
+	az    map[string][]remotegit.RepoRef
+	bb    map[string][]remotegit.RepoRef
 	ghErr map[string]error
 	glErr map[string]error
+	azErr map[string]error
+	bbErr map[string]error
 }
 
 func (f fakeLister) ListGitHub(_ context.Context, org string) ([]remotegit.RepoRef, error) {
@@ -35,6 +39,24 @@ func (f fakeLister) ListGitLab(_ context.Context, group string) ([]remotegit.Rep
 		}
 	}
 	return f.gl[group], nil
+}
+
+func (f fakeLister) ListAzureDevOps(_ context.Context, org string) ([]remotegit.RepoRef, error) {
+	if f.azErr != nil {
+		if err := f.azErr[org]; err != nil {
+			return nil, err
+		}
+	}
+	return f.az[org], nil
+}
+
+func (f fakeLister) ListBitbucket(_ context.Context, workspace string) ([]remotegit.RepoRef, error) {
+	if f.bbErr != nil {
+		if err := f.bbErr[workspace]; err != nil {
+			return nil, err
+		}
+	}
+	return f.bb[workspace], nil
 }
 
 func TestDiscoverAndApplySelection(t *testing.T) {

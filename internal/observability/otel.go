@@ -1,5 +1,4 @@
-// Package observability bootstraps OTEL and writes error-only inference dumps
-// (same pattern as content-pipelines).
+// Package observability bootstraps OTEL and writes error-only inference dumps (same pattern as content-pipelines).
 package observability
 
 import (

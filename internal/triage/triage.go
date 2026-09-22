@@ -7,6 +7,9 @@ import (
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/llm"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // Request is the triage input from the dashboard.
@@ -44,7 +47,19 @@ func (a *Analyzer) Enabled() bool {
 }
 
 // Analyze sends logs to the configured model.
-func (a *Analyzer) Analyze(ctx context.Context, req Request) (Response, error) {
+func (a *Analyzer) Analyze(ctx context.Context, req Request) (resp Response, err error) {
+	tr := otel.Tracer("gitboard")
+	ctx, span := tr.Start(ctx, "triage.Analyze")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		} else {
+			span.SetStatus(codes.Ok, "")
+		}
+		span.End()
+	}()
+
 	if !a.Enabled() {
 		return Response{
 			Unavailable: "set llm.base_url in config.yaml (or GITBOARD_LLM_BASE_URL / POLYPUS_BASE_URL) for AI triage",

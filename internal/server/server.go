@@ -7,18 +7,20 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/board"
 	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/dashboard"
+	"github.com/behaviorengineering/gitboard/internal/observability"
 	"github.com/behaviorengineering/gitboard/internal/pruneagent"
+	"github.com/behaviorengineering/gitboard/internal/servertiming"
 	"github.com/behaviorengineering/gitboard/internal/triage"
+	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/dashboard"
 	"github.com/behaviorengineering/strop/agentsession"
 
 	"go.opentelemetry.io/otel"
@@ -51,6 +53,7 @@ type Options struct {
 	Triage      *triage.Analyzer
 	Prune       *pruneagent.Service
 	PollSeconds int
+	Log         observability.Logger
 }
 
 // NewMux returns the gitboard HTTP handler.
@@ -71,7 +74,11 @@ func NewMux(opts Options) http.Handler {
 	if poll == 0 {
 		poll = opts.Doc.EffectivePollSeconds()
 	}
-	live := newConfigLive(opts.ConfigPath, opts.Doc, poll, clearCaches)
+	log := opts.Log
+	if log == nil {
+		log = observability.NewLogger()
+	}
+	live := newConfigLive(opts.ConfigPath, opts.Doc, poll, clearCaches, log)
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -89,12 +96,21 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
-		doc, poll := live.snapshot()
-		writeJSON(w, map[string]any{
+		doc, poll, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
+		payload := map[string]any{
 			"poll_interval_seconds": poll,
 			"ui":                    boardUIConfig(doc),
 			"views":                 dashboard.ViewSummaries(doc),
-		})
+		}
+		if opts.Dash != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			payload["tooling"] = opts.Dash.ToolingStatus(ctx)
+		}
+		_ = writeJSON(w, payload)
 	})
 
 	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
@@ -108,10 +124,23 @@ func NewMux(opts Options) http.Handler {
 		}
 		fresh := r.URL.Query().Get("fresh") == "1" || strings.EqualFold(r.URL.Query().Get("fresh"), "true")
 		viewID := strings.TrimSpace(r.URL.Query().Get("view"))
+		stream := r.URL.Query().Get("stream") == "1" || strings.EqualFold(r.URL.Query().Get("stream"), "true")
+		if stream {
+			writeDashboardStream(w, r, live, opts, fresh, viewID)
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		doc, poll := live.snapshot()
-		payload, err := opts.Dash.Collect(ctx, doc, fresh, viewID)
+		doc, poll, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
+		timing := servertiming.New()
+		var payload board.Dashboard
+		var err error
+		timing.Track("collect", func() {
+			payload, err = opts.Dash.Collect(ctx, doc, fresh, viewID)
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -122,7 +151,13 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "dashboard timed out or canceled", http.StatusGatewayTimeout)
 			return
 		}
-		writeJSON(w, payload)
+		cacheDesc := "warm"
+		if fresh {
+			cacheDesc = "fresh"
+		}
+		timing.Add("cache", 0, cacheDesc)
+		timing.WriteHeader(w)
+		_ = writeJSON(w, payload)
 	})
 
 	registerSyncRoutes(mux, live, opts)
@@ -136,7 +171,10 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
 			return
 		}
-		doc, _ := live.snapshot()
+		doc, _, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
 		projectID := strings.TrimSpace(r.URL.Query().Get("project"))
 		runID := strings.TrimSpace(r.URL.Query().Get("run_id"))
 		p, ok := dashboard.FindProject(doc.Projects, projectID)
@@ -156,7 +194,7 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "failed to list jobs", http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, map[string]any{"jobs": jobs})
+		_ = writeJSON(w, map[string]any{"jobs": jobs})
 	})
 
 	mux.HandleFunc("/api/triage", func(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +210,10 @@ func NewMux(opts Options) http.Handler {
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			return
 		}
-		doc, _ := live.snapshot()
+		doc, _, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
 		p, ok := dashboard.FindProject(doc.Projects, body.ProjectID)
 		if !ok {
 			http.Error(w, errUnknownProject, http.StatusBadRequest)
@@ -198,7 +239,7 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "triage failed", http.StatusBadGateway)
 			return
 		}
-		writeJSON(w, resp)
+		_ = writeJSON(w, resp)
 	})
 
 	mux.HandleFunc("/api/prune/safe", func(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +257,10 @@ func NewMux(opts Options) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		doc, _ := live.snapshot()
+		doc, _, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
 		if err := opts.Commands.PruneSafe(ctx, doc, body); err != nil {
 			if writeCommandError(w, err) {
 				return
@@ -224,7 +268,7 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true})
+		_ = writeJSON(w, map[string]any{"ok": true})
 	})
 
 	mux.HandleFunc("/api/pull/ff", func(w http.ResponseWriter, r *http.Request) {
@@ -242,8 +286,16 @@ func NewMux(opts Options) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
-		doc, _ := live.snapshot()
-		result, err := opts.Commands.PullFF(ctx, doc, body)
+		doc, _, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
+		timing := servertiming.New()
+		var result dashboard.PullFFResult
+		var err error
+		timing.Track("pull", func() {
+			result, err = opts.Commands.PullFF(ctx, doc, body)
+		})
 		if err != nil {
 			if writeCommandError(w, err) {
 				return
@@ -251,7 +303,20 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, result)
+		if result.FetchMs > 0 {
+			timing.Add("pull_fetch", time.Duration(result.FetchMs)*time.Millisecond, "")
+		}
+		if result.SubmodulePreMs > 0 {
+			timing.Add("pull_submodule_pre", time.Duration(result.SubmodulePreMs)*time.Millisecond, "")
+		}
+		if result.MergeMs > 0 {
+			timing.Add("pull_merge", time.Duration(result.MergeMs)*time.Millisecond, "")
+		}
+		if result.SubmodulePostMs > 0 {
+			timing.Add("pull_submodule_post", time.Duration(result.SubmodulePostMs)*time.Millisecond, "")
+		}
+		timing.WriteHeader(w)
+		_ = writeJSON(w, result)
 	})
 
 	mux.HandleFunc("/api/local/sync/investigate", func(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +334,10 @@ func NewMux(opts Options) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
-		doc, _ := live.snapshot()
+		doc, _, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
 		result, err := opts.Commands.InvestigateSync(ctx, doc, body)
 		if err != nil {
 			code := http.StatusInternalServerError
@@ -279,7 +347,7 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, err.Error(), code)
 			return
 		}
-		writeJSON(w, result)
+		_ = writeJSON(w, result)
 	})
 
 	mux.HandleFunc("/api/agents/prune/investigate", func(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +371,10 @@ func NewMux(opts Options) http.Handler {
 			http.Error(w, "project_id is required", http.StatusBadRequest)
 			return
 		}
-		doc, _ := live.snapshot()
+		doc, _, ok := liveDoc(w, live)
+		if !ok {
+			return
+		}
 		if _, ok := dashboard.FindProject(doc.Projects, body.ProjectID); !ok {
 			http.Error(w, errUnknownProject, http.StatusBadRequest)
 			return
@@ -331,7 +402,7 @@ func NewMux(opts Options) http.Handler {
 			return
 		}
 		span.SetStatus(codes.Ok, "")
-		writeJSON(w, resp)
+		_ = writeJSON(w, resp)
 	})
 
 	mux.HandleFunc("/api/agents/sessions/", func(w http.ResponseWriter, r *http.Request) {
@@ -388,7 +459,7 @@ func NewMux(opts Options) http.Handler {
 		if turnsErr != nil && !errors.Is(turnsErr, os.ErrNotExist) {
 			out["turns_error"] = "failed to load turns"
 		}
-		writeJSON(w, out)
+		_ = writeJSON(w, out)
 	})
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
@@ -417,12 +488,94 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	return nil
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func liveDoc(w http.ResponseWriter, live *configLive) (config.File, int, bool) {
+	doc, poll, err := live.snapshot()
+	if err != nil {
+		http.Error(w, "config unavailable: "+err.Error(), http.StatusServiceUnavailable)
+		return config.File{}, 0, false
+	}
+	return doc, poll, true
+}
+
+func writeJSON(w http.ResponseWriter, v any) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("gitboard: write json: %v", err)
+		return err
 	}
+	return nil
+}
+
+// writeDashboardStream emits NDJSON: shell stubs, then each project as it finishes, then done.
+func writeDashboardStream(w http.ResponseWriter, r *http.Request, live *configLive, opts Options, fresh bool, viewID string) {
+	doc, poll, ok := liveDoc(w, live)
+	if !ok {
+		return
+	}
+	shell, err := dashboard.Shell(doc, viewID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	shell.PollIntervalSeconds = poll
+	shell.UI = boardUIConfig(doc)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+
+	enc := json.NewEncoder(w)
+	var writeMu sync.Mutex
+	writeEvent := func(v any) bool {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		if err := enc.Encode(v); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	if !writeEvent(map[string]any{
+		"type": "shell",
+		"dashboard": map[string]any{
+			"generated_at":          shell.GeneratedAt,
+			"poll_interval_seconds": shell.PollIntervalSeconds,
+			"ui":                    shell.UI,
+			"views":                 shell.Views,
+			"active_view":           shell.ActiveView,
+			"projects":              shell.Projects,
+			// tooling omitted: zero-value would look like missing CLIs; UI keeps last / pending until done.
+		},
+	}) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	payload, err := opts.Dash.CollectStream(ctx, doc, dashboard.CollectOpts{Fresh: fresh, ViewID: viewID}, func(row board.ProjectSummary) {
+		if !writeEvent(map[string]any{"type": "project", "project": row}) {
+			cancel()
+		}
+	})
+	if err != nil {
+		_ = writeEvent(map[string]any{"type": "error", "error": err.Error()})
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		_ = writeEvent(map[string]any{"type": "error", "error": "dashboard timed out or canceled"})
+		return
+	}
+	_ = writeEvent(map[string]any{
+		"type":         "done",
+		"tooling":      payload.Tooling,
+		"generated_at": payload.GeneratedAt,
+	})
 }
 
 // writeCommandError maps dashboard validation and confirm errors to HTTP.
@@ -433,9 +586,12 @@ func writeCommandError(w http.ResponseWriter, err error) bool {
 	}
 	if dashboard.IsConfirmRequired(err) {
 		var cre dashboard.ConfirmRequiredError
-		_ = errors.As(err, &cre)
+		if !errors.As(err, &cre) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return true
+		}
 		w.WriteHeader(http.StatusConflict)
-		writeJSON(w, cre)
+		_ = writeJSON(w, cre)
 		return true
 	}
 	if dashboard.IsBadRequest(err) {

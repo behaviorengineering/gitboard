@@ -21,7 +21,7 @@ keywords: [go, golang, gitboard, cli, gh, glab, cliexec]
 
 - **Small packages, clear names:** singular nouns (`forge`, `localgit`, not `utils`).
 - **Testable I/O:** inject `cliexec` for `gh` / `glab` / `git`; no live forge calls in unit tests.
-- **Shell out** only through `internal/cliexec` or existing forge/localgit helpers. Do not scatter ad-hoc `exec.Command` in handlers.
+- **Shell out** only through `pkg/cliexec` or existing forge/localgit helpers. Do not scatter ad-hoc `exec.Command` in handlers.
 - **Never embed tokens;** rely on `gh` / `glab` logged-in sessions and config env overrides.
 - **CLI:** subcommands in `cmd/gitboard`; keep handlers thin; domain in `internal/*`.
 - **Exit codes:** `0` success, non-zero error, `2` usage/unknown command where already used. Keep `-h` / `--help` and `printUsage` in sync.

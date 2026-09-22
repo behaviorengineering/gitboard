@@ -21,17 +21,20 @@ Ask for target path(s). Default: `internal/` and `cmd/`.
 
 ```
 cmd/gitboard/main.go
+pkg/cliexec/
+pkg/board/
+pkg/remotegit/
+pkg/localgit/
+pkg/dashboard/
 internal/config/
-internal/cliexec/
-internal/forge/
-internal/localgit/
 internal/syncproj/
-internal/dashboard/
 internal/server/          # HTTP API + static UI
 internal/triage/
 internal/llm/
 internal/pruneagent/      # strop agentsession (published module)
 internal/observability/
+internal/conformity/
+internal/benchnet/
 ```
 
 ---
@@ -40,15 +43,15 @@ internal/observability/
 
 | Layer | May import | Must not import |
 |-------|------------|-----------------|
-| `cmd/gitboard` | `internal/*` | — |
-| Domain (`forge`, `localgit`, `dashboard`, …) | other domain + `cliexec`/`config` | `cmd` |
+| `cmd/gitboard` | `internal/*`, `pkg/*` | — |
+| `pkg/*` (portable domain) | other `pkg/*`; same-module `internal/config` when needed | `cmd` |
+| `internal/*` (app) | `pkg/*`, other `internal/*` | reverse cycles into `pkg` that pull app UI |
 | `server` | domain packages needed for handlers | reverse-import from domain into server cycles |
 
 **Forbidden**
 
 - Domain packages importing `cmd`
-- Circular imports between `internal/` packages
-- Growing business logic inside fat `main` switch arms (extract to domain)
+- Circular imports between packages- Growing business logic inside fat `main` switch arms (extract to domain)
 - App features implemented by editing a vendored/submodule copy of strop
 
 ---

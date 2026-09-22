@@ -418,6 +418,12 @@ body {
   height: 0.85rem;
 }
 
+.tool-row--pending .mark-icon--spin {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--link);
+}
+
 .project-host {
   display: inline-flex;
   align-items: center;
@@ -846,6 +852,24 @@ button.branch-inspect {
   color: var(--muted);
   font-size: 0.75rem;
   opacity: 0.7;
+}
+
+.branch-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.branch-pending .mark-icon--spin {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--link);
+}
+
+.branch-pending-label {
+  opacity: 0.85;
 }
 
 .branch-actions {
@@ -1606,6 +1630,35 @@ a { color: var(--link); }
   color: var(--muted);
   font-size: 0.88rem;
   margin: 0 0 0.45rem;
+}
+
+.manage-provider {
+  margin-bottom: 1.15rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+}
+
+.manage-provider:last-of-type {
+  border-bottom: none;
+}
+
+.manage-provider-title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.manage-provider-status {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.manage-provider-status--ok {
+  color: var(--ok, #2a7a3a);
+}
+
+.manage-provider-status--blocked {
+  color: var(--warn, #9a6b00);
 }
 
 .manage-field {

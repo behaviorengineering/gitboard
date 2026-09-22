@@ -602,6 +602,64 @@ function pullStatusText() {
   return `Pulling ${n} checkouts…`;
 }
 
+/** Optimistically clear behind/ahead for a pulled branch so the row looks clean before the quiet reload lands. */
+function markPulledCaughtUp(projectID, branchName, repoPath) {
+  const branch = String(branchName || '');
+  const repo = String(repoPath || '');
+  if (!projectID || !branch) return;
+  for (const row of allProjects || []) {
+    if (String(row?.id || '') !== String(projectID)) continue;
+    const local = row?.local;
+    if (!local) continue;
+    for (const s of local.origin_sync || []) {
+      if (s && String(s.name || '') === branch) {
+        s.behind = 0;
+        s.ahead = 0;
+      }
+    }
+    if (String(local.branch || '') === branch && (!repo || String(local.path || '') === repo)) {
+      local.behind = 0;
+      local.ahead = 0;
+    }
+    for (const wt of local.worktrees || []) {
+      if (String(wt?.branch || '') !== branch || wt?.bare || wt?.detached) continue;
+      if (repo && String(wt.path || '') !== repo && String(wt.appearance_path || '') !== repo) continue;
+      wt.behind = 0;
+      wt.ahead = 0;
+    }
+    for (const app of local.appearances || []) {
+      for (const s of app?.origin_sync || []) {
+        if (s && String(s.name || '') === branch) {
+          s.behind = 0;
+          s.ahead = 0;
+        }
+      }
+      if (String(app?.branch || '') === branch && (!repo || String(app?.path || '') === repo)) {
+        app.behind = 0;
+        app.ahead = 0;
+      }
+      for (const wt of app?.worktrees || []) {
+        if (String(wt?.branch || '') !== branch || wt?.bare || wt?.detached) continue;
+        if (repo && String(wt.path || '') !== repo && String(wt.appearance_path || '') !== repo) continue;
+        wt.behind = 0;
+        wt.ahead = 0;
+      }
+    }
+  }
+}
+
+/** Success text for a pull, with submodule cost when it dominated the wait. */
+function pulledSuccessText(branchName, data) {
+  const num = (v) => Number(v) || 0;
+  const sub = num(data?.submodule_pre_ms) + num(data?.submodule_post_ms);
+  const total = num(data?.fetch_ms) + sub + num(data?.merge_ms);
+  let suffix = '';
+  if (sub > 0 && total > 0 && (sub >= total / 2 || sub >= 2000)) {
+    suffix = ` (submodules ${sub}ms)`;
+  }
+  return `Pulled ${branchName}${suffix}; refreshing…`;
+}
+
 function schedulePullFlush() {
   if (pendingPulls.size > 0 || pullFlushScheduled) return;
   pullFlushScheduled = true;
@@ -615,7 +673,7 @@ async function flushPullBatch() {
   if (pendingPulls.size > 0) return;
   const failures = pullFailures.splice(0, pullFailures.length);
   const status = document.getElementById('status');
-  // Prefer a fresh load so origin ahead/behind matches the pulls that just finished.
+  // One decisive ?fresh=1 paint clears pullBoardDirty and stops re-flush loops.
   let ok = await loadDashboard({ quiet: true, fresh: true });
   if (!ok && pullBoardDirty) {
     ok = await loadDashboard({ quiet: true, fresh: true });
@@ -649,6 +707,75 @@ async function flushPullBatch() {
 
 function pullActionKey(projectID, branch, repoPath) {
   return `${projectID}\0${branch}\0${repoPath}`;
+}
+
+/** @type {Set<string>} */
+const pendingPrunes = new Set();
+
+/** Keys that just finished safe-remove successfully; cleared after a successful fresh board paint. */
+/** @type {Set<string>} */
+const recentRemoved = new Set();
+
+/** True until a fresh dashboard paint lands after one or more successful safe-removes. */
+let pruneBoardDirty = false;
+
+/** @type {{ label: string, path: string, message: string }[]} */
+const pruneFailures = [];
+
+let pruneFlushScheduled = false;
+
+function pruneStatusText() {
+  const n = pendingPrunes.size;
+  if (n <= 0) return '';
+  if (n === 1) return 'Removing 1 checkout…';
+  return `Removing ${n} checkouts…`;
+}
+
+function pruneActionKey(projectID, branch, worktreePath) {
+  return `${projectID}\0${branch}\0${worktreePath}`;
+}
+
+function schedulePruneFlush() {
+  if (pendingPrunes.size > 0 || pruneFlushScheduled) return;
+  pruneFlushScheduled = true;
+  queueMicrotask(() => {
+    void flushPruneBatch();
+  });
+}
+
+async function flushPruneBatch() {
+  pruneFlushScheduled = false;
+  if (pendingPrunes.size > 0) return;
+  const failures = pruneFailures.splice(0, pruneFailures.length);
+  const status = document.getElementById('status');
+  let ok = await loadDashboard({ quiet: true, fresh: true });
+  if (!ok && pruneBoardDirty) {
+    ok = await loadDashboard({ quiet: true, fresh: true });
+  }
+  if (!ok && pruneBoardDirty) {
+    if (status && !String(status.textContent || '').startsWith('Error:')) {
+      status.textContent = 'Removes finished; refresh pending…';
+    }
+  }
+  if (failures.length === 0) {
+    if (status && !String(status.textContent || '').startsWith('Error:') && ok) {
+      status.textContent = status.textContent || 'Removes finished';
+    }
+    return;
+  }
+  if (status) {
+    status.textContent = failures.length === 1
+      ? `Remove failed: ${failures[0].message}`
+      : `${failures.length} removes failed`;
+  }
+  const body = failures.map((f) => {
+    const where = f.path ? `${f.label}\n${f.path}` : f.label;
+    return `${where}\n${f.message}`;
+  }).join('\n\n');
+  await infoDialog({
+    title: failures.length === 1 ? `Remove failed: ${failures[0].label}` : `${failures.length} removes failed`,
+    body,
+  });
 }
 
 function appendPullButton(cell, { sync, project, branchName, repoPath, dirty, whyDirty }) {
@@ -727,6 +854,15 @@ function localAppearances(local) {
 
 function branchesCell(branches, host, project) {
   const cell = el('td', 'branches-cell');
+  if (project?.id && pendingStreamProjects.has(project.id)) {
+    const hint = el('span', 'branch-pending');
+    hint.setAttribute('aria-busy', 'true');
+    hint.setAttribute('aria-label', 'Loading branches');
+    hint.insertAdjacentHTML('beforeend', ICONS.spinner);
+    hint.appendChild(el('span', 'branch-pending-label', 'loading…'));
+    cell.appendChild(hint);
+    return cell;
+  }
   const local = project?.local;
   const byLocal = localByBranch(local);
   const list = el('ul', 'branch-list');
@@ -823,21 +959,39 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
   const meta = el('div', 'branch-meta');
   if (localOnly) meta.appendChild(el('span', 'branch-chip branch-chip--local', 'local only'));
   const pruneCmd = pruneCommand(b.name, localWt, local);
-  if (pruneHint === 'safe') {
+  const prunePath = localWt?.path || local?.path || '';
+  const pruneKey = (project?.id && b.name && prunePath)
+    ? pruneActionKey(project.id, b.name, prunePath)
+    : '';
+  if (pruneKey && recentRemoved.has(pruneKey) && pruneHint !== 'safe') {
+    recentRemoved.delete(pruneKey);
+    if (recentRemoved.size === 0) pruneBoardDirty = false;
+  }
+  if (pruneHint === 'safe' || (pruneKey && (pendingPrunes.has(pruneKey) || recentRemoved.has(pruneKey)))) {
+    const pending = pruneKey && pendingPrunes.has(pruneKey);
+    const justRemoved = pruneKey && recentRemoved.has(pruneKey);
     const btn = el('button', 'branch-chip branch-chip--ok branch-prune-safe');
     btn.type = 'button';
-    btn.id = morphId('prune', project.id, b.name, localWt?.path || local?.path || '');
+    btn.id = morphId('prune', project.id, b.name, prunePath);
     btn.dataset.action = 'prune-safe';
     btn.dataset.projectId = project.id;
     btn.dataset.branch = b.name;
-    btn.dataset.worktreePath = localWt?.path || local?.path || '';
-    setButtonLabel(btn, ICONS.trash, 'safe to remove');
-    const bits = [];
-    if (localWt.merged_id) bits.push(`merged ${reviewKind} #${localWt.merged_id}`);
-    const mergedWhen = relativeTime(localWt.merged_at);
-    if (mergedWhen) bits.push(mergedWhen);
-    bits.push('Click to remove local branch');
-    btn.title = bits.join(' · ');
+    btn.dataset.worktreePath = prunePath;
+    if (pending) {
+      setButtonBusy(btn, 'removing…', `Removing local ${b.name}…`);
+    } else if (justRemoved) {
+      setButtonLabel(btn, ICONS.trash, 'removed');
+      btn.disabled = true;
+      btn.title = `Removed local ${b.name}`;
+    } else {
+      setButtonLabel(btn, ICONS.trash, 'safe to remove');
+      const bits = [];
+      if (localWt?.merged_id) bits.push(`merged ${reviewKind} #${localWt.merged_id}`);
+      const mergedWhen = relativeTime(localWt?.merged_at);
+      if (mergedWhen) bits.push(mergedWhen);
+      bits.push('Click to remove local branch');
+      btn.title = bits.join(' · ');
+    }
     meta.appendChild(btn);
   } else if (pruneHint === 'likely') {
     const chip = el('span', 'branch-chip branch-chip--warn', 'likely removable');
@@ -873,7 +1027,8 @@ function branchRow({ remote: b, localWts, local, host, project, reviewKind, loca
   const actions = el('div', 'branch-actions');
   const ci = ciMark(b.ci_status);
   if (ci) {
-    if (failed && (b.run_id || project.ci?.run_id)) {
+    const canTriage = failed && (b.run_id || project.ci?.run_id) && project.capabilities?.failed_jobs;
+    if (canTriage) {
       const triageBtn = el('button', 'branch-triage');
       triageBtn.type = 'button';
       triageBtn.id = morphId('triage', project.id, b.name || '', b.run_id || project.ci?.run_id || '');
@@ -1099,11 +1254,48 @@ function toolRow(hostKey, label, cli) {
   return row;
 }
 
+function toolRowPending(hostKey, label) {
+  const row = el('span', `tool-row tool-row--${hostKey} tool-row--pending`);
+  const tip = `${label}: checking…`;
+  row.title = tip;
+  row.setAttribute('aria-label', tip);
+  row.setAttribute('aria-busy', 'true');
+  row.insertAdjacentHTML('beforeend', ICONS[hostKey] || '');
+  row.insertAdjacentHTML('beforeend', ICONS.spinner);
+  return row;
+}
+
+/** Hosts the dashboard UI advertises (tooling strip, Sources, Discover). Adapters may still exist for config/API. */
+const UI_SURFACE_HOSTS = new Set(['github', 'gitlab']);
+
+function isUISurfaceHost(host) {
+  return UI_SURFACE_HOSTS.has(String(host || '').toLowerCase());
+}
+
+/** Last known forge CLI status; kept across shell paints so empty tooling does not flash red X. */
+let lastTooling = null;
+
 function renderTooling(tool) {
   const root = document.getElementById('tooling');
+  if (!root) return;
   root.innerHTML = '';
   root.appendChild(toolRow('github', 'gh', tool?.github || {}));
   root.appendChild(toolRow('gitlab', 'glab', tool?.gitlab || {}));
+}
+
+function renderToolingPending() {
+  const root = document.getElementById('tooling');
+  if (!root) return;
+  root.innerHTML = '';
+  root.appendChild(toolRowPending('github', 'gh'));
+  root.appendChild(toolRowPending('gitlab', 'glab'));
+}
+
+/** Apply tooling only when we have a real check result (meta, done, one-shot Collect). */
+function applyTooling(tool) {
+  if (!tool) return;
+  lastTooling = tool;
+  renderTooling(tool);
 }
 
 const CI_FAILED = new Set(['failed', 'failure', 'error', 'cancelled', 'canceled']);
@@ -1728,8 +1920,10 @@ let dashboardGen = 0;
 let dashboardAbort = null;
 /** Last successful dashboard payload per view id (instant paint on switch). */
 const viewPayloadCache = new Map();
-/** View id whose tab shows a busy spinner while its dashboard fetch is in flight. */
+/** View id whose tab shows a busy spinner while its first (uncached) dashboard fetch is in flight. */
 let loadingViewId = '';
+/** Project ids still waiting for a stream `project` event (shell stubs). */
+const pendingStreamProjects = new Set();
 
 function updatePollLabel() {
   const label = document.getElementById('poll-label');
@@ -1748,15 +1942,18 @@ function schedulePoll() {
   }
   if (pollSeconds <= 0) return;
   pollTimer = setInterval(() => {
-    if (document.hidden || loading || pendingPulls.size > 0 || pullFlushScheduled) return;
-    void loadDashboard({ quiet: true, fresh: pullBoardDirty });
+    // Pause only while pull/prune APIs are in flight (busy morph). Flush sets
+    // loading/dashboardFreshInFlight, which already blocks competing paints.
+    if (document.hidden || loading || pendingPulls.size > 0 || pendingPrunes.size > 0) return;
+    void loadDashboard({ quiet: true, fresh: pullBoardDirty || pruneBoardDirty });
   }, pollSeconds * 1000);
 }
 
-function dashboardURL(fresh) {
+function dashboardURL(fresh, { stream = false } = {}) {
   const params = new URLSearchParams();
   if (activeViewId) params.set('view', activeViewId);
   if (fresh) params.set('fresh', '1');
+  if (stream) params.set('stream', '1');
   const q = params.toString();
   return q ? `/api/dashboard?${q}` : '/api/dashboard';
 }
@@ -1774,10 +1971,13 @@ function persistActiveView(id) {
 /**
  * Paint board UI from a dashboard JSON payload (live or cached).
  * @param {object} data
- * @param {{ fresh?: boolean, fromCache?: boolean }} [opts]
+ * @param {{ fresh?: boolean, fromCache?: boolean, progressive?: boolean }} [opts]
  */
-function paintDashboardData(data, { fresh = false, fromCache = false } = {}) {
+function paintDashboardData(data, { fresh = false, fromCache = false, progressive = false } = {}) {
   const status = document.getElementById('status');
+  if (!progressive) {
+    pendingStreamProjects.clear();
+  }
   if (typeof data.poll_interval_seconds === 'number') {
     const next = data.poll_interval_seconds;
     if (next !== pollSeconds) {
@@ -1795,26 +1995,146 @@ function paintDashboardData(data, { fresh = false, fromCache = false } = {}) {
   if (fresh) {
     recentPulled.clear();
     pullBoardDirty = false;
-  } else if (pullBoardDirty) {
-    schedulePullFlush();
-  } else if (!fromCache) {
-    recentPulled.clear();
+    recentRemoved.clear();
+    pruneBoardDirty = false;
+  } else {
+    if (pullBoardDirty) schedulePullFlush();
+    if (pruneBoardDirty) schedulePruneFlush();
+    if (!fromCache && !progressive && !pullBoardDirty && !pruneBoardDirty) {
+      recentPulled.clear();
+      recentRemoved.clear();
+    }
   }
-  renderTooling(data.tooling);
+  if (progressive) {
+    // Shell tooling is zero-value / unchecked; keep last strip or show checking…
+    if (!lastTooling) renderToolingPending();
+  } else if (data.tooling) {
+    applyTooling(data.tooling);
+  }
   allProjects = Array.isArray(data.projects) ? data.projects : [];
   rebuildScopeMenu();
   applyBoard();
   if (status) {
-    if (fromCache) {
+    if (progressive) {
+      status.textContent = loadingViewId ? 'Loading…' : 'Refreshing…';
+    } else if (fromCache) {
       status.textContent = `Cached ${data.generated_at || ''}…`;
     } else {
       status.textContent = `Updated ${data.generated_at || ''}`;
     }
   }
   const cacheKey = String(data.active_view || activeViewId || '').trim();
-  if (cacheKey && !fromCache) {
+  if (cacheKey && !fromCache && !progressive) {
     viewPayloadCache.set(cacheKey, data);
   }
+}
+
+/**
+ * Replace one project row in the current board (progressive stream fill-in).
+ * @param {object} project
+ */
+function mergeStreamProject(project) {
+  if (!project || !project.id) return;
+  pendingStreamProjects.delete(project.id);
+  const idx = allProjects.findIndex((p) => p.id === project.id);
+  if (idx >= 0) {
+    allProjects[idx] = project;
+  } else {
+    allProjects.push(project);
+  }
+  rebuildScopeMenu();
+  applyBoard();
+}
+
+/**
+ * Consume an NDJSON dashboard stream (shell → project* → done).
+ * @param {Response} res
+ * @param {{ fresh?: boolean, gen: number }} opts
+ * @returns {Promise<boolean>}
+ */
+async function consumeDashboardStream(res, { fresh = false, gen }) {
+  const status = document.getElementById('status');
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    throw new Error('streaming unsupported');
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  /** @type {object | null} */
+  let assembled = null;
+
+  const handleLine = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const ev = JSON.parse(trimmed);
+    if (gen !== dashboardGen) return;
+    if (ev.type === 'shell' && ev.dashboard) {
+      assembled = {
+        ...ev.dashboard,
+        projects: Array.isArray(ev.dashboard.projects) ? ev.dashboard.projects.slice() : [],
+      };
+      pendingStreamProjects.clear();
+      for (const p of assembled.projects) {
+        if (p && p.id) pendingStreamProjects.add(p.id);
+      }
+      paintDashboardData(assembled, { fresh, progressive: true });
+      return;
+    }
+    if (ev.type === 'project' && ev.project) {
+      mergeStreamProject(ev.project);
+      if (assembled) {
+        const id = ev.project.id;
+        const idx = assembled.projects.findIndex((p) => p.id === id);
+        if (idx >= 0) assembled.projects[idx] = ev.project;
+        else assembled.projects.push(ev.project);
+      }
+      return;
+    }
+    if (ev.type === 'done') {
+      pendingStreamProjects.clear();
+      if (assembled) {
+        if (ev.tooling) assembled.tooling = ev.tooling;
+        if (ev.generated_at) assembled.generated_at = ev.generated_at;
+        loadingViewId = '';
+        paintDashboardData(assembled, { fresh, progressive: false });
+      } else {
+        loadingViewId = '';
+        if (ev.tooling) applyTooling(ev.tooling);
+        if (status) status.textContent = `Updated ${ev.generated_at || ''}`;
+        renderViewSwitcher(boardViews, activeViewId);
+      }
+      return;
+    }
+    if (ev.type === 'error') {
+      throw new Error(String(ev.error || 'stream error'));
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (gen !== dashboardGen) {
+      try {
+        await reader.cancel();
+      } catch (_) {
+        /* ignore */
+      }
+      return false;
+    }
+    if (value) buffer += decoder.decode(value, { stream: !done });
+    if (done) buffer += decoder.decode();
+    let nl;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      handleLine(line);
+      if (gen !== dashboardGen) return false;
+    }
+    if (done) {
+      if (buffer.trim()) handleLine(buffer);
+      break;
+    }
+  }
+  return gen === dashboardGen;
 }
 
 function renderViewSwitcher(views, active) {
@@ -1840,13 +2160,15 @@ function renderViewSwitcher(views, active) {
     btn.addEventListener('click', () => {
       if (v.id === activeViewId) return;
       persistActiveView(v.id);
-      loadingViewId = v.id;
       const cached = viewPayloadCache.get(v.id);
       if (cached) {
+        // Instant paint from cache; refresh quietly so the tab is not busy.
+        loadingViewId = '';
         paintDashboardData(cached, { fromCache: true });
-        void loadDashboard({ quiet: false, fresh: false, viewBusy: true });
+        void loadDashboard({ quiet: true, fresh: false, viewBusy: false });
         return;
       }
+      loadingViewId = v.id;
       renderViewSwitcher(boardViews, v.id);
       void loadDashboard({ quiet: false, fresh: false, viewBusy: true });
     });
@@ -1856,6 +2178,7 @@ function renderViewSwitcher(views, active) {
 
 /**
  * Fetch and paint the board. Returns true when this generation painted successfully.
+ * Quiet / cache-hit refreshes use one-shot JSON. Bootstrap, uncached view switch, and Refresh use NDJSON stream.
  * @param {{ quiet?: boolean, fresh?: boolean, viewBusy?: boolean }} [opts]
  */
 async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } = {}) {
@@ -1882,8 +2205,9 @@ async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } 
   if (!quiet) {
     status.textContent = loadingViewId ? 'Loading…' : 'Refreshing…';
   }
+  const useStream = !quiet;
   try {
-    const url = dashboardURL(fresh);
+    const url = dashboardURL(fresh, { stream: useStream });
     const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
     if (gen !== dashboardGen) return false;
     if (!res.ok) {
@@ -1899,6 +2223,9 @@ async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } 
       }
       throw new Error(`HTTP ${res.status}`);
     }
+    if (useStream) {
+      return await consumeDashboardStream(res, { fresh, gen });
+    }
     const data = await res.json();
     if (gen !== dashboardGen) return false;
     loadingViewId = '';
@@ -1909,6 +2236,7 @@ async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } 
     if (err && typeof err === 'object' && /** @type {{ name?: string }} */ (err).name === 'AbortError') {
       return false;
     }
+    pendingStreamProjects.clear();
     if (loadingViewId) {
       loadingViewId = '';
       renderViewSwitcher(boardViews, activeViewId);
@@ -1931,6 +2259,8 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
     return;
   }
   const label = `${project_id} / ${branch}`;
+  const key = pruneActionKey(project_id, branch, worktree_path);
+  if (pendingPrunes.has(key)) return;
   const ok = await confirmDialog({
     title: 'Remove local checkout?',
     body: `Remove the local branch checkout for ${label}. This only affects your machine.`,
@@ -1940,8 +2270,15 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
     danger: true,
   });
   if (!ok) return;
-  setButtonBusy(button, 'removing…');
-  if (status) status.textContent = `Removing ${label}…`;
+
+  pendingPrunes.add(key);
+  if (button) {
+    setButtonBusy(button, 'removing…', `Removing local ${branch}…`);
+  }
+  if (status) status.textContent = pruneStatusText();
+  // Repaint so morph keeps the button in removing… across polls and board paints.
+  applyBoard();
+
   try {
     await postJSONWithIndexLockConfirm('/api/prune/safe', {
       project_id,
@@ -1951,28 +2288,26 @@ async function pruneSafeCheckout({ project_id, branch, worktree_path, button }) 
       title: `${label}: stale git lock`,
       body: 'A leftover git index.lock is blocking remove. Remove the lock and continue?',
     });
-    if (status) status.textContent = `Removed ${label}`;
-    await loadDashboard({ quiet: true, fresh: true });
+    recentRemoved.add(key);
+    pruneBoardDirty = true;
   } catch (err) {
     if (err && err.name === 'AbortError') {
-      setButtonIdle(button, {
-        svg: ICONS.trash,
-        label: 'safe to remove',
-      });
-      if (status) status.textContent = '';
-      return;
+      // User declined lock clear; treat as cancel, not a remove failure.
+    } else {
+      const msg = err instanceof Error ? err.message : String(err);
+      pruneFailures.push({ label, path: worktree_path, message: msg });
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    if (status) status.textContent = '';
-    setButtonIdle(button, {
-      svg: ICONS.trash,
-      label: 'safe to remove',
-    });
-    await infoDialog({
-      title: `${label}: remove failed`,
-      body: msg,
-      detail: worktree_path,
-    });
+  } finally {
+    pendingPrunes.delete(key);
+    applyBoard();
+    if (pendingPrunes.size > 0) {
+      if (status) status.textContent = pruneStatusText();
+    } else {
+      if (status && recentRemoved.size > 0) {
+        status.textContent = 'Removes finished; refreshing…';
+      }
+      schedulePruneFlush();
+    }
   }
 }
 
@@ -1987,12 +2322,16 @@ async function pullFFCheckout({ project_id, branch, repo_path, behind, button })
   if (pendingPulls.has(key)) return;
 
   pendingPulls.add(key);
+  // Instant busy on the clicked control before the full board morph.
+  if (button) {
+    setButtonBusy(button, 'pulling…', `Pulling ${branch} from origin…`);
+  }
+  if (status) status.textContent = pullStatusText();
   // Repaint so the static ↓N hides while the button shows pulling…
   applyBoard();
-  if (status) status.textContent = pullStatusText();
 
   try {
-    await postJSONWithIndexLockConfirm('/api/pull/ff', {
+    const data = await postJSONWithIndexLockConfirm('/api/pull/ff', {
       project_id,
       branch,
       repo_path,
@@ -2002,6 +2341,8 @@ async function pullFFCheckout({ project_id, branch, repo_path, behind, button })
     });
     recentPulled.add(key);
     pullBoardDirty = true;
+    markPulledCaughtUp(project_id, branch, repo_path);
+    if (status) status.textContent = pulledSuccessText(branch, data);
   } catch (err) {
     if (err && err.name === 'AbortError') {
       // User declined lock clear; treat as cancel, not a pull failure.
@@ -2016,7 +2357,7 @@ async function pullFFCheckout({ project_id, branch, repo_path, behind, button })
     if (pendingPulls.size > 0) {
       if (status) status.textContent = pullStatusText();
     } else {
-      if (status && recentPulled.size > 0) {
+      if (status && recentPulled.size > 0 && !String(status.textContent || '').startsWith('Pulled ')) {
         status.textContent = 'Pulls finished; refreshing…';
       }
       schedulePullFlush();
@@ -2484,6 +2825,8 @@ async function openManageSync() {
     state.sourcesDraft = {
       orgs: (sync.github_orgs || []).join(', '),
       groups: (sync.gitlab_groups || []).join(', '),
+      azureOrgs: (sync.azuredevops_orgs || []).join(', '),
+      bitbucketWorkspaces: (sync.bitbucket_workspaces || []).join(', '),
     };
     return state.sourcesDraft;
   };
@@ -2498,6 +2841,12 @@ async function openManageSync() {
   const refreshState = async () => {
     setStatus('Loading…');
     state.payload = await apiJSON('/api/views');
+    try {
+      const meta = await apiJSON('/api/meta');
+      if (state.payload && meta?.tooling) state.payload.tooling = meta.tooling;
+    } catch (_) {
+      /* tooling optional for Sources panel */
+    }
     setStatus('');
     renderPanel();
   };
@@ -2778,8 +3127,14 @@ async function openManageSync() {
       setButtonBusy(loadBtn, 'loading…', 'Discovering forge repositories');
       try {
         const data = await apiJSON('/api/sync/candidates');
-        state.candidates = data.candidates || [];
-        const warnings = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+        const all = Array.isArray(data.candidates) ? data.candidates : [];
+        state.candidates = all.filter((c) => isUISurfaceHost(c.Host || c.host));
+        const warnings = Array.isArray(data.warnings)
+          ? data.warnings.filter((w) => {
+            const s = String(w || '').toLowerCase();
+            return s && !s.includes('azuredevops') && !s.includes('bitbucket');
+          })
+          : [];
         let msg = `${state.candidates.length} candidates`;
         if (warnings.length) {
           msg += `; ${warnings.join(' · ')}`;
@@ -2963,48 +3318,95 @@ async function openManageSync() {
   const renderSources = () => {
     panel.replaceChildren();
     const draft = ensureSourcesDraft();
-    const orgField = el('div', 'manage-field');
-    orgField.appendChild(el('label', '', 'GitHub orgs (comma-separated)'));
-    const orgInput = document.createElement('input');
-    orgInput.value = draft.orgs;
-    orgInput.addEventListener('input', () => {
-      draft.orgs = orgInput.value;
-      markDirty();
-    });
-    orgField.appendChild(orgInput);
-    const groupField = el('div', 'manage-field');
-    groupField.appendChild(el('label', '', 'GitLab groups (comma-separated)'));
-    const groupInput = document.createElement('input');
-    groupInput.value = draft.groups;
-    groupInput.addEventListener('input', () => {
-      draft.groups = groupInput.value;
-      markDirty();
-    });
-    groupField.appendChild(groupInput);
+    const tooling = state.payload?.tooling || {};
+    const providers = [
+      {
+        key: 'github',
+        title: 'GitHub',
+        help: 'Install gh, run gh auth login, then list org names to discover.',
+        fieldKey: 'orgs',
+        label: 'Orgs (comma-separated)',
+        tool: tooling.github || {},
+        blockedHint: 'gh missing or not authenticated',
+      },
+      {
+        key: 'gitlab',
+        title: 'GitLab',
+        help: 'Install glab, run glab auth login, then list group paths to discover.',
+        fieldKey: 'groups',
+        label: 'Groups (comma-separated)',
+        tool: tooling.gitlab || {},
+        blockedHint: 'glab missing or not authenticated',
+      },
+    ];
+
+    const inputs = {};
+    for (const p of providers) {
+      const block = el('div', 'manage-provider');
+      const heading = el('h3', 'manage-provider-title', p.title);
+      block.appendChild(heading);
+      const ready = Boolean(p.tool.installed && p.tool.authed);
+      const status = el(
+        'p',
+        ready ? 'manage-provider-status manage-provider-status--ok' : 'manage-provider-status manage-provider-status--blocked',
+        ready
+          ? 'Ready'
+          : `${p.blockedHint}${p.tool.detail ? `: ${p.tool.detail}` : ''}`,
+      );
+      block.appendChild(status);
+      block.appendChild(el('p', 'manage-empty', p.help));
+      const field = el('div', 'manage-field');
+      field.appendChild(el('label', '', p.label));
+      const input = document.createElement('input');
+      input.value = draft[p.fieldKey] || '';
+      input.disabled = !ready && !(draft[p.fieldKey] || '').trim();
+      if (!ready) input.title = p.blockedHint;
+      input.addEventListener('input', () => {
+        draft[p.fieldKey] = input.value;
+        markDirty();
+      });
+      // Keep fields editable so users can pre-fill sources before auth if they want.
+      input.disabled = false;
+      field.appendChild(input);
+      inputs[p.fieldKey] = input;
+      block.appendChild(field);
+      panel.appendChild(block);
+    }
+
     const saveBtn = el('button', 'modal-btn modal-btn--ok');
     saveBtn.type = 'button';
     setButtonLabel(saveBtn, null, 'Save sources');
     saveBtn.addEventListener('click', async () => {
       if (saveBtn.disabled) return;
       const split = (s) => String(s || '').split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+      // Preserve Azure/Bitbucket entries from config (not editable in UI yet).
+      const sync = state.payload?.sync || {};
       setButtonBusy(saveBtn, 'saving…', 'Saving sync sources');
       try {
         const data = await apiJSON('/api/sync/sources', {
           method: 'PUT',
           body: JSON.stringify({
-            github_orgs: split(orgInput.value),
-            gitlab_groups: split(groupInput.value),
+            github_orgs: split(inputs.orgs.value),
+            gitlab_groups: split(inputs.groups.value),
+            azuredevops_orgs: Array.isArray(sync.azuredevops_orgs) ? sync.azuredevops_orgs : split(draft.azureOrgs),
+            bitbucket_workspaces: Array.isArray(sync.bitbucket_workspaces)
+              ? sync.bitbucket_workspaces
+              : split(draft.bitbucketWorkspaces),
           }),
         });
         if (state.payload) {
           state.payload.sync = {
             github_orgs: data.github_orgs || [],
             gitlab_groups: data.gitlab_groups || [],
+            azuredevops_orgs: data.azuredevops_orgs || [],
+            bitbucket_workspaces: data.bitbucket_workspaces || [],
           };
         }
         state.sourcesDraft = {
           orgs: (data.github_orgs || []).join(', '),
           groups: (data.gitlab_groups || []).join(', '),
+          azureOrgs: (data.azuredevops_orgs || []).join(', '),
+          bitbucketWorkspaces: (data.bitbucket_workspaces || []).join(', '),
         };
         clearDirty();
         setStatus('Sources saved');
@@ -3016,8 +3418,6 @@ async function openManageSync() {
     });
     const actions = el('div', 'manage-actions manage-actions--footer');
     actions.appendChild(saveBtn);
-    panel.appendChild(orgField);
-    panel.appendChild(groupField);
     panel.appendChild(actions);
   };
 
@@ -3114,8 +3514,8 @@ document.getElementById('refresh').addEventListener('click', () => {
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
-  if (pendingPulls.size > 0 || pullFlushScheduled) return;
-  void loadDashboard({ quiet: true, fresh: pullBoardDirty });
+  if (pendingPulls.size > 0 || pendingPrunes.size > 0) return;
+  void loadDashboard({ quiet: true, fresh: pullBoardDirty || pruneBoardDirty });
 });
 
 function findProjectById(id) {
@@ -3254,6 +3654,7 @@ async function bootstrapBoard() {
         }
       }
       if (meta.ui) renderConfigInfo(meta.ui);
+      if (meta.tooling) applyTooling(meta.tooling);
       const views = Array.isArray(meta.views) ? meta.views : [];
       if (views.length) {
         let active = activeViewId;
@@ -3265,6 +3666,7 @@ async function bootstrapBoard() {
         renderViewSwitcher(views, active);
         if (status) status.textContent = 'Loading…';
       }
+      if (!lastTooling) renderToolingPending();
     }
   } catch (_) {
     /* Dashboard fetch still runs below. */

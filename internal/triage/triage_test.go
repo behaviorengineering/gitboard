@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/llm"
 )
@@ -85,8 +86,10 @@ func TestAnalyzeHappy(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	a := &Analyzer{LLM: &llm.Client{BaseURL: srv.URL, Model: "fallback", HTTP: srv.Client()}}
-	resp, err := a.Analyze(context.Background(), Request{Log: "FAIL", JobName: "test"})
+	resp, err := a.Analyze(ctx, Request{Log: "FAIL", JobName: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
