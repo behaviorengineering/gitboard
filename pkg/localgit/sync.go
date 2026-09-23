@@ -35,36 +35,59 @@ type SyncInspection struct {
 }
 
 // InspectSync refreshes origin and compares a local branch with origin/<branch>.
+// Prefer FetchOrigin (under a mutation lease) plus CompareSync when the caller
+// already coordinates writers.
 func (in *Inspector) InspectSync(ctx context.Context, repoPath, branch string) (SyncInspection, error) {
+	out, abs, err := in.prepareSyncInspection(ctx, repoPath, branch)
+	if err != nil {
+		return out, err
+	}
+	if _, err := in.git(ctx, abs, "fetch", "--prune", "origin"); err != nil {
+		return out, fmt.Errorf("fetch --prune origin: %w", err)
+	}
+	return in.compareSync(ctx, abs, branch, out)
+}
+
+// CompareSync compares a local branch with origin/<branch> without fetching.
+// Callers that refresh origin must do so under the mutation coordinator first.
+func (in *Inspector) CompareSync(ctx context.Context, repoPath, branch string) (SyncInspection, error) {
+	out, abs, err := in.prepareSyncInspection(ctx, repoPath, branch)
+	if err != nil {
+		return out, err
+	}
+	return in.compareSync(ctx, abs, branch, out)
+}
+
+func (in *Inspector) prepareSyncInspection(ctx context.Context, repoPath, branch string) (SyncInspection, string, error) {
 	var out SyncInspection
 	if in == nil {
-		return out, ErrInspectorMissing
+		return out, "", ErrInspectorMissing
 	}
 	branch = strings.TrimSpace(branch)
 	if err := ValidateBranchName(branch); err != nil {
-		return out, err
+		return out, "", err
 	}
 	abs, err := ExpandPath(repoPath)
 	if err != nil {
-		return out, fmt.Errorf("expand path: %w", err)
+		return out, "", fmt.Errorf("expand path: %w", err)
 	}
 	if resolved, resolveErr := filepath.EvalSymlinks(abs); resolveErr == nil {
 		abs = resolved
 	}
 	abs = filepath.Clean(abs)
 	if !in.isGitDir(ctx, abs) {
-		return out, fmt.Errorf("not a git repository: %s", abs)
+		return out, "", fmt.Errorf("not a git repository: %s", abs)
 	}
-
 	out.Path = abs
 	out.Branch = branch
 	out.Upstream = "origin/" + branch
-	if _, err := in.git(ctx, abs, "fetch", "--prune", "origin"); err != nil {
-		return out, fmt.Errorf("fetch --prune origin: %w", err)
-	}
+	return out, abs, nil
+}
 
+func (in *Inspector) compareSync(ctx context.Context, abs, branch string, out SyncInspection) (SyncInspection, error) {
 	localRef := "refs/heads/" + branch
 	remoteRef := "refs/remotes/origin/" + branch
+	var err error
 	out.LocalSHA, err = in.revParse(ctx, abs, localRef)
 	if err != nil {
 		return out, fmt.Errorf("local branch %q: %w", branch, err)

@@ -72,15 +72,18 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 		return zero, badRequest("repo_path is not a mapped checkout for this project")
 	}
 
-	common := abs
-	if cd, err := s.Local.CommonGitDir(ctx, abs); err == nil && cd != "" {
-		common = cd
+	common, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, abs)
+	if err != nil {
+		return zero, badRequestCause("resolve common git dir", err)
 	}
-	unlock := func() {}
-	if s.Mutations != nil {
-		unlock = s.Mutations.Lock(common)
+	lease, err := s.Mutations.Acquire(ctx, common)
+	if err != nil {
+		if errors.Is(err, localgit.ErrMutationCanceled) {
+			return zero, err
+		}
+		return zero, fmt.Errorf("mutation lock: %w", err)
 	}
-	defer unlock()
+	defer lease.Release()
 
 	if err := c.ensureWritableIndex(ctx, abs, req.ClearIndexLock); err != nil {
 		return zero, err
@@ -106,6 +109,7 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 		// Idempotent with ensureBranchFFFromOrigin: a fresh fetch can show the
 		// checkout is already caught up while the board still painted ↓N.
 		if errors.Is(err, localgit.ErrUpToDate) {
+			lease.BumpEpoch()
 			s.InvalidateOrigin(common)
 			s.InvalidateProject(string(p.Host), p.Path)
 			return PullFFResult{OK: true, Branch: branch, Path: abs, FetchMs: phases.FetchMs, SubmodulePreMs: phases.SubmodulePreMs, MergeMs: phases.MergeMs, SubmodulePostMs: phases.SubmodulePostMs}, nil
@@ -118,6 +122,7 @@ func (c *Commands) PullFF(ctx context.Context, doc config.File, req PullFFReques
 		}
 		return zero, fmt.Errorf("pull ff-only: %w", err)
 	}
+	lease.BumpEpoch()
 	s.InvalidateOrigin(common)
 	s.InvalidateProject(string(p.Host), p.Path)
 	return PullFFResult{OK: true, Branch: branch, Path: abs, FetchMs: phases.FetchMs, SubmodulePreMs: phases.SubmodulePreMs, MergeMs: phases.MergeMs, SubmodulePostMs: phases.SubmodulePostMs}, nil

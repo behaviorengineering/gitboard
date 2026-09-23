@@ -34,7 +34,7 @@ func TestFetchOriginCachedRefreshesStaleTracking(t *testing.T) {
 	}
 
 	cache := localgit.NewOriginFetchCache()
-	if err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
+	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
 		t.Fatalf("FetchOriginCached: %v", err)
 	}
 
@@ -62,14 +62,14 @@ func TestFetchOriginCachedRespectsTTL(t *testing.T) {
 	now := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
 	cache.SetNow(func() time.Time { return now })
 
-	if err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
+	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
 		t.Fatalf("first fetch: %v", err)
 	}
 	if got := fetches.Load(); got != 1 {
 		t.Fatalf("fetches after first=%d", got)
 	}
 
-	if err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
+	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
 		t.Fatalf("second fetch within TTL: %v", err)
 	}
 	if got := fetches.Load(); got != 1 {
@@ -77,14 +77,14 @@ func TestFetchOriginCachedRespectsTTL(t *testing.T) {
 	}
 
 	now = now.Add(2 * time.Minute)
-	if err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
+	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
 		t.Fatalf("third fetch after TTL: %v", err)
 	}
 	if got := fetches.Load(); got != 2 {
 		t.Fatalf("want fetch after TTL, fetches=%d", got)
 	}
 
-	if err := in.FetchOriginCached(ctx, local, time.Minute, true, cache); err != nil {
+	if _, err := in.FetchOriginCached(ctx, local, time.Minute, true, cache); err != nil {
 		t.Fatalf("fresh fetch: %v", err)
 	}
 	if got := fetches.Load(); got != 3 {

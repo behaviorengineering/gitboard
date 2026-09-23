@@ -2,8 +2,10 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
@@ -22,10 +24,12 @@ type SyncInvestigation struct {
 	Result    localgit.SyncInspection `json:"result"`
 }
 
-// InvestigateSync validates a mapped checkout, refreshes origin, and compares refs.
+// InvestigateSync validates a mapped checkout, refreshes origin under the
+// mutation lease, then compares refs without holding the lease.
 func (c *Commands) InvestigateSync(ctx context.Context, doc config.File, req SyncInvestigationRequest) (SyncInvestigation, error) {
 	var zero SyncInvestigation
-	if _, err := c.requireLocal(); err != nil {
+	s, err := c.requireLocal()
+	if err != nil {
 		return zero, err
 	}
 	projectID := strings.TrimSpace(req.ProjectID)
@@ -41,7 +45,16 @@ func (c *Commands) InvestigateSync(ctx context.Context, doc config.File, req Syn
 	if err != nil {
 		return zero, err
 	}
-	result, err := c.Local.InspectSync(ctx, abs, branch)
+	common, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, abs)
+	if err != nil {
+		return zero, badRequestCause("resolve common git dir", err)
+	}
+
+	if err := c.refreshOriginForInvestigate(ctx, s, abs, common, branch); err != nil {
+		return zero, err
+	}
+
+	result, err := s.Local.CompareSync(ctx, abs, branch)
 	if err != nil {
 		return zero, fmt.Errorf("investigate sync: %w", err)
 	}
@@ -49,4 +62,26 @@ func (c *Commands) InvestigateSync(ctx context.Context, doc config.File, req Syn
 		ProjectID: projectID,
 		Result:    result,
 	}, nil
+}
+
+func (c *Commands) refreshOriginForInvestigate(ctx context.Context, s *Service, abs, common, branch string) error {
+	lease, err := s.Mutations.Acquire(ctx, common)
+	if err != nil {
+		if errors.Is(err, localgit.ErrMutationCanceled) {
+			return err
+		}
+		return fmt.Errorf("mutation lock: %w", err)
+	}
+	defer lease.Release()
+
+	// Fresh full fetch matches prior InspectSync (git fetch --prune origin).
+	updated, err := s.Local.FetchOriginSmart(ctx, abs, time.Minute, true, s.OriginFetch, []string{branch})
+	if err != nil {
+		return fmt.Errorf("investigate fetch: %w", err)
+	}
+	if updated {
+		lease.BumpEpoch()
+		s.InvalidateOrigin(common)
+	}
+	return nil
 }
