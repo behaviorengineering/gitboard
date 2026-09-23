@@ -129,9 +129,23 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 	if defaultBranch == "" {
 		defaultBranch = "main"
 	}
+	common, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, wt.Path)
+	if err != nil {
+		return badRequestCause("resolve common git dir", err)
+	}
+	lease, err := s.Mutations.Acquire(ctx, common)
+	if err != nil {
+		if errors.Is(err, localgit.ErrMutationCanceled) {
+			return err
+		}
+		return fmt.Errorf("mutation lock: %w", err)
+	}
+	defer lease.Release()
+
 	if err := c.ensureWritableIndex(ctx, wt.Path, req.ClearIndexLock); err != nil {
 		return err
 	}
+
 	err = s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch)
 	if err != nil && localgit.IsIndexLockError(err) {
 		if lockErr := c.ensureWritableIndex(ctx, wt.Path, req.ClearIndexLock); lockErr != nil {
@@ -150,6 +164,9 @@ func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafe
 		}
 		return fmt.Errorf("remove checkout: %w", err)
 	}
+	lease.BumpEpoch()
+	s.InvalidateOrigin(common)
+	s.InvalidateProject(string(p.Host), p.Path)
 	return nil
 }
 

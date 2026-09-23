@@ -52,7 +52,7 @@ func TestFetchOriginSmartFullThenTargeted(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Minute
 
-	if err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
+	if _, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
 		t.Fatalf("cold smart: %v", err)
 	}
 	if !hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -63,8 +63,12 @@ func TestFetchOriginSmartFullThenTargeted(t *testing.T) {
 	}
 
 	fx.calls = nil
-	if err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
+	updated, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"})
+	if err != nil {
 		t.Fatalf("warm within TTL: %v", err)
+	}
+	if updated {
+		t.Fatal("warm within branch TTL must report updated=false")
 	}
 	if hasCallSubstr(fx.calls, "fetch") {
 		t.Fatalf("warm within branch TTL should skip, calls=%v", fx.calls)
@@ -72,7 +76,7 @@ func TestFetchOriginSmartFullThenTargeted(t *testing.T) {
 
 	now = now.Add(2 * time.Minute)
 	fx.calls = nil
-	if err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
+	if _, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
 		t.Fatalf("after full TTL: %v", err)
 	}
 	if !hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -94,13 +98,13 @@ func TestFetchOriginSmartTargetedWhenFullWarm(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Minute
 
-	if err := in.FetchOriginCached(ctx, repo, ttl, false, cache); err != nil {
+	if _, err := in.FetchOriginCached(ctx, repo, ttl, false, cache); err != nil {
 		t.Fatalf("full: %v", err)
 	}
 	fx.calls = nil
 
 	cache.MarkBranchesSuccess(filepath.Clean(common), []string{"main"})
-	if err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
+	if _, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
 		t.Fatalf("targeted: %v", err)
 	}
 	if hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -123,7 +127,7 @@ func TestFetchOriginSmartFreshForcesPrune(t *testing.T) {
 	cache.MarkFullSuccess(filepath.Clean(common))
 	cache.MarkBranchesSuccess(filepath.Clean(common), []string{"main"})
 	ctx := context.Background()
-	if err := in.FetchOriginSmart(ctx, repo, time.Hour, true, cache, []string{"main"}); err != nil {
+	if _, err := in.FetchOriginSmart(ctx, repo, time.Hour, true, cache, []string{"main"}); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
 	if !hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -142,7 +146,7 @@ func TestFetchOriginSmartEmptyBranchesSkipsWhenWarm(t *testing.T) {
 	cache.MarkFullSuccess(filepath.Clean(common))
 	ctx := context.Background()
 	fx.calls = nil
-	if err := in.FetchOriginSmart(ctx, repo, time.Hour, false, cache, nil); err != nil {
+	if _, err := in.FetchOriginSmart(ctx, repo, time.Hour, false, cache, nil); err != nil {
 		t.Fatalf("empty warm: %v", err)
 	}
 	if hasCallSubstr(fx.calls, "fetch") {
@@ -166,7 +170,7 @@ func TestFetchOriginSmartCoalescesAndCoversLeftoverBranches(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Minute
 
-	if err := in.FetchOriginCached(ctx, repo, ttl, false, cache); err != nil {
+	if _, err := in.FetchOriginCached(ctx, repo, ttl, false, cache); err != nil {
 		t.Fatalf("seed full: %v", err)
 	}
 	fetches.Store(0)
@@ -176,11 +180,11 @@ func TestFetchOriginSmartCoalescesAndCoversLeftoverBranches(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		errCh <- in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main"})
+		_, e1 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main"}); errCh <- e1
 	}()
 	go func() {
 		defer wg.Done()
-		errCh <- in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"feature/x"})
+		_, e2 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"feature/x"}); errCh <- e2
 	}()
 	wg.Wait()
 	close(errCh)

@@ -594,6 +594,10 @@ func writeCommandError(w http.ResponseWriter, err error) bool {
 		_ = writeJSON(w, cre)
 		return true
 	}
+	if dashboard.IsMutationCanceled(err) {
+		http.Error(w, err.Error(), http.StatusGatewayTimeout)
+		return true
+	}
 	if dashboard.IsBadRequest(err) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return true

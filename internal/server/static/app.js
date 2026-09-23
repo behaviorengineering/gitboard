@@ -1,4 +1,7 @@
 import { Idiomorph } from './idiomorph.esm.js';
+import { createDashboardLoadArbiter } from './dashboard_load.js';
+
+const dashboardArbiter = createDashboardLoadArbiter();
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -587,9 +590,6 @@ const recentPulled = new Set();
 /** True until a fresh dashboard paint lands after one or more successful pulls. */
 let pullBoardDirty = false;
 
-/** Quiet polls must not abort an in-flight ?fresh=1 load (post-pull / Refresh). */
-let dashboardFreshInFlight = false;
-
 /** @type {{ label: string, path: string, message: string }[]} */
 const pullFailures = [];
 
@@ -674,9 +674,9 @@ async function flushPullBatch() {
   const failures = pullFailures.splice(0, pullFailures.length);
   const status = document.getElementById('status');
   // One decisive ?fresh=1 paint clears pullBoardDirty and stops re-flush loops.
-  let ok = await loadDashboard({ quiet: true, fresh: true });
+  let ok = await loadDashboard({ quiet: true, fresh: true, reason: 'action' });
   if (!ok && pullBoardDirty) {
-    ok = await loadDashboard({ quiet: true, fresh: true });
+    ok = await loadDashboard({ quiet: true, fresh: true, reason: 'action' });
   }
   if (!ok && pullBoardDirty) {
     // Keep "pulled" until a later fresh paint; do not clear recentPulled on abort races.
@@ -748,9 +748,9 @@ async function flushPruneBatch() {
   if (pendingPrunes.size > 0) return;
   const failures = pruneFailures.splice(0, pruneFailures.length);
   const status = document.getElementById('status');
-  let ok = await loadDashboard({ quiet: true, fresh: true });
+  let ok = await loadDashboard({ quiet: true, fresh: true, reason: 'action' });
   if (!ok && pruneBoardDirty) {
-    ok = await loadDashboard({ quiet: true, fresh: true });
+    ok = await loadDashboard({ quiet: true, fresh: true, reason: 'action' });
   }
   if (!ok && pruneBoardDirty) {
     if (status && !String(status.textContent || '').startsWith('Error:')) {
@@ -1914,10 +1914,6 @@ function renderRows(projects) {
 let pollSeconds = 30;
 let pollTimer = null;
 let loading = false;
-/** Monotonic id for in-flight dashboard fetches; only the latest may paint. */
-let dashboardGen = 0;
-/** @type {AbortController | null} */
-let dashboardAbort = null;
 /** Last successful dashboard payload per view id (instant paint on switch). */
 const viewPayloadCache = new Map();
 /** View id whose tab shows a busy spinner while its first (uncached) dashboard fetch is in flight. */
@@ -1942,10 +1938,10 @@ function schedulePoll() {
   }
   if (pollSeconds <= 0) return;
   pollTimer = setInterval(() => {
-    // Pause only while pull/prune APIs are in flight (busy morph). Flush sets
-    // loading/dashboardFreshInFlight, which already blocks competing paints.
+    // Pause only while pull/prune APIs are in flight (busy morph). The arbiter
+    // blocks quiet polls while a fresh load owns the board.
     if (document.hidden || loading || pendingPulls.size > 0 || pendingPrunes.size > 0) return;
-    void loadDashboard({ quiet: true, fresh: pullBoardDirty || pruneBoardDirty });
+    void loadDashboard({ quiet: true, fresh: pullBoardDirty || pruneBoardDirty, reason: 'poll' });
   }, pollSeconds * 1000);
 }
 
@@ -2067,7 +2063,7 @@ async function consumeDashboardStream(res, { fresh = false, gen }) {
     const trimmed = line.trim();
     if (!trimmed) return;
     const ev = JSON.parse(trimmed);
-    if (gen !== dashboardGen) return;
+    if (!dashboardArbiter.isCurrent(gen)) return;
     if (ev.type === 'shell' && ev.dashboard) {
       assembled = {
         ...ev.dashboard,
@@ -2112,7 +2108,7 @@ async function consumeDashboardStream(res, { fresh = false, gen }) {
 
   while (true) {
     const { done, value } = await reader.read();
-    if (gen !== dashboardGen) {
+    if (!dashboardArbiter.isCurrent(gen)) {
       try {
         await reader.cancel();
       } catch (_) {
@@ -2127,14 +2123,14 @@ async function consumeDashboardStream(res, { fresh = false, gen }) {
       const line = buffer.slice(0, nl);
       buffer = buffer.slice(nl + 1);
       handleLine(line);
-      if (gen !== dashboardGen) return false;
+      if (!dashboardArbiter.isCurrent(gen)) return false;
     }
     if (done) {
       if (buffer.trim()) handleLine(buffer);
       break;
     }
   }
-  return gen === dashboardGen;
+  return dashboardArbiter.isCurrent(gen);
 }
 
 function renderViewSwitcher(views, active) {
@@ -2165,12 +2161,12 @@ function renderViewSwitcher(views, active) {
         // Instant paint from cache; refresh quietly so the tab is not busy.
         loadingViewId = '';
         paintDashboardData(cached, { fromCache: true });
-        void loadDashboard({ quiet: true, fresh: false, viewBusy: false });
+        void loadDashboard({ quiet: true, fresh: false, viewBusy: false, reason: 'view-switch' });
         return;
       }
       loadingViewId = v.id;
       renderViewSwitcher(boardViews, v.id);
-      void loadDashboard({ quiet: false, fresh: false, viewBusy: true });
+      void loadDashboard({ quiet: false, fresh: false, viewBusy: true, reason: 'view-switch' });
     });
     root.appendChild(btn);
   }
@@ -2179,25 +2175,19 @@ function renderViewSwitcher(views, active) {
 /**
  * Fetch and paint the board. Returns true when this generation painted successfully.
  * Quiet / cache-hit refreshes use one-shot JSON. Bootstrap, uncached view switch, and Refresh use NDJSON stream.
- * @param {{ quiet?: boolean, fresh?: boolean, viewBusy?: boolean }} [opts]
+ * @param {{ quiet?: boolean, fresh?: boolean, viewBusy?: boolean, reason?: string }} [opts]
  */
-async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } = {}) {
-  // Do not let a quiet poll abort a post-pull / Refresh fresh load mid-flight.
-  if (!fresh && dashboardFreshInFlight) {
+async function loadDashboard({ quiet = false, fresh = false, viewBusy = false, reason = '' } = {}) {
+  const loadReason = reason || (viewBusy ? 'view-switch' : '');
+  const lease = dashboardArbiter.begin({ fresh, reason: loadReason });
+  if (!lease.allowed) {
     return false;
   }
   if (!viewBusy && loadingViewId) {
     loadingViewId = '';
   }
-  const gen = ++dashboardGen;
-  if (dashboardAbort) {
-    dashboardAbort.abort();
-  }
-  const ac = new AbortController();
-  dashboardAbort = ac;
+  const { gen, abortController: ac, trackingFresh, signal } = lease;
   loading = true;
-  const trackingFresh = fresh;
-  if (trackingFresh) dashboardFreshInFlight = true;
   const status = document.getElementById('status');
   if (viewBusy && loadingViewId && boardViews.length) {
     renderViewSwitcher(boardViews, loadingViewId);
@@ -2208,18 +2198,18 @@ async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } 
   const useStream = !quiet;
   try {
     const url = dashboardURL(fresh, { stream: useStream });
-    const res = await fetch(url, { cache: 'no-store', signal: ac.signal });
-    if (gen !== dashboardGen) return false;
+    const res = await fetch(url, { cache: 'no-store', signal });
+    if (!dashboardArbiter.isCurrent(gen)) return false;
     if (!res.ok) {
       if (res.status === 400 && activeViewId) {
         persistActiveView('');
         loadingViewId = '';
-        if (gen === dashboardGen) {
+        if (dashboardArbiter.isCurrent(gen)) {
           loading = false;
-          if (dashboardAbort === ac) dashboardAbort = null;
-          if (trackingFresh) dashboardFreshInFlight = false;
+          dashboardArbiter.releaseAbort(gen, ac);
+          dashboardArbiter.finish(gen, trackingFresh);
         }
-        return loadDashboard({ quiet, fresh });
+        return loadDashboard({ quiet, fresh, reason: loadReason });
       }
       throw new Error(`HTTP ${res.status}`);
     }
@@ -2227,12 +2217,12 @@ async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } 
       return await consumeDashboardStream(res, { fresh, gen });
     }
     const data = await res.json();
-    if (gen !== dashboardGen) return false;
+    if (!dashboardArbiter.isCurrent(gen)) return false;
     loadingViewId = '';
     paintDashboardData(data, { fresh });
     return true;
   } catch (err) {
-    if (gen !== dashboardGen) return false;
+    if (!dashboardArbiter.isCurrent(gen)) return false;
     if (err && typeof err === 'object' && /** @type {{ name?: string }} */ (err).name === 'AbortError') {
       return false;
     }
@@ -2244,10 +2234,10 @@ async function loadDashboard({ quiet = false, fresh = false, viewBusy = false } 
     status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
     return false;
   } finally {
-    if (gen === dashboardGen) {
+    dashboardArbiter.finish(gen, trackingFresh);
+    if (dashboardArbiter.isCurrent(gen)) {
       loading = false;
-      if (dashboardAbort === ac) dashboardAbort = null;
-      if (trackingFresh) dashboardFreshInFlight = false;
+      dashboardArbiter.releaseAbort(gen, ac);
     }
   }
 }
@@ -3505,7 +3495,7 @@ document.getElementById('manage-sync')?.addEventListener('click', () => {
 document.getElementById('refresh').addEventListener('click', () => {
   const btn = document.getElementById('refresh');
   setButtonBusy(btn, 'refreshing…', 'Bypass upstream cache and reload');
-  void loadDashboard({ fresh: true }).finally(() => {
+  void loadDashboard({ fresh: true, reason: 'refresh' }).finally(() => {
     setButtonIdle(btn, {
       label: 'Refresh',
       title: 'Bypass upstream cache and reload',
@@ -3515,7 +3505,7 @@ document.getElementById('refresh').addEventListener('click', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   if (pendingPulls.size > 0 || pendingPrunes.size > 0) return;
-  void loadDashboard({ quiet: true, fresh: pullBoardDirty || pruneBoardDirty });
+  void loadDashboard({ quiet: true, fresh: pullBoardDirty || pruneBoardDirty, reason: 'visibility' });
 });
 
 function findProjectById(id) {

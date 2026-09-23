@@ -227,48 +227,57 @@ func (in *Inspector) ListLocalHeads(ctx context.Context, repoPath string) ([]str
 
 // FetchOriginCached fetches origin when the full-fetch TTL says the common git dir is stale.
 // Concurrent misses for the same common dir coalesce to one full fetch.
-func (in *Inspector) FetchOriginCached(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *OriginFetchCache) error {
+// updated is true when this call performed (or shared) a real full fetch.
+func (in *Inspector) FetchOriginCached(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *OriginFetchCache) (updated bool, err error) {
 	if in == nil {
-		return ErrInspectorMissing
+		return false, ErrInspectorMissing
 	}
 	abs, err := ExpandPath(repoPath)
 	if err != nil {
-		return fmt.Errorf("expand path: %w", err)
+		return false, fmt.Errorf("expand path: %w", err)
 	}
 	common, err := in.CommonGitDir(ctx, abs)
 	if err != nil || common == "" {
 		common = abs
 	}
 	common = filepath.Clean(common)
-	if !cache.NeedsFullFetch(common, ttl, fresh) {
-		return nil
-	}
 	if cache == nil {
-		return in.FetchOrigin(ctx, abs)
+		if err := in.FetchOrigin(ctx, abs); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
-	_, err, _ = cache.group.Do("full:"+common, func() (any, error) {
+	if !cache.NeedsFullFetch(common, ttl, fresh) {
+		return false, nil
+	}
+	v, err, _ := cache.group.Do("full:"+common, func() (any, error) {
 		if !cache.NeedsFullFetch(common, ttl, fresh) {
-			return nil, nil
+			return false, nil
 		}
 		if err := in.FetchOrigin(ctx, abs); err != nil {
-			return nil, err
+			return false, err
 		}
 		cache.MarkFullSuccess(common)
-		return nil, nil
+		return true, nil
 	})
-	return err
+	if err != nil {
+		return false, err
+	}
+	did, _ := v.(bool)
+	return did, nil
 }
 
 // FetchOriginSmart chooses full prune vs targeted branch fetch.
 // Fresh or expired full TTL → git fetch --prune origin.
 // Warm full TTL → targeted fetch of stale branches only; empty branch list skips network.
-func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *OriginFetchCache, branches []string) error {
+// updated is true when this call performed (or shared) a real network fetch.
+func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *OriginFetchCache, branches []string) (updated bool, err error) {
 	if in == nil {
-		return ErrInspectorMissing
+		return false, ErrInspectorMissing
 	}
 	abs, err := ExpandPath(repoPath)
 	if err != nil {
-		return fmt.Errorf("expand path: %w", err)
+		return false, fmt.Errorf("expand path: %w", err)
 	}
 	common, err := in.CommonGitDir(ctx, abs)
 	if err != nil || common == "" {
@@ -276,60 +285,65 @@ func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl 
 	}
 	common = filepath.Clean(common)
 
-	if cache.NeedsFullFetch(common, ttl, fresh) {
-		if err := in.FetchOriginCached(ctx, abs, ttl, fresh, cache); err != nil {
-			return err
+	if cache == nil || cache.NeedsFullFetch(common, ttl, fresh) {
+		updated, err := in.FetchOriginCached(ctx, abs, ttl, fresh, cache)
+		if err != nil {
+			return false, err
 		}
 		// Full prune refreshed remote heads; mark requested branches so this
 		// call does not immediately re-fetch them via the targeted path.
 		if cache != nil {
 			cache.MarkBranchesSuccess(common, branches)
 		}
-		return nil
+		return updated, nil
 	}
 
 	stale := cache.StaleBranches(common, ttl, branches)
 	if len(stale) == 0 {
-		return nil
-	}
-	if cache == nil {
-		return in.FetchOriginBranches(ctx, abs, stale)
+		return false, nil
 	}
 
 	key := "branches:" + common + ":" + strings.Join(stale, ",")
-	_, err, _ = cache.group.Do(key, func() (any, error) {
+	v, err, _ := cache.group.Do(key, func() (any, error) {
 		need := cache.StaleBranches(common, ttl, stale)
 		if len(need) == 0 {
-			return nil, nil
+			return false, nil
 		}
 		if err := in.FetchOriginBranches(ctx, abs, need); err != nil {
-			return nil, err
+			return false, err
 		}
 		cache.MarkBranchesSuccess(common, need)
-		return nil, nil
+		return true, nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
+	did, _ := v.(bool)
 
 	// A concurrent singleflight may have covered a different subset; fetch any leftovers.
 	leftover := cache.StaleBranches(common, ttl, branches)
 	if len(leftover) == 0 {
-		return nil
+		return did, nil
 	}
 	leftoverKey := "branches:" + common + ":" + strings.Join(leftover, ",")
-	_, err, _ = cache.group.Do(leftoverKey, func() (any, error) {
+	v2, err, _ := cache.group.Do(leftoverKey, func() (any, error) {
 		need := cache.StaleBranches(common, ttl, leftover)
 		if len(need) == 0 {
-			return nil, nil
+			return false, nil
 		}
 		if err := in.FetchOriginBranches(ctx, abs, need); err != nil {
-			return nil, err
+			return false, err
 		}
 		cache.MarkBranchesSuccess(common, need)
-		return nil, nil
+		return true, nil
 	})
-	return err
+	if err != nil {
+		return false, err
+	}
+	if did2, ok := v2.(bool); ok && did2 {
+		did = true
+	}
+	return did, nil
 }
 
 func sanitizeBranchList(branches []string) []string {

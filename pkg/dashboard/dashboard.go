@@ -22,7 +22,7 @@ type Service struct {
 	Local       LocalGit
 	Cache       *remotegit.TTLCache
 	OriginFetch *localgit.OriginFetchCache
-	Mutations   *localgit.MutationLocks
+	Mutations   *localgit.MutationCoordinator
 
 	scanMu   sync.Mutex
 	scanKey  string
@@ -40,7 +40,7 @@ func New(gh *remotegit.GitHub, gl *remotegit.GitLab, az *remotegit.AzureDevOps, 
 		Local:       local,
 		Cache:       remotegit.NewTTLCache(),
 		OriginFetch: localgit.NewOriginFetchCache(),
-		Mutations:   localgit.NewMutationLocks(),
+		Mutations:   localgit.NewMutationCoordinator(localgit.DefaultOSLocker()),
 	}
 }
 
@@ -295,6 +295,8 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 
 	targetBranches := s.originFetchBranches(ctx, inspectList, forgeBranches)
 	fetchErrByCommon := s.refreshOrigins(ctx, inspectList, fresh, fetchTTL, targetBranches)
+	// Capture epochs after our own fetch bump so only concurrent mutations invalidate.
+	epochsBeforeInspect := s.mutationEpochs(ctx, inspectList)
 
 	type inspected struct {
 		checkout localgit.Checkout
@@ -313,6 +315,9 @@ func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localg
 					st.Error = err.Error()
 					localgit.InvalidateOriginSync(&st)
 				}
+			}
+			if s.mutationEpochChanged(ctx, c, epochsBeforeInspect) {
+				localgit.InvalidateOriginSync(&st)
 			}
 			results[i] = inspected{checkout: c, status: st}
 		}(i, c)
@@ -392,11 +397,13 @@ func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Check
 		}
 		common := strings.TrimSpace(c.CommonGitDir)
 		if common == "" {
-			if cd, err := s.Local.CommonGitDir(ctx, path); err == nil && cd != "" {
-				common = cd
-			} else {
-				common = path
+			cd, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, path)
+			if err != nil {
+				muCommon := filepath.Clean(path)
+				out[muCommon] = err
+				continue
 			}
+			common = cd
 		}
 		common = filepath.Clean(common)
 		if _, ok := seen[common]; ok {
@@ -419,17 +426,79 @@ func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Check
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			err := s.Local.FetchOriginSmart(ctx, j.path, fetchTTL, fresh, s.OriginFetch, branches)
-			if err == nil {
-				return
+			if err := s.fetchOriginLocked(ctx, j.path, j.common, fetchTTL, fresh, branches); err != nil {
+				mu.Lock()
+				out[j.common] = err
+				mu.Unlock()
 			}
-			mu.Lock()
-			out[j.common] = err
-			mu.Unlock()
 		}(j)
 	}
 	wg.Wait()
 	return out
+}
+
+func (s *Service) fetchOriginLocked(ctx context.Context, path, common string, fetchTTL time.Duration, fresh bool, branches []string) error {
+	lease, err := s.Mutations.Acquire(ctx, common)
+	if err != nil {
+		return err
+	}
+	defer lease.Release()
+	updated, err := s.Local.FetchOriginSmart(ctx, path, fetchTTL, fresh, s.OriginFetch, branches)
+	if err != nil {
+		return err
+	}
+	if updated {
+		lease.BumpEpoch()
+	}
+	return nil
+}
+
+func (s *Service) mutationEpochs(ctx context.Context, checkouts []localgit.Checkout) map[string]uint64 {
+	out := map[string]uint64{}
+	if s == nil || s.Mutations == nil {
+		return out
+	}
+	for _, c := range checkouts {
+		common := s.checkoutCommonDir(ctx, c)
+		if common == "" {
+			continue
+		}
+		if _, ok := out[common]; ok {
+			continue
+		}
+		out[common] = s.Mutations.Epoch(common)
+	}
+	return out
+}
+
+func (s *Service) mutationEpochChanged(ctx context.Context, c localgit.Checkout, before map[string]uint64) bool {
+	if s == nil || s.Mutations == nil || before == nil {
+		return false
+	}
+	common := s.checkoutCommonDir(ctx, c)
+	if common == "" {
+		return false
+	}
+	prev, ok := before[common]
+	if !ok {
+		return false
+	}
+	return s.Mutations.Epoch(common) != prev
+}
+
+func (s *Service) checkoutCommonDir(ctx context.Context, c localgit.Checkout) string {
+	common := strings.TrimSpace(c.CommonGitDir)
+	if common != "" {
+		return filepath.Clean(common)
+	}
+	if s.Local == nil || c.Path == "" {
+		return ""
+	}
+	cd, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, c.Path)
+	if err != nil {
+		return ""
+	}
+	return cd
 }
 
 func forgeBranchNames(branches []board.BranchRef) []string {

@@ -14,14 +14,15 @@ type LocalGit interface {
 	EnrichOriginSync(ctx context.Context, st *localgit.Status)
 	CommonGitDir(ctx context.Context, repoPath string) (string, error)
 	ListLocalHeads(ctx context.Context, repoPath string) ([]string, error)
-	FetchOriginCached(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *localgit.OriginFetchCache) error
-	FetchOriginSmart(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *localgit.OriginFetchCache, branches []string) error
+	FetchOriginCached(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *localgit.OriginFetchCache) (updated bool, err error)
+	FetchOriginSmart(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *localgit.OriginFetchCache, branches []string) (updated bool, err error)
 	OriginRemote(ctx context.Context, dir string) (string, error)
 	PullFFOnly(ctx context.Context, repoPath, branch string) error
 	RemoveSafeCheckout(ctx context.Context, worktreePath, branch, defaultBranch string) error
 	EnsureWritableIndex(ctx context.Context, repoPath string, clearStale bool) error
 	ContentOnDefault(ctx context.Context, repoPath, branch, defaultBranch string) (ok bool, reason string, err error)
 	InspectSync(ctx context.Context, repoPath, branch string) (localgit.SyncInspection, error)
+	CompareSync(ctx context.Context, repoPath, branch string) (localgit.SyncInspection, error)
 }
 
 // Ensure *localgit.Inspector satisfies LocalGit.

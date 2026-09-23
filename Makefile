@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help build test vet tidy lint format ci init sync serve serve-down conformity conformity-live bench-net
+.PHONY: help build test test-js vet tidy lint format ci init sync serve serve-down conformity conformity-live bench-net
 
 BINARY := bin/gitboard
 CONFIG ?= $(HOME)/.config/gitboard/config.yaml
@@ -15,7 +15,10 @@ build: ## Build bin/gitboard
 	@mkdir -p $(dir $(BINARY))
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/gitboard
 
-test: ## Run unit tests
+test-js: ## Run dashboard JS unit tests
+	node --test ./internal/server/static/*_test.js
+
+test: test-js ## Run unit tests (JS + Go)
 	go test ./...
 
 vet: ## Run go vet ./...
@@ -39,7 +42,7 @@ conformity-live: ## Opt-in live forge Collect (needs credentials)
 bench-net: ## Network call-count / latency microbenchmarks
 	go test ./internal/benchnet/ -bench=. -benchmem -count=1
 
-ci: ## tidy + gofmt check + vet + race tests + build
+ci: test-js ## tidy + gofmt check + vet + race tests + build
 	@cp go.mod go.mod.bak && cp go.sum go.sum.bak
 	go mod tidy
 	@diff -u go.mod.bak go.mod && diff -u go.sum.bak go.sum

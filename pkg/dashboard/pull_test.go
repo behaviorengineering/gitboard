@@ -36,12 +36,12 @@ func (f *pullLocalFake) ListLocalHeads(context.Context, string) ([]string, error
 	return nil, nil
 }
 
-func (f *pullLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) error {
-	return nil
+func (f *pullLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) (bool, error) {
+	return false, nil
 }
 
-func (f *pullLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) error {
-	return nil
+func (f *pullLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) (bool, error) {
+	return false, nil
 }
 
 func (f *pullLocalFake) OriginRemote(context.Context, string) (string, error) {
@@ -65,6 +65,10 @@ func (f *pullLocalFake) ContentOnDefault(context.Context, string, string, string
 }
 
 func (f *pullLocalFake) InspectSync(context.Context, string, string) (localgit.SyncInspection, error) {
+	return localgit.SyncInspection{}, fmt.Errorf("not used")
+}
+
+func (f *pullLocalFake) CompareSync(context.Context, string, string) (localgit.SyncInspection, error) {
 	return localgit.SyncInspection{}, fmt.Errorf("not used")
 }
 
