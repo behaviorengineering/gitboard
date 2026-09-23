@@ -10,8 +10,7 @@ llm:
   model: cf_local/@cf/qwen/qwen3-30b-a3b-fp8
   api_key: ""
 
-# OpenInference tracing + error-only dumps (content-pipelines pattern).
-# Dumps land under ~/.config/gitboard/logs/inference-failures/ when enabled.
+# OpenInference tracing + error-only dumps for agent/LLM work.
 openinference:
   enabled: true
   endpoint: ""
@@ -24,8 +23,8 @@ openinference:
 
 ui:
   poll_seconds: 30
-  # Optional path.Match patterns; empty / omitted = show all branches.
-  # Hides matching names from the dashboard Branches column only.
+  # Optional path.Match patterns; empty / omitted = show all.
+  # Hides matching names from the Branches column only (prune data unchanged).
   # hide_branches:
   #   - majordomo-context/*
   #   - dependabot/*
@@ -37,14 +36,30 @@ upstream:
 
 # Optional: scan these trees for local checkouts (incl. git worktrees).
 # Match is via origin remote → project host/path. Override per project with local_path.
+# fetch_seconds TTL-gates git fetch origin before ↑/↓ sync (0 = always fetch).
+# scan_seconds TTL-gates root ScanRoots (0 = always rescan; default 300).
 local:
   roots: []
+  fetch_seconds: 120
+  scan_seconds: 300
 
 sync:
   github:
     orgs: []
   gitlab:
     groups: []
+  azuredevops:
+    orgs: []
+    projects: []
+  bitbucket:
+    workspaces: []
+
+# Named board views (subsets of projects). Empty / omitted → implicit "default"
+# view containing every tracked project. Membership may overlap across views.
+# views:
+#   - id: work
+#     label: Work
+#     projects: [demo]
 
 # Curated by: gitboard sync
 # Optional per project: local_path: ~/code/my-clone

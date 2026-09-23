@@ -87,7 +87,7 @@ func main() {
 }
 
 func printUsage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, `gitboard - GitLab + GitHub code-change board (gh + glab)
+	_, _ = fmt.Fprintf(w, `gitboard - local code-change board (gh + glab + git)
 
 Usage:
   gitboard init [-config path]
@@ -103,7 +103,7 @@ Commands:
 
 Sync flags:
   -config path          Config file (default: %s)
-  -host github|gitlab   Limit discovery to one forge
+  -host github|gitlab|azuredevops|bitbucket   Limit discovery to one forge
   -add owner/repo       Non-interactive: add a project (requires -host)
   -remove id            Non-interactive: remove a project by id
   -dry-run              Discover / print without writing

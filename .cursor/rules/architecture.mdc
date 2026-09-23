@@ -84,7 +84,7 @@ After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with
 | `GET` | `/api/sync/candidates` | Discover forge repos from `sync` sources (`?host=`); JSON `candidates` plus optional `warnings` for per-source forge failures |
 | `POST` | `/api/sync/projects` | Add, remove, or set `local_path` on a tracked project (`action` add/remove/set_local_path) |
 | `PUT` | `/api/sync/selection` | Replace tracked set from selected host/path refs |
-| `GET`/`PUT` | `/api/sync/sources` | Read/update GitHub orgs and GitLab groups |
+| `GET`/`PUT` | `/api/sync/sources` | Read/update GitHub orgs, GitLab groups, Azure DevOps orgs, and Bitbucket workspaces |
 | `GET`/`PUT` | `/api/local/roots` | Read/update `local.roots` scan directories |
 | `GET`/`PUT` | `/api/views` | Read sync state / replace named view definitions |
 
