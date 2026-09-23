@@ -180,11 +180,13 @@ func TestFetchOriginSmartCoalescesAndCoversLeftoverBranches(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, e1 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main"}); errCh <- e1
+		_, e1 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main"})
+		errCh <- e1
 	}()
 	go func() {
 		defer wg.Done()
-		_, e2 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"feature/x"}); errCh <- e2
+		_, e2 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"feature/x"})
+		errCh <- e2
 	}()
 	wg.Wait()
 	close(errCh)
