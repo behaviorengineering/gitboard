@@ -1,10 +1,10 @@
-// Package cliexec re-exports the shared forge-clients git executor.
+// Package cliexec re-exports the shared gitvalet git executor.
 package cliexec
 
 import (
 	"time"
 
-	"github.com/behaviorengineering/majordomo-forge-clients/pkg/gitexec"
+	"github.com/behaviorengineering/gitvalet/pkg/gitexec"
 )
 
 // Exec is the injectable CLI surface used by forge and local git callers.

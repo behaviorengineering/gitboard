@@ -1,3 +1,3 @@
 package cliexec
 
-// Resilience behavior is tested in majordomo-forge-clients/pkg/gitexec.
+// Resilience behavior is tested in gitvalet/pkg/gitexec.
