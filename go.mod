@@ -3,6 +3,7 @@ module github.com/behaviorengineering/gitboard
 go 1.26.5
 
 require (
+	github.com/behaviorengineering/majordomo-forge-clients v0.1.0
 	github.com/behaviorengineering/strop v0.2.0
 	github.com/charmbracelet/huh v1.0.0
 	github.com/failsafe-go/failsafe-go v0.9.7

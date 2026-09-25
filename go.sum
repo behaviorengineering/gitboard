@@ -6,6 +6,8 @@ github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiE
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/aymanbagabas/go-udiff v0.3.1 h1:LV+qyBQ2pqe0u42ZsUEtPiCaUoqgA9gYRDs3vj1nolY=
 github.com/aymanbagabas/go-udiff v0.3.1/go.mod h1:G0fsKmG+P6ylD0r6N/KgQD/nWzgfnl8ZBcNLgcbrw8E=
+github.com/behaviorengineering/majordomo-forge-clients v0.1.0 h1:lSZS2jOrkkNMn1qPVIrfR/3Y3CDrkcAT8OlyX+3p+bU=
+github.com/behaviorengineering/majordomo-forge-clients v0.1.0/go.mod h1:BSufHquGFU3p0kk1sJV6lu2nzshCcT+1vpoaYHvNnSk=
 github.com/behaviorengineering/strop v0.2.0 h1:wT7RlBV1QrVxsVUXWsECC2UC9LgRf7GCFjdfdQC36pU=
 github.com/behaviorengineering/strop v0.2.0/go.mod h1:gOkzPQK8c0QQ3ZKeh8oiHlBv2Sx4BYjkTQshCsy75eA=
 github.com/bits-and-blooms/bitset v1.24.4 h1:95H15Og1clikBrKr/DuzMXkQzECs1M6hhoGXLwLQOZE=
