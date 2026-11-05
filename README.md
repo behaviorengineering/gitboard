@@ -91,7 +91,7 @@ Override path with `GITBOARD_CONFIG`. LLM fields also accept env overrides: `GIT
 | `gitboard serve` | Direct dashboard (no process-compose) |
 | `gitboard version` | Print the build version |
 
-Sync helpers: `-add owner/repo -host github|gitlab|azuredevops|bitbucket`, `-remove id`, `-dry-run`, `-host github|gitlab|azuredevops|bitbucket`.
+Sync helpers: `--add owner/repo --host github|gitlab|azuredevops|bitbucket`, `--remove id`, `--dry-run`, `--host github|gitlab|azuredevops|bitbucket`. Without a terminal, `sync` refuses the interactive path and names these flags. Bare `gitboard` prints an operating guide; `gitboard help` lists every command.
 
 `go tool task sync` uses an interactive TUI (Charm huh): arrow keys, space to toggle, `/` to filter, enter to confirm. Already-tracked repos start checked. The interactive prompt currently lists GitHub and GitLab sources.
 

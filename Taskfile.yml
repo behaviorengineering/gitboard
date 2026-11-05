@@ -89,7 +89,7 @@ tasks:
     desc: Create config if missing (never overwrites)
     summary: |
       Builds, then runs gitboard init. The binary picks the path: GITBOARD_CONFIG,
-      then ~/.config/gitboard/config.yaml. Override with: go tool task init -- -config path
+      then ~/.config/gitboard/config.yaml. Override with: go tool task init -- --config path
     deps: [build]
     cmds:
       - "{{.BIN}} init {{.CLI_ARGS}}"
@@ -98,7 +98,7 @@ tasks:
     desc: Discover repos and select tracked projects
     summary: |
       Builds, then runs gitboard sync (interactive). Pass sync flags after --,
-      for example: go tool task sync -- -host github -dry-run
+      for example: go tool task sync -- --host github --dry-run
     deps: [build]
     interactive: true
     cmds:
