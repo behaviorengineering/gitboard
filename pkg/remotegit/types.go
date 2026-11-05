@@ -32,7 +32,7 @@ type Client interface {
 // RepoRef is a discoverable repository from an org or group.
 type RepoRef struct {
 	Host     config.Host
-	Path     string // owner/repo
+	Path     string // owner/repo.
 	Name     string
 	Archived bool
 }

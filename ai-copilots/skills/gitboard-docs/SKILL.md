@@ -3,7 +3,7 @@ name: gitboard-docs
 description: >-
   Route Gitboard documentation and AI guidance to the correct home: README
   pitch, .cursor rules for invariants, ai-copilots skills for operator
-  procedures, and Makefile/tests for enforcement. Use when documenting setup,
+  procedures, and Taskfile/tests for enforcement. Use when documenting setup,
   architecture, commands, or when asked to add CONTRIBUTING-style guidance.
 ---
 
@@ -28,7 +28,7 @@ README stays a short human pitch. Agents read `AGENTS.md` and `ai-copilots/`.
 | Portable AI operator procedures | `ai-copilots/skills/*/SKILL.md` |
 | Durable project invariants (packages, API, board) | `.cursor/rules/*.mdc` (especially `architecture.mdc`) |
 | Shared cross-product practice | `.cursor/packs/shared` via cursor-packs workflow only |
-| Repeatable checks | `Makefile`, Go/JS tests, CI workflows |
+| Repeatable checks | `Taskfile.yml`, Go/JS tests, CI workflows |
 
 ## Core constraints
 
@@ -44,12 +44,12 @@ CORRECT:
 ```text
 Setup steps → ai-copilots/skills/gitboard-setup/SKILL.md
 AGENTS.md links to that skill
-README keeps brew + make serve pitch
+README keeps brew + go tool task serve pitch
 ```
 
 PROHIBITED:
 ```text
-docs/contributor-setup.md with the full make/ci/serve runbook
+docs/contributor-setup.md with the full task/ci/serve runbook
 # and no skill
 ```
 
@@ -67,12 +67,12 @@ both together).
 - Enforcement: docs claim matches `cmd/`, `internal/server`, and package layout
 - Violation: STOP, fix the mismatch
 
-**CONSTRAINT:** MUST NOT invent Make targets, CLI flags, env vars, or API routes
+**CONSTRAINT:** MUST NOT invent Taskfile tasks, CLI flags, env vars, or API routes
 that are absent from the repository. When a doc change exposes a mismatch,
 MUST update the doc to match code, or implement the missing surface with an
 explicit user request.
 
-- Enforcement: `make help`, `./bin/gitboard -h`, and route list in architecture
+- Enforcement: `go tool task`, `./bin/gitboard -h`, and route list in architecture
 - Violation: STOP, correct the doc or ask before inventing behavior
 
 **CONSTRAINT:** MUST NOT add Gitboard-only operator skills or product brand
@@ -93,7 +93,7 @@ MUST NOT use the em dash character (U+2014).
 1. **Classify the request** — pitch vs invariant vs operator procedure vs enforceable check.
 2. **Pick one home** from the placement map. Prefer extending an existing skill/rule over a new file.
 3. **Cross-link** — `AGENTS.md` and `ai-copilots/skills/README.md` for skill load order; README for human commands only.
-4. **Verify commands** — run or inspect `make help` / CLI usage / architecture API table before documenting them.
+4. **Verify commands** — run or inspect `go tool task` / CLI usage / architecture API table before documenting them.
 5. **Wire discovery** — if a new `ai-copilots` skill is added, update BOOTSTRAP examples and host symlinks per [BOOTSTRAP.md](../../BOOTSTRAP.md).
 
 ## Related
@@ -110,7 +110,7 @@ MUST NOT use the em dash character (U+2014).
       Pass: one clear home; no duplicate long guides
       Fail: STOP, relocate
 - [ ] **No invented surface:** Commands and routes exist in tree
-      Method: `make help` / CLI help / architecture.mdc
+      Method: `go tool task` / CLI help / architecture.mdc
       Pass: every cited command/route is real
       Fail: STOP, fix doc or implement with explicit request
 - [ ] **Architecture aligned:** Package/API claims match `architecture.mdc` and code

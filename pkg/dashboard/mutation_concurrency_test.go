@@ -258,7 +258,7 @@ func TestPullVersusOriginFetchSerialize(t *testing.T) {
 func TestPullVersusSyncInvestigationSerialize(t *testing.T) {
 	common := filepath.Clean(t.TempDir())
 	fake := newConcurrentLocalFake(common)
-	close(fake.fetchRelease) // investigate fetch completes once the pull lease is released
+	close(fake.fetchRelease) // investigate fetch completes once the pull lease is released.
 	service := New(nil, nil, nil, nil, fake)
 	service.Mutations = localgit.NewMutationCoordinator(nil)
 	commands := NewCommands(service)
@@ -319,6 +319,7 @@ func TestPullVersusSyncInvestigationSerialize(t *testing.T) {
 		t.Fatal("investigate should compare after the lease")
 	}
 }
+
 func TestQueuedPullCancelsWithContext(t *testing.T) {
 	common := filepath.Clean(t.TempDir())
 	fake := newConcurrentLocalFake(common)

@@ -30,7 +30,7 @@ import (
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
-// version is set by GoReleaser / make build via -ldflags -X main.version=...
+// version is set by GoReleaser / go tool task build via -ldflags -X main.version=...
 // go install does not apply those ldflags, so reportVersion falls back to BuildInfo.
 var version = "dev"
 

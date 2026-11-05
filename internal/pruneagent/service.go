@@ -67,7 +67,7 @@ type Evidence struct {
 
 // Card is the UI verdict.
 type Card struct {
-	Verdict  string   `json:"verdict"` // drop | keep | ask_user
+	Verdict  string   `json:"verdict"` // drop | keep | ask_user.
 	Summary  string   `json:"summary"`
 	Bullets  []string `json:"bullets"`
 	Command  string   `json:"command,omitempty"`
@@ -80,7 +80,7 @@ type Result struct {
 	Card      Card     `json:"card"`
 	Evidence  Evidence `json:"evidence"`
 	Model     string   `json:"model,omitempty"`
-	Source    string   `json:"source,omitempty"` // llm | rules
+	Source    string   `json:"source,omitempty"` // llm | rules.
 }
 
 // Service runs investigations into agentsession directories.

@@ -81,7 +81,7 @@ type GitLabSync struct {
 // AzureDevOpsSync lists Azure DevOps orgs (and optional projects) to discover.
 type AzureDevOpsSync struct {
 	Orgs     []string `yaml:"orgs"`
-	Projects []string `yaml:"projects"` // optional project-name filter within orgs
+	Projects []string `yaml:"projects"` // optional project-name filter within orgs.
 }
 
 // BitbucketSync lists Bitbucket workspaces to discover.
@@ -388,7 +388,7 @@ func normalizeViews(doc *File) error {
 		memberSeen := map[string]struct{}{}
 		for _, pid := range members {
 			if _, ok := known[pid]; !ok {
-				continue // drop orphans
+				continue // drop orphans.
 			}
 			if _, ok := memberSeen[pid]; ok {
 				continue

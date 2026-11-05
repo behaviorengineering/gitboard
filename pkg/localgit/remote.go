@@ -7,8 +7,8 @@ import (
 
 // RemoteRef is a forge identity parsed from a git remote URL.
 type RemoteRef struct {
-	Host string // github | gitlab
-	Path string // owner/repo (no .git)
+	Host string // github | gitlab.
+	Path string // owner/repo (no .git).
 }
 
 // ParseRemoteURL maps common GitHub/GitLab clone URLs to host+path.

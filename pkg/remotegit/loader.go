@@ -19,11 +19,11 @@ const DefaultCITTL = 30 * time.Second
 type SummaryOpts struct {
 	Fresh     bool
 	Cache     *TTLCache
-	Auth      *AuthCache    // optional request-scoped auth reuse
-	HeadsTTL  time.Duration // 0 = always refetch heads
-	MergedTTL time.Duration // 0 = always refetch merged
-	OpenTTL   time.Duration // 0 = DefaultOpenTTL when Cache set; negative = always refetch
-	CITTL     time.Duration // 0 = DefaultCITTL when Cache set; negative = always refetch
+	Auth      *AuthCache    // optional request-scoped auth reuse.
+	HeadsTTL  time.Duration // 0 = always refetch heads.
+	MergedTTL time.Duration // 0 = always refetch merged.
+	OpenTTL   time.Duration // 0 = DefaultOpenTTL when Cache set; negative = always refetch.
+	CITTL     time.Duration // 0 = DefaultCITTL when Cache set; negative = always refetch.
 }
 
 // AuthCache reuses AuthStatus results within one dashboard collect (or similar request).

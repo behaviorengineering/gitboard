@@ -17,20 +17,20 @@ alwaysApply: false
 ## Forbidden
 
 - MUST NOT run `go mod init` or delete root `go.mod` / `go.sum` or `go.work`.
-- MUST NOT recreate module layout or duplicate Makefile targets that already exist.
+- MUST NOT recreate module layout or duplicate Taskfile tasks that already exist.
 - MUST NOT change import paths to "fix" tests without a stated reason.
 - MUST NOT re-add a `providers/strop` submodule or commit a long-lived `replace` for strop unless the user explicitly asks.
 - MUST NOT implement gitboard features by permanently forking strop inside this repo; change strop upstream, tag, then `go get`.
 
 ## Required
 
-- MUST use existing `go.mod`, `go.sum`, `go.work`, and Makefile targets (`make build`, `make test`, `make vet`, `make ci`).
+- MUST use existing `go.mod`, `go.sum`, `go.work`, and Taskfile tasks (`go tool task build`, `go tool task test`, `go tool task vet`, `go tool task ci`).
 - MUST run `go mod tidy` after adding or removing dependencies, then `go mod verify` when checking integrity.
 - For temporary local strop work: sibling checkout + `go.work` `use` path (see `architecture.mdc`); drop it before merge once the published tag is bumped.
 
 ## Commands
 
-- Correct: `go mod tidy`, `make test`, `make build`, `go build ./...`, `make ci`.
+- Correct: `go mod tidy`, `go tool task test`, `go tool task build`, `go build ./...`, `go tool task ci`.
 - Wrong: `go mod init new_module`, `rm go.mod go.sum`.
 
 ## On failure

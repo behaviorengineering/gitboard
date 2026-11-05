@@ -62,7 +62,7 @@ type Candidate struct {
 	Path    string      `json:"path"`
 	Name    string      `json:"name"`
 	Tracked bool        `json:"tracked"`
-	Index   int         `json:"index"` // 1-based display index
+	Index   int         `json:"index"` // 1-based display index.
 }
 
 // DiscoverResult is forge discovery output with optional per-source warnings.

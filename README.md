@@ -28,7 +28,7 @@ The first run creates `~/.config/gitboard/config.yaml` if missing (never overwri
 
 Each GitHub Release includes notes for what changed since the previous tag.
 
-`process-compose` is only needed for the from-source `make serve` TUI below.
+`process-compose` is only needed for the from-source `go tool task serve` TUI below.
 
 ## From source
 
@@ -38,12 +38,12 @@ glab auth login
 gh auth login
 git clone https://github.com/behaviorengineering/gitboard.git
 cd gitboard
-make serve
+go tool task serve
 ```
 
-Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/). Stop with `make serve-down`. `make serve` and `gitboard serve` both create the config file if it is missing.
+Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/). Stop with `go tool task serve-down`. `go tool task serve` and `gitboard serve` both create the config file if it is missing.
 
-`make serve` runs a **process-compose** TUI. The CLI `gitboard serve` still works for one-off runs without the TUI.
+`go tool task serve` runs a **process-compose** TUI. The CLI `gitboard serve` still works for one-off runs without the TUI.
 
 ## Config
 
@@ -84,16 +84,16 @@ Override path with `GITBOARD_CONFIG`. LLM fields also accept env overrides: `GIT
 
 | Command | Purpose |
 |---------|---------|
-| `gitboard init` / `make init` | Create config if missing (never overwrite) |
-| `gitboard sync` / `make sync` | Discover repos and select tracked projects |
-| `make serve` | process-compose TUI on `:1325`; rebuilds/restarts when `.go` or static UI files change |
-| `make serve-down` | Stop this Gitboard process-compose project |
+| `gitboard init` / `go tool task init` | Create config if missing (never overwrite) |
+| `gitboard sync` / `go tool task sync` | Discover repos and select tracked projects |
+| `go tool task serve` | process-compose TUI on `:1325`; rebuilds/restarts when `.go` or static UI files change |
+| `go tool task serve-down` | Stop this Gitboard process-compose project |
 | `gitboard serve` | Direct dashboard (no process-compose) |
 | `gitboard version` | Print the build version |
 
 Sync helpers: `-add owner/repo -host github|gitlab|azuredevops|bitbucket`, `-remove id`, `-dry-run`, `-host github|gitlab|azuredevops|bitbucket`.
 
-`make sync` uses an interactive TUI (Charm huh): arrow keys, space to toggle, `/` to filter, enter to confirm. Already-tracked repos start checked. The interactive prompt currently lists GitHub and GitLab sources.
+`go tool task sync` uses an interactive TUI (Charm huh): arrow keys, space to toggle, `/` to filter, enter to confirm. Already-tracked repos start checked. The interactive prompt currently lists GitHub and GitLab sources.
 
 ## Local checkouts
 
