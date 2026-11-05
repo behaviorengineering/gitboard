@@ -26,7 +26,7 @@ export GITBOARD_BIN="$GITBOARD_DIR/bin/gitboard"
 
 if [[ ! -f "$GITBOARD_CONFIG" ]]; then
   echo "missing config: $GITBOARD_CONFIG — creating via init" >&2
-  "$GITBOARD_BIN" init -config "$GITBOARD_CONFIG"
+  "$GITBOARD_BIN" init --config "$GITBOARD_CONFIG"
 fi
 
 chmod +x "$GITBOARD_DIR/scripts/"*.sh 2>/dev/null || true

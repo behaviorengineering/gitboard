@@ -19,7 +19,8 @@ Local code-change board (not deployments/runtime ops). Talks to forges via CLIs 
 ## Packages
 
 ```
-cmd/gitboard/           # CLI: init, sync, serve
+cmd/gitboard/           # entrypoint: version stamp, signals, cli.Execute
+internal/cli/           # Cobra command tree: init, sync, serve, version, agent guide
 pkg/cliexec/            # shared gh/glab/git exec
 pkg/board/              # shared JSON data types (DTOs) for dashboard UI and forge adapters
 pkg/remotegit/          # forge adapters (GitHub, GitLab, …; uses board for shared types)
@@ -37,7 +38,7 @@ internal/conformity/    # network retrieval contracts across upstreams
 internal/benchnet/      # call-count and latency benchmarks
 ```
 
-**Dependency direction:** `cmd` → `internal/*` and `pkg/*`; `internal/*` may import `pkg/*`; domain packages must not import `cmd`. Prefer `cliexec` for process calls. Do not grow business logic in `main` switch arms beyond flag parse + wire-up.
+**Dependency direction:** `cmd` → `internal/*` and `pkg/*`; `internal/*` may import `pkg/*`; domain packages must not import `cmd`. Prefer `cliexec` for process calls. Keep `main` to wiring; Cobra `RunE` handlers in `internal/cli` parse flags and call services.
 
 ## strop dependency
 

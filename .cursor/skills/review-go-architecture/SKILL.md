@@ -21,6 +21,7 @@ Ask for target path(s). Default: `internal/` and `cmd/`.
 
 ```
 cmd/gitboard/main.go
+internal/cli/             # Cobra command tree
 pkg/cliexec/
 pkg/board/
 pkg/remotegit/

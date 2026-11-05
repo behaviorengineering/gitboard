@@ -65,7 +65,7 @@ go tool task tidy
 go tool task ci              # primary local gate
 go tool task init            # create config if missing
 go tool task sync            # interactive project selection
-go tool task sync -- -host github -dry-run
+go tool task sync -- --host github --dry-run
 go tool task serve           # process-compose on :1325
 go tool task serve-down
 go tool task conformity          # fake-exec network contracts
@@ -77,7 +77,7 @@ Direct CLI (after `go tool task build` or installed binary):
 
 ```bash
 ./bin/gitboard init
-./bin/gitboard sync [-host …] [-add owner/repo -host …] [-remove id] [-dry-run]
+./bin/gitboard sync [--host …] [--add owner/repo --host …] [--remove id] [--dry-run]
 ./bin/gitboard serve [-addr 127.0.0.1:1325] [-allow-non-localhost]
 ./bin/gitboard version
 ```
@@ -128,7 +128,7 @@ GITBOARD_OPENINFERENCE_ENDPOINT
 
 **Note:** Tasks pass no config path, so `init`, `sync` and `serve` use the
 binary's resolution order above. Override with `GITBOARD_CONFIG=…` or flags after
-`--`, for example `go tool task init -- -config path`.
+`--`, for example `go tool task init -- --config path`.
 
 Human overview of config sections: [README.md](../../../README.md).
 Deeper operator-config patterns: `.cursor/skills/operator-config/SKILL.md`.
@@ -136,7 +136,7 @@ Deeper operator-config patterns: `.cursor/skills/operator-config/SKILL.md`.
 ## Serve and sync
 
 **CONSTRAINT:** The dashboard MUST bind to loopback by default. MUST NOT widen
-the listen address without an explicit user request and `-allow-non-localhost`.
+the listen address without an explicit user request and `--allow-non-localhost`.
 
 - Enforcement: `gitboard serve` refuses non-loopback unless the flag is set
 - Violation: STOP, keep `127.0.0.1` / localhost
@@ -198,6 +198,6 @@ integrity. Prefer published `github.com/behaviorengineering/strop@vX.Y.Z`.
       Pass: exit 0
       Fail: STOP, fix failures
 - [ ] **Serve bind:** still loopback unless user requested otherwise
-      Method: check `-addr` / `-allow-non-localhost` usage
+      Method: check `--addr` / `--allow-non-localhost` usage
       Pass: localhost default preserved
       Fail: STOP, revert bind widening
