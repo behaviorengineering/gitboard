@@ -131,6 +131,21 @@ tasks:
     cmds:
       - go test ./internal/conformity/ -run 'TestLiveAdapterContract|TestLiveDisabledByDefault' -count=1 -v
 
+  hooks-install:
+    desc: Install Lefthook git hooks for this clone or worktree
+    summary: "Ensures lefthook is on PATH, then lefthook install."
+    cmds:
+      - |
+        command -v lefthook >/dev/null 2>&1 || {
+          if command -v brew >/dev/null 2>&1; then brew install lefthook
+          else go install github.com/evilmartians/lefthook@latest; fi
+        }
+        command -v lefthook >/dev/null 2>&1 || {
+          echo "lefthook not on PATH; add $(go env GOPATH)/bin"
+          exit 1
+        }
+        lefthook install
+
   # Unlisted (no desc): microbenchmarks, run on demand.
   bench-net:
     cmds:

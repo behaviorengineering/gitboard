@@ -113,6 +113,6 @@ projects:
 ## Releases (for agents)
 
 - Every releasable merge to `main` cuts a patch tag (`vX.Y.(Z+1)`) and publishes it with GoReleaser (`.github/workflows/auto-patch-release.yml`).
-- No tag is cut when every commit since the last `v*` is `docs:`, `chore:` or `ci:`, when every changed path is agent harness (`.cursor/`, `.claude/`, `AGENTS.md`, `CLAUDE.md`, `lefthook.yml`), or when the tip commit says `[skip release]`.
+- No tag is cut when every commit since the last `v*` is `docs:`, `chore:` or `ci:`, when every changed path is agent harness (`.cursor/`, `.claude/`, `AGENTS.md`, `CLAUDE.md`, `lefthook.yml`, `scripts/git-hooks/`), or when the tip commit says `[skip release]`.
 - Minor and major bumps are manual: run the **Auto patch release** workflow with the `bump` input.
 - Pin a consumer to `vX.Y.Z` only after that workflow run is green, including its `verify` job.

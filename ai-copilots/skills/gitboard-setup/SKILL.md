@@ -63,6 +63,7 @@ go tool task format          # gofumpt
 go tool task lint            # whole module, including older debt
 go tool task tidy
 go tool task ci              # primary local gate
+go tool task hooks-install   # Lefthook git hooks for this clone
 go tool task init            # create config if missing
 go tool task sync            # interactive project selection
 go tool task sync -- --host github --dry-run

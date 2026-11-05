@@ -27,7 +27,7 @@ README stays a short human pitch. Agents read `AGENTS.md` and `ai-copilots/`.
 | Agent entry + load order | [AGENTS.md](../../../AGENTS.md) |
 | Portable AI operator procedures | `ai-copilots/skills/*/SKILL.md` |
 | Durable project invariants (packages, API, board) | `.cursor/rules/*.mdc` (especially `architecture.mdc`) |
-| Shared cross-product practice | cursor-packs Cursor plugin (Lefthook and CI still submodule `.cursor/packs/shared`) |
+| Shared cross-product practice | cursor-packs Cursor plugin |
 | Repeatable checks | `Taskfile.yml`, Go/JS tests, CI workflows |
 
 ## Core constraints
