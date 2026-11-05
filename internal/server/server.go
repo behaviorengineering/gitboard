@@ -30,7 +30,7 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
-const maxJSONBody = 4 << 20 // 4 MiB
+const maxJSONBody = 4 << 20 // 4 MiB.
 
 // HTTP error message constants for repeated handler responses.
 const (

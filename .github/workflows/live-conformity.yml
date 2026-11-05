@@ -83,4 +83,4 @@ jobs:
           GITBOARD_LIVE_BITBUCKET_PATH: ${{ inputs.bitbucket_path || vars.GITBOARD_LIVE_BITBUCKET_PATH }}
           BITBUCKET_TOKEN: ${{ secrets.GITBOARD_LIVE_BITBUCKET_TOKEN }}
           AZURE_DEVOPS_EXT_PAT: ${{ secrets.GITBOARD_LIVE_AZURE_PAT }}
-        run: make conformity-live
+        run: go tool task conformity-live

@@ -571,7 +571,7 @@ func TestTriageWithLogBody(t *testing.T) {
 }
 
 func TestPruneInvestigateUnavailable(t *testing.T) {
-	mux := testMux(t, nil, nil) // Prune nil
+	mux := testMux(t, nil, nil) // Prune nil.
 	res := httptest.NewRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)

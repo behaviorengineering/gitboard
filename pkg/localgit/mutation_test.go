@@ -163,7 +163,7 @@ func TestMutationCoordinatorReleaseAfterErrorPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	lease.Release()
-	lease.Release() // idempotent
+	lease.Release() // idempotent.
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

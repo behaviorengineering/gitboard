@@ -45,8 +45,8 @@ type MergedReview struct {
 
 // Prune hint values for local worktrees whose remote head is gone.
 const (
-	PruneSafe   = "safe"   // forge merged PR/MR, or local content already on default
-	PruneLikely = "likely" // remote gone, confirmed no merged PR/MR, content not on default
+	PruneSafe   = "safe"   // forge merged PR/MR, or local content already on default.
+	PruneLikely = "likely" // remote gone, confirmed no merged PR/MR, content not on default.
 )
 
 // ProjectSummary is one row in the dashboard.
@@ -93,7 +93,7 @@ const (
 
 // LocalAppearance is one on-disk checkout of a forge project (standalone or submodule).
 type LocalAppearance struct {
-	Role          string             `json:"role,omitempty"` // standalone | submodule
+	Role          string             `json:"role,omitempty"` // standalone | submodule.
 	Path          string             `json:"path,omitempty"`
 	DisplayID     string             `json:"display_id,omitempty"`
 	ParentPath    string             `json:"parent_path,omitempty"`
@@ -155,7 +155,7 @@ type LocalWorktree struct {
 	Ahead            int    `json:"ahead,omitempty"`
 	Behind           int    `json:"behind,omitempty"`
 	Upstream         string `json:"upstream,omitempty"`
-	PruneHint        string `json:"prune_hint,omitempty"` // safe | likely
+	PruneHint        string `json:"prune_hint,omitempty"` // safe | likely.
 	ContentOnDefault bool   `json:"content_on_default,omitempty"`
 	MergedID         int    `json:"merged_id,omitempty"`
 	MergedURL        string `json:"merged_url,omitempty"`

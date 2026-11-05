@@ -18,7 +18,7 @@ const maxScanDepth = 5
 // ScanRoots walks roots for git checkouts and indexes them by origin remote.
 func (in *Inspector) ScanRoots(ctx context.Context, roots []string) Discovery {
 	d := Discovery{ByKey: map[string][]Checkout{}}
-	seenCommon := map[string]struct{}{} // common git dir already indexed
+	seenCommon := map[string]struct{}{} // common git dir already indexed.
 	for _, root := range roots {
 		abs, err := ExpandPath(root)
 		if err != nil {

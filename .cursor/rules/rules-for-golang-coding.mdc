@@ -46,9 +46,9 @@ keywords: [go, golang, gitboard, cli, gh, glab, cliexec]
 ## Done when
 
 ```bash
-make test
-make vet
-# or: make ci
+go tool task test
+go tool task vet
+# or: go tool task ci
 go mod tidy   # after dependency changes
 ```
 

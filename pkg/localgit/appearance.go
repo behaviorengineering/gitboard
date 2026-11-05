@@ -15,12 +15,12 @@ const (
 
 // Checkout is one distinct on-disk clone of a forge remote.
 type Checkout struct {
-	Path           string // absolute preferred worktree path
+	Path           string // absolute preferred worktree path.
 	CommonGitDir   string
-	Superproject   string // absolute parent working tree when a submodule; empty if standalone
-	Role           string // standalone | submodule
-	RelPath        string // path relative to Superproject when submodule
-	ParentBasename string // basename(Superproject) when submodule
+	Superproject   string // absolute parent working tree when a submodule; empty if standalone.
+	Role           string // standalone | submodule.
+	RelPath        string // path relative to Superproject when submodule.
+	ParentBasename string // basename(Superproject) when submodule.
 }
 
 // Appearances returns all checkouts for a forge track key.

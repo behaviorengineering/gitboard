@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start Gitboard via process-compose (standalone stack).
 # Rebuilds and restarts on .go / static changes (process-compose watch).
-# Disable: PC_NO_WATCH=1 make serve
+# Disable: PC_NO_WATCH=1 go tool task serve
 set -euo pipefail
 
 GITBOARD_DIR="$(cd "$(dirname "$0")/.." && pwd)"

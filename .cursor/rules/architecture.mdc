@@ -14,7 +14,7 @@ Local code-change board (not deployments/runtime ops). Talks to forges via CLIs 
 | Auth | Existing CLI login sessions |
 | AI triage | Optional OpenAI-compatible chat in config `llm` |
 | Agent sessions | `strop/agentsession` (prune investigate) via published module |
-| Supervision | process-compose (`make serve`); `gitboard serve` for one-off |
+| Supervision | process-compose (`go tool task serve`); `gitboard serve` for one-off |
 
 ## Packages
 

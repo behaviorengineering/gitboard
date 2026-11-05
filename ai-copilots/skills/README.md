@@ -5,7 +5,7 @@ Canonical operator skills for this module. Host IDEs discover them via
 
 | Skill | Load when |
 |-------|-----------|
-| [gitboard-setup](gitboard-setup/SKILL.md) | First-time clone, config, serve, sync, `make ci`, conformity |
+| [gitboard-setup](gitboard-setup/SKILL.md) | First-time clone, config, serve, sync, `go tool task ci`, conformity |
 | [gitboard-docs](gitboard-docs/SKILL.md) | Adding or changing README, rules, skills, or operational docs |
 
 ## Related project guidance (not duplicated here)

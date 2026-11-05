@@ -1,0 +1,137 @@
+version: "3"
+
+vars:
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  BIN: bin/gitboard{{exeExt}}
+  LDFLAGS: "-X main.version={{.VERSION}}"
+  GO_DIRS: ./cmd ./internal ./pkg
+  GO_PKGS: ./cmd/... ./internal/... ./pkg/...
+
+tasks:
+  default:
+    desc: List local-dev tasks
+    summary: "Prints go tool task --list and the first three steps."
+    silent: true
+    cmds:
+      - go tool task --list
+      - |
+        echo ""
+        echo "Next steps:"
+        echo "  1. go tool task init"
+        echo "  2. go tool task sync"
+        echo "  3. go tool task serve"
+
+  build:
+    desc: Build bin/gitboard
+    summary: "go build with the git describe version stamped into main.version."
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.BIN}} ./cmd/gitboard
+
+  test:
+    desc: Run unit tests (JS + Go)
+    summary: "Runs the dashboard JS tests with node --test, then go test ./.... Needs Node on PATH."
+    deps: [test-js]
+    cmds:
+      - go test ./...
+
+  # Unlisted (no desc): called by test and ci, still runnable on its own.
+  test-js:
+    cmds:
+      - node --test ./internal/server/static/*_test.js
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Run go mod tidy
+    cmds:
+      - go mod tidy
+
+  format:
+    desc: Format Go sources with gofumpt
+    summary: "go tool gofumpt -w over cmd, internal and pkg (rewrites files)."
+    cmds:
+      - go tool gofumpt -w {{.GO_DIRS}}
+
+  lint:
+    desc: Run golangci-lint on cmd, internal and pkg
+    summary: |
+      go tool golangci-lint over cmd, internal and pkg with .golangci.yml.
+      Reports the whole module, including older debt. CI gates only new lines.
+      Pass extra flags after --, for example: go tool task lint -- --fix
+    cmds:
+      - go tool golangci-lint run --timeout 5m {{.CLI_ARGS}} {{.GO_PKGS}}
+
+  ci:
+    desc: Local twin of CI (tidy, gofumpt, vet, lint, race tests, build)
+    summary: |
+      Tidy check, gofumpt check, go vet, golangci-lint on lines changed since
+      origin/main, JS tests, race tests and build. Needs Node on PATH.
+    cmds:
+      - go mod tidy -diff
+      - |
+        unformatted=$(go tool gofumpt -l {{.GO_DIRS}})
+        if [ -n "$unformatted" ]; then
+          echo "gofumpt needed (go tool task format):"
+          echo "$unformatted"
+          exit 1
+        fi
+      - go vet ./...
+      - go tool golangci-lint run --timeout 5m --new-from-rev origin/main {{.GO_PKGS}}
+      - task: test-js
+      - go test -race -count=1 ./...
+      - go build ./...
+
+  init:
+    desc: Create config if missing (never overwrites)
+    summary: |
+      Builds, then runs gitboard init. The binary picks the path: GITBOARD_CONFIG,
+      then ~/.config/gitboard/config.yaml. Override with: go tool task init -- -config path
+    deps: [build]
+    cmds:
+      - "{{.BIN}} init {{.CLI_ARGS}}"
+
+  sync:
+    desc: Discover repos and select tracked projects
+    summary: |
+      Builds, then runs gitboard sync (interactive). Pass sync flags after --,
+      for example: go tool task sync -- -host github -dry-run
+    deps: [build]
+    interactive: true
+    cmds:
+      - "{{.BIN}} sync {{.CLI_ARGS}}"
+
+  serve:
+    desc: process-compose TUI on :1325; creates config if missing
+    summary: "Builds, then starts the process-compose stack via scripts/pc-up.sh. Needs bash and process-compose."
+    deps: [build]
+    interactive: true
+    cmds:
+      - ./scripts/pc-up.sh
+
+  serve-down:
+    desc: Stop this Gitboard process-compose project
+    summary: "Stops this repo's process-compose project via scripts/pc-down.sh."
+    cmds:
+      - ./scripts/pc-down.sh
+
+  conformity:
+    desc: Network retrieval contract tests (fake exec)
+    cmds:
+      - go test ./internal/conformity/ -count=1 -v
+
+  conformity-live:
+    desc: Opt-in live forge Collect (needs credentials)
+    summary: "Runs the live adapter contract against real forges. Needs gh, glab or az sessions and GITBOARD_LIVE_* paths."
+    env:
+      GITBOARD_CONFORMITY_LIVE: "1"
+    cmds:
+      - go test ./internal/conformity/ -run 'TestLiveAdapterContract|TestLiveDisabledByDefault' -count=1 -v
+
+  # Unlisted (no desc): microbenchmarks, run on demand.
+  bench-net:
+    cmds:
+      - go test ./internal/benchnet/ -bench=. -benchmem -count=1

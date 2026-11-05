@@ -38,6 +38,6 @@ Quick scan after reading changed code. Each item: pass / fail / N/A.
 
 ## Tooling
 
-- [ ] `make test` passes
-- [ ] `make vet` passes
-- [ ] `make ci` considered for surface changes
+- [ ] `go tool task test` passes
+- [ ] `go tool task vet` passes
+- [ ] `go tool task ci` considered for surface changes

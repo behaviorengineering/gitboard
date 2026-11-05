@@ -5,7 +5,7 @@ description: Reviews gitboard CLI dispatch and command wiring in cmd/gitboard. U
 
 # Review Go CLI (gitboard)
 
-**Spec sources:** `cmd/gitboard/main.go` (`printUsage`), `Makefile` (`bin/gitboard`).
+**Spec sources:** `cmd/gitboard/main.go` (`printUsage`), `Taskfile.yml` (`bin/gitboard`).
 
 ---
 
@@ -41,7 +41,7 @@ Default: `cmd/gitboard/`. Narrow if the user names a subcommand only (`init`, `s
 
 - [ ] Loads config; wires forge, localgit, dashboard, server, optional LLM/prune.
 - [ ] Default addr is loopback.
-- [ ] process-compose path remains `make serve` (scripts); CLI serve stays one-off.
+- [ ] process-compose path remains `go tool task serve` (scripts); CLI serve stays one-off.
 
 ---
 

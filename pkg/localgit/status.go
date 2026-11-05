@@ -54,8 +54,8 @@ type Status struct {
 // BranchSync is local refs/heads/<name> versus refs/remotes/origin/<name>.
 type BranchSync struct {
 	Name   string `json:"name"`
-	Ahead  int    `json:"ahead,omitempty"`  // local has commits origin lacks
-	Behind int    `json:"behind,omitempty"` // origin has commits local lacks
+	Ahead  int    `json:"ahead,omitempty"`  // local has commits origin lacks.
+	Behind int    `json:"behind,omitempty"` // origin has commits local lacks.
 }
 
 // Inspector reads local git state via the git CLI.
