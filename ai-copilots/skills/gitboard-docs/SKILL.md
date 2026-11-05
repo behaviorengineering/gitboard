@@ -27,7 +27,7 @@ README stays a short human pitch. Agents read `AGENTS.md` and `ai-copilots/`.
 | Agent entry + load order | [AGENTS.md](../../../AGENTS.md) |
 | Portable AI operator procedures | `ai-copilots/skills/*/SKILL.md` |
 | Durable project invariants (packages, API, board) | `.cursor/rules/*.mdc` (especially `architecture.mdc`) |
-| Shared cross-product practice | `.cursor/packs/shared` via cursor-packs workflow only |
+| Shared cross-product practice | cursor-packs Cursor plugin |
 | Repeatable checks | `Taskfile.yml`, Go/JS tests, CI workflows |
 
 ## Core constraints
@@ -79,7 +79,7 @@ explicit user request.
 paths into cursor-packs. Pack membership gate: shared practice only. Product
 operator content stays in this module's `ai-copilots/` or host `.cursor/` overlay.
 
-- Enforcement: `.cursor/rules/cursor-packs.mdc` three questions
+- Enforcement: cursor-packs plugin rule `cursor-packs` three questions
 - Violation: STOP, keep content under `ai-copilots/` or host overlay
 
 **CONSTRAINT:** English only in code, identifiers, comments, paths, and docs.
@@ -98,10 +98,9 @@ MUST NOT use the em dash character (U+2014).
 
 ## Related
 
-- Docs-as-code rule: `.cursor/rules/always-rules-docs-as-code.mdc`
 - Setup skill: [gitboard-setup](../gitboard-setup/SKILL.md)
-- Skill authoring standards: `.cursor/skills/agent-smith/SKILL.md`
-- Pack edits: `.cursor/skills/edit-cursor-packs/SKILL.md`
+- Skill authoring standards: cursor-packs plugin skill `agent-smith`
+- Pack edits: cursor-packs plugin skill `edit-cursor-packs`
 
 ## Pre-completion checklist
 

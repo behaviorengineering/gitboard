@@ -64,7 +64,7 @@ type PullPhases struct {
 //
 // When the branch is checked out, stale nested submodule checkouts are synced
 // with `git submodule update --init --recursive` before refusing a dirty tree
-// and again after a successful fast-forward, so pins like .cursor/packs/shared
+// and again after a successful fast-forward, so nested submodule pins
 // match the parent tip.
 func (in *Inspector) PullFFOnly(ctx context.Context, repoPath, branch string) error {
 	_, err := in.PullFFOnlyWithPhases(ctx, repoPath, branch)

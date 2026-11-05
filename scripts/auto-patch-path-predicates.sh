@@ -25,7 +25,7 @@ _matches_extra_globs() {
 is_harness_only_path() {
   local path="$1"
   case "${path}" in
-    lefthook.yml|lefthook/*) return 0 ;;
+    lefthook.yml|lefthook/*|scripts/git-hooks/*) return 0 ;;
     .claude/*) return 0 ;;
     CLAUDE.md|*/CLAUDE.md|AGENTS.md|*/AGENTS.md) return 0 ;;
   esac

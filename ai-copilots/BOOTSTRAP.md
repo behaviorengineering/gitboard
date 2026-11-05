@@ -52,8 +52,9 @@ ai-copilots/
   skills/gitboard-docs/SKILL.md
 ```
 
-MUST NOT put Gitboard-only operator content into `.cursor/packs/shared`
-(cursor-packs). That pack is for portable shared practice across consumers.
+MUST NOT put Gitboard-only operator content into the cursor-packs plugin.
+That pack is for portable shared practice across consumers. Cursor loads pack
+skills and rules from the plugin.
 
 ---
 

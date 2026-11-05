@@ -20,6 +20,7 @@ check() {
 
 check is_harness_only_path true  "lefthook.yml"
 check is_harness_only_path true  "lefthook/lefthook-go-standalone.yml"
+check is_harness_only_path true  "scripts/git-hooks/default-branch-refuse.sh"
 check is_harness_only_path true  ".claude/skills/foo/SKILL.md"
 check is_harness_only_path true  "CLAUDE.md"
 check is_harness_only_path true  "pkg/engine/AGENTS.md"
