@@ -131,7 +131,7 @@ binary's resolution order above. Override with `GITBOARD_CONFIG=…` or flags af
 `--`, for example `go tool task init -- --config path`.
 
 Human overview of config sections: [README.md](../../../README.md).
-Deeper operator-config patterns: `.cursor/skills/operator-config/SKILL.md`.
+Deeper operator-config patterns: cursor-packs plugin skill `operator-config`.
 
 ## Serve and sync
 
@@ -168,7 +168,7 @@ Tag-driven releases: `.cursor/skills/release-gitboard/SKILL.md`.
 `go.work`, re-add a long-lived `providers/strop` submodule, or permanently
 `replace` strop unless the user explicitly asks.
 
-- Enforcement: `.cursor/rules/always-rules-1-setup.mdc`
+- Enforcement: `.cursor/rules/architecture.mdc` and cursor-packs plugin rule `golang`
 - Violation: STOP, restore module files, use `go get` + `go mod tidy`
 
 After dependency edits: `go mod tidy`, then `go mod verify` when checking
@@ -178,8 +178,8 @@ integrity. Prefer published `github.com/behaviorengineering/strop@vX.Y.Z`.
 
 | Task | Load |
 |------|------|
-| Go generation / quality | `.cursor/skills/golang-quality/SKILL.md` |
-| CLI surface | `.cursor/skills/cli-command-surface/SKILL.md` |
+| Go generation / quality | cursor-packs plugin skill `golang-quality` |
+| CLI surface | cursor-packs plugin skill `cli-command-surface` |
 | Architecture | `.cursor/rules/architecture.mdc` |
 | Docs placement | [gitboard-docs](../gitboard-docs/SKILL.md) |
 

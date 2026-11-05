@@ -89,4 +89,4 @@ After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with
 | `GET`/`PUT` | `/api/local/roots` | Read/update `local.roots` scan directories |
 | `GET`/`PUT` | `/api/views` | Read sync state / replace named view definitions |
 
-**Review skills (on request):** `review-go-code`, `review-go-smells`, `review-go-architecture`, `review-go-cli`, `review-member-visibility`.
+**Review skills (on request, cursor-packs plugin):** `review-code-staged`, `review-code-smells`, `review-member-visibility`, `cli-command-surface`. Architecture review uses this file.
