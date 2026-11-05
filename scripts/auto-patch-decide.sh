@@ -42,7 +42,11 @@ is_manual_event() {
   esac
 }
 
-if [[ "${HEAD_MSG:-}" == *"[skip release]"* ]]; then
+# Only the subject line counts: CI passes the full message, and a body that
+# explains the skip marker must not trigger it.
+head_subject="${HEAD_MSG:-}"
+head_subject="${head_subject%%$'\n'*}"
+if [[ "${head_subject}" == *"[skip release]"* ]]; then
   write_out "skip=true"
   write_out "reason=commit contains [skip release]"
   exit 0
