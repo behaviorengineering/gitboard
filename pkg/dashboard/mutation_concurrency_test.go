@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
@@ -71,7 +71,9 @@ func (f *concurrentLocalFake) InspectPath(_ context.Context, path string) localg
 	return localgit.Status{Mapped: true, Path: path, Branch: "main"}
 }
 
-func (f *concurrentLocalFake) EnrichOriginSync(context.Context, *localgit.Status) {}
+func (f *concurrentLocalFake) OriginSync(context.Context, string) (localgit.RepoSync, error) {
+	return localgit.RepoSync{}, nil
+}
 
 func (f *concurrentLocalFake) CommonGitDir(context.Context, string) (string, error) {
 	return f.common, nil
@@ -81,11 +83,7 @@ func (f *concurrentLocalFake) ListLocalHeads(context.Context, string) ([]string,
 	return nil, nil
 }
 
-func (f *concurrentLocalFake) FetchOriginCached(ctx context.Context, path string, ttl time.Duration, fresh bool, cache *localgit.OriginFetchCache) (bool, error) {
-	return f.FetchOriginSmart(ctx, path, ttl, fresh, cache, nil)
-}
-
-func (f *concurrentLocalFake) FetchOriginSmart(ctx context.Context, _ string, _ time.Duration, _ bool, _ *localgit.OriginFetchCache, _ []string) (bool, error) {
+func (f *concurrentLocalFake) FetchOriginSmart(ctx context.Context, _ string, _ localgit.FetchPolicy, _ *localgit.OriginFetchCache) (bool, error) {
 	f.fetchCalls.Add(1)
 	f.enter()
 	defer f.leave()
@@ -106,7 +104,7 @@ func (f *concurrentLocalFake) OriginRemote(context.Context, string) (string, err
 	return "https://example.test/acme/app.git", nil
 }
 
-func (f *concurrentLocalFake) PullFFOnly(ctx context.Context, _, _ string) error {
+func (f *concurrentLocalFake) PullFFOnly(ctx context.Context, _, _ string) (localgit.PullPhases, error) {
 	f.pullCalls.Add(1)
 	f.enter()
 	defer f.leave()
@@ -116,13 +114,13 @@ func (f *concurrentLocalFake) PullFFOnly(ctx context.Context, _, _ string) error
 		close(f.pullStarted)
 	}
 	if f.pullErr != nil {
-		return f.pullErr
+		return localgit.PullPhases{}, f.pullErr
 	}
 	select {
 	case <-f.pullRelease:
-		return nil
+		return localgit.PullPhases{}, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return localgit.PullPhases{}, ctx.Err()
 	}
 }
 
@@ -146,10 +144,6 @@ func (f *concurrentLocalFake) ContentOnDefault(context.Context, string, string, 
 	return false, "", nil
 }
 
-func (f *concurrentLocalFake) InspectSync(ctx context.Context, path, branch string) (localgit.SyncInspection, error) {
-	return f.CompareSync(ctx, path, branch)
-}
-
 func (f *concurrentLocalFake) CompareSync(ctx context.Context, _, _ string) (localgit.SyncInspection, error) {
 	f.syncCalls.Add(1)
 	select {
@@ -160,17 +154,24 @@ func (f *concurrentLocalFake) CompareSync(ctx context.Context, _, _ string) (loc
 	}
 }
 
+func (f *concurrentLocalFake) CanonicalCheckoutPath(_ context.Context, path string) string {
+	return path
+}
+
+func (f *concurrentLocalFake) Mutator(*localgit.MutationLease) (LocalMutator, error) {
+	return f, nil
+}
+
 func TestConcurrentPullsSameCommonDirSerialize(t *testing.T) {
 	common := filepath.Clean(t.TempDir())
 	fake := newConcurrentLocalFake(common)
 	close(fake.pullRelease)
-	service := New(nil, nil, nil, nil, fake)
-	service.Mutations = localgit.NewMutationCoordinator(nil)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: common,
 		}},
@@ -208,13 +209,12 @@ func TestConcurrentPullsSameCommonDirSerialize(t *testing.T) {
 func TestPullVersusOriginFetchSerialize(t *testing.T) {
 	common := filepath.Clean(t.TempDir())
 	fake := newConcurrentLocalFake(common)
-	service := New(nil, nil, nil, nil, fake)
-	service.Mutations = localgit.NewMutationCoordinator(nil)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: common,
 		}},
@@ -233,7 +233,7 @@ func TestPullVersusOriginFetchSerialize(t *testing.T) {
 
 	fetchDone := make(chan error, 1)
 	go func() {
-		fetchDone <- service.fetchOriginLocked(context.Background(), common, common, time.Minute, true, []string{"main"})
+		fetchDone <- service.fetchOriginLocked(context.Background(), common, common, localgit.FetchPolicy{TTL: time.Minute, Fresh: true, Branches: []string{"main"}})
 	}()
 
 	select {
@@ -259,13 +259,12 @@ func TestPullVersusSyncInvestigationSerialize(t *testing.T) {
 	common := filepath.Clean(t.TempDir())
 	fake := newConcurrentLocalFake(common)
 	close(fake.fetchRelease) // investigate fetch completes once the pull lease is released.
-	service := New(nil, nil, nil, nil, fake)
-	service.Mutations = localgit.NewMutationCoordinator(nil)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: common,
 		}},
@@ -323,13 +322,12 @@ func TestPullVersusSyncInvestigationSerialize(t *testing.T) {
 func TestQueuedPullCancelsWithContext(t *testing.T) {
 	common := filepath.Clean(t.TempDir())
 	fake := newConcurrentLocalFake(common)
-	service := New(nil, nil, nil, nil, fake)
-	service.Mutations = localgit.NewMutationCoordinator(nil)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: common,
 		}},
@@ -368,19 +366,19 @@ func TestMutationEpochInvalidatesStaleSnapshot(t *testing.T) {
 	fake := newConcurrentLocalFake(common)
 	close(fake.pullRelease)
 	close(fake.fetchRelease)
-	service := New(nil, nil, nil, nil, fake)
-	service.Mutations = localgit.NewMutationCoordinator(nil)
+	service := newTestService(&fakeExec{}, fake)
 
-	before := service.mutationEpochs(context.Background(), []localgit.Checkout{{Path: common, CommonGitDir: common}})
-	if service.mutationEpochChanged(context.Background(), localgit.Checkout{Path: common, CommonGitDir: common}, before) {
+	target := inspectTarget{checkout: localgit.Checkout{Path: common, CommonGitDir: common}, common: common}
+	before := service.mutationEpochs([]inspectTarget{target})
+	if service.mutationEpochChanged(target, before) {
 		t.Fatal("epoch should be stable before mutation")
 	}
 
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: common,
 		}},
@@ -392,7 +390,7 @@ func TestMutationEpochInvalidatesStaleSnapshot(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !service.mutationEpochChanged(context.Background(), localgit.Checkout{Path: common, CommonGitDir: common}, before) {
+	if !service.mutationEpochChanged(target, before) {
 		t.Fatal("expected epoch change after pull")
 	}
 }

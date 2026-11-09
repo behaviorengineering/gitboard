@@ -8,23 +8,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
-	"github.com/behaviorengineering/gitboard/pkg/remotegit"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 )
 
 func TestShellConfigOnly(t *testing.T) {
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
-			{ID: "gl-lib", Label: "Lib", Host: config.HostGitLab, Path: "acme/lib"},
-			{ID: "az-x", Label: "X", Host: config.HostAzureDevOps, Path: "org/proj/x"},
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
+			{ID: "gl-lib", Label: "Lib", Host: boardconfig.HostGitLab, Path: "acme/lib"},
+			{ID: "az-x", Label: "X", Host: boardconfig.HostAzureDevOps, Path: "org/proj/x"},
 		},
-		Views: []config.View{
+		Views: []boardconfig.View{
 			{ID: "work", Label: "Work", Projects: []string{"gh-app", "gl-lib"}},
 		},
 	}
-	out, err := Shell(doc, "work")
+	s := newTestService(&fakeExec{}, nil)
+	out, err := s.Shell(doc, "work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,20 +56,20 @@ func TestShellConfigOnly(t *testing.T) {
 	if !byID["gl-lib"].Capabilities.FailedJobs {
 		t.Fatalf("gitlab capabilities: %+v", byID["gl-lib"].Capabilities)
 	}
-	if _, err := Shell(doc, "nope"); err == nil {
+	if _, err := s.Shell(doc, "nope"); err == nil {
 		t.Fatal("expected unknown view error")
 	}
 }
 
 func TestShellNoForgeExec(t *testing.T) {
 	fx := &countingExec{responses: dualHostFake().responses}
-	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	s := newTestService(fx, nil)
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 		},
 	}
-	_, err := Shell(doc, "")
+	_, err := s.Shell(doc, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,11 +135,11 @@ func TestCollectStreamEmitsBeforeSlowestFinishes(t *testing.T) {
 			"acme/lib": 0,
 		},
 	}
-	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
-			{ID: "gl-lib", Label: "Lib", Host: config.HostGitLab, Path: "acme/lib"},
+	s := newTestService(fx, nil)
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
+			{ID: "gl-lib", Label: "Lib", Host: boardconfig.HostGitLab, Path: "acme/lib"},
 		},
 	}
 	fastSeen := make(chan string, 2)

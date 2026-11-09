@@ -1912,6 +1912,23 @@ function renderRows(projects) {
 }
 
 let pollSeconds = 30;
+/**
+ * Launch token from /api/meta. The server sets one only when it was started
+ * with --allow-non-localhost; it then refuses mutating requests without it.
+ */
+let apiToken = '';
+
+/**
+ * Headers for every mutating API request: the server's same-origin guard
+ * refuses a write that is not JSON, or that lacks the launch token when the
+ * server has one.
+ * @returns {Record<string, string>}
+ */
+function mutationHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiToken) headers['X-Gitboard-Token'] = apiToken;
+  return headers;
+}
 let pollTimer = null;
 let loading = false;
 /** Last successful dashboard payload per view id (instant paint on switch). */
@@ -2018,6 +2035,7 @@ function paintDashboardData(data, { fresh = false, fromCache = false, progressiv
     } else {
       status.textContent = `Updated ${data.generated_at || ''}`;
     }
+    if (!progressive) showLocalWarnings(status, data.local_warnings);
   }
   const cacheKey = String(data.active_view || activeViewId || '').trim();
   if (cacheKey && !fromCache && !progressive) {
@@ -2091,12 +2109,16 @@ async function consumeDashboardStream(res, { fresh = false, gen }) {
       if (assembled) {
         if (ev.tooling) assembled.tooling = ev.tooling;
         if (ev.generated_at) assembled.generated_at = ev.generated_at;
+        assembled.local_warnings = ev.local_warnings;
         loadingViewId = '';
         paintDashboardData(assembled, { fresh, progressive: false });
       } else {
         loadingViewId = '';
         if (ev.tooling) applyTooling(ev.tooling);
-        if (status) status.textContent = `Updated ${ev.generated_at || ''}`;
+        if (status) {
+          status.textContent = `Updated ${ev.generated_at || ''}`;
+          showLocalWarnings(status, ev.local_warnings);
+        }
         renderViewSwitcher(boardViews, activeViewId);
       }
       return;
@@ -2365,7 +2387,7 @@ async function postJSONWithIndexLockConfirm(url, body, lockPrompt) {
   const send = async (payload) => {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: mutationHeaders(),
       body: JSON.stringify(payload),
     });
     const text = await res.text();
@@ -2522,7 +2544,7 @@ async function investigateSync(request, btn) {
   try {
     const res = await fetch('/api/local/sync/investigate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: mutationHeaders(),
       body: JSON.stringify(request),
     });
     const text = await res.text();
@@ -2574,7 +2596,7 @@ async function investigatePrune(body, btn) {
   try {
     const res = await fetch('/api/agents/prune/investigate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: mutationHeaders(),
       body: JSON.stringify(body),
     });
     const text = await res.text();
@@ -2688,7 +2710,7 @@ async function runTriage(project, job, runID, button) {
   try {
     const res = await fetch('/api/triage', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: mutationHeaders(),
       body: JSON.stringify({
         project_id: project.id,
         run_id: runID || project.ci?.run_id || '',
@@ -2725,10 +2747,25 @@ async function runTriage(project, job, runID, button) {
   }
 }
 
+/**
+ * Append a count of local scan warnings (skipped roots or checkouts) to the
+ * status line; the full list is in its tooltip.
+ * @param {HTMLElement} status
+ * @param {unknown} warnings
+ */
+function showLocalWarnings(status, warnings) {
+  const list = Array.isArray(warnings) ? warnings.filter((w) => typeof w === 'string' && w) : [];
+  status.title = list.join('\n');
+  if (!list.length) return;
+  const noun = list.length === 1 ? 'warning' : 'warnings';
+  status.textContent += ` · ${list.length} local scan ${noun} (hover for details)`;
+}
+
 async function apiJSON(url, opts = {}) {
+  const method = String(opts.method || 'GET').toUpperCase();
   const res = await fetch(url, {
     cache: 'no-store',
-    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: method === 'GET' || method === 'HEAD' ? undefined : mutationHeaders(),
     ...opts,
   });
   const text = await res.text();
@@ -3635,6 +3672,7 @@ async function bootstrapBoard() {
     const res = await fetch('/api/meta', { cache: 'no-store' });
     if (res.ok) {
       const meta = await res.json();
+      apiToken = typeof meta.token === 'string' ? meta.token : '';
       if (typeof meta.poll_interval_seconds === 'number') {
         const next = meta.poll_interval_seconds;
         if (next !== pollSeconds) {

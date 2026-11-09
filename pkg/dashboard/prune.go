@@ -2,58 +2,16 @@ package dashboard
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
-
-// BadRequestError is a client/validation failure for command APIs.
-type BadRequestError struct {
-	Msg   string
-	Cause error `json:"-"`
-}
-
-func (e BadRequestError) Error() string {
-	if e.Msg != "" {
-		return e.Msg
-	}
-	if e.Cause != nil {
-		return e.Cause.Error()
-	}
-	return "bad request"
-}
-
-// Unwrap returns the underlying cause when present.
-func (e BadRequestError) Unwrap() error {
-	return e.Cause
-}
-
-// IsBadRequest reports whether err is a prune validation / not-safe failure.
-func IsBadRequest(err error) bool {
-	var e BadRequestError
-	return errors.As(err, &e)
-}
-
-func badRequest(msg string) error {
-	return BadRequestError{Msg: msg}
-}
-
-func badRequestCause(msg string, cause error) error {
-	if cause == nil {
-		return badRequest(msg)
-	}
-	if msg == "" {
-		return BadRequestError{Msg: cause.Error(), Cause: cause}
-	}
-	return BadRequestError{Msg: msg, Cause: cause}
-}
 
 // PruneSafeRequest identifies a local checkout marked safe to remove.
 type PruneSafeRequest struct {
@@ -63,114 +21,96 @@ type PruneSafeRequest struct {
 	ClearIndexLock bool   `json:"clear_index_lock,omitempty"`
 }
 
-// PruneSafe re-checks forge prune hints, then removes the local checkout when still safe.
-func (c *Commands) PruneSafe(ctx context.Context, doc config.File, req PruneSafeRequest) error {
+// PruneSafe re-checks the prune verdict with fresh local state, then removes
+// the local checkout only when pruneVerdict still allows it.
+func (c *Commands) PruneSafe(ctx context.Context, doc boardconfig.File, req PruneSafeRequest) error {
+	const op = "dashboard.PruneSafe"
 	s, err := c.requireLocal()
 	if err != nil {
 		return err
 	}
-	projectID := strings.TrimSpace(req.ProjectID)
-	branch := strings.TrimSpace(req.Branch)
-	worktreePath := strings.TrimSpace(req.WorktreePath)
-	if projectID == "" || branch == "" || worktreePath == "" {
-		return badRequest("project_id, branch, and worktree_path are required")
-	}
-	if err := localgit.ValidateBranchName(branch); err != nil {
-		return badRequestCause("", err)
-	}
-	p, ok := FindProject(doc.Projects, projectID)
-	if !ok {
-		return badRequest("unknown project")
-	}
-
-	abs, err := localgit.ExpandPath(worktreePath)
+	t, err := parseMutation(op, doc, mutationRequest{
+		ProjectID: req.ProjectID, Branch: req.Branch, Path: req.WorktreePath, PathField: "worktree_path",
+	})
 	if err != nil {
-		return badRequestCause(fmt.Sprintf("worktree path: %v", err), err)
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	abs = filepath.Clean(abs)
-	abs = canonicalCheckoutPath(ctx, s.Local, abs)
-	canon := func(p string) string { return canonicalCheckoutPath(ctx, s.Local, p) }
-
-	opts := remotegit.SummaryOpts{
-		Fresh:     false,
-		Cache:     s.Cache,
-		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
-		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
-	}
-	row := s.summarize(ctx, p, opts)
-	if !row.RemoteNamesOK {
-		return badRequest("cannot re-validate remote heads; refuse prune")
-	}
-	var disc localgit.Discovery
-	if len(doc.Local.Roots) > 0 {
-		disc = s.Local.ScanRoots(ctx, doc.Local.Roots)
-	}
-	forgeBranches := filterHiddenBranches(row.Branches, doc.UI.HideBranches)
-	row.Local = s.attachLocal(ctx, p, disc, projectLabelsByKey(doc.Projects), false, time.Duration(doc.EffectiveFetchSeconds())*time.Second, forgeBranchNames(forgeBranches))
-	row.Branches = forgeBranches
-	if row.Local == nil || !row.Local.Mapped {
-		return badRequest("project has no mapped local checkout")
-	}
-	if !repoPathAllowedCanon(row.Local, abs, canon) {
-		return badRequest("worktree_path is not a mapped checkout for this project")
-	}
-	s.annotateContentOnDefault(ctx, &row)
-	s.confirmMergedForCandidates(ctx, p, &row, opts)
-	remotegit.EnrichPruneHints(&row)
-
-	wt, ok := findSafeWorktree(row.Local, branch, abs, canon)
-	if !ok {
-		return badRequest(fmt.Sprintf("branch %q is not safe to remove (re-check prune hints)", branch))
-	}
-	defaultBranch := strings.TrimSpace(row.Local.DefaultBranch)
-	if defaultBranch == "" {
-		defaultBranch = "main"
-	}
-	common, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, wt.Path)
-	if err != nil {
-		return badRequestCause("resolve common git dir", err)
-	}
-	lease, err := s.Mutations.Acquire(ctx, common)
-	if err != nil {
-		if errors.Is(err, localgit.ErrMutationCanceled) {
-			return err
-		}
-		return fmt.Errorf("mutation lock: %w", err)
-	}
-	defer lease.Release()
-
-	if err := c.ensureWritableIndex(ctx, wt.Path, req.ClearIndexLock); err != nil {
 		return err
 	}
-
-	err = s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch)
-	if err != nil && localgit.IsIndexLockError(err) {
-		if lockErr := c.ensureWritableIndex(ctx, wt.Path, req.ClearIndexLock); lockErr != nil {
-			return lockErr
-		}
-		if req.ClearIndexLock {
-			err = s.Local.RemoveSafeCheckout(ctx, wt.Path, branch, defaultBranch)
-		}
-	}
+	t.path = canonicalCheckoutPath(ctx, s.local, t.path)
+	wt, defaultBranch, err := s.pruneTarget(ctx, doc, t)
 	if err != nil {
-		if errors.Is(err, localgit.ErrInvalidBranch) ||
-			errors.Is(err, localgit.ErrDirtyTree) ||
-			errors.Is(err, localgit.ErrDiverged) ||
-			errors.Is(err, localgit.ErrMissingBranch) {
-			return badRequestCause("", err)
-		}
-		return fmt.Errorf("remove checkout: %w", err)
+		return err
 	}
-	lease.BumpEpoch()
-	s.InvalidateOrigin(common)
-	s.InvalidateProject(string(p.Host), p.Path)
+	common, err := s.commonDirFor(ctx, op, wt.Path)
+	if err != nil {
+		return err
+	}
+	err = s.withLease(ctx, common, func(m LocalMutator) (bool, error) {
+		err := runWithIndexLock(ctx, m, wt.Path, req.ClearIndexLock, func() error {
+			return m.RemoveSafeCheckout(ctx, wt.Path, t.branch, defaultBranch)
+		})
+		if err != nil {
+			return false, gitMutationErr(op, err)
+		}
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+	s.afterMutation(common, t.project)
 	return nil
 }
 
-func findSafeWorktree(local *board.LocalStatus, branch, absPath string, canon func(string) string) (board.LocalWorktree, bool) {
+// pruneTarget rebuilds t.project's row with fresh local state and prune
+// evidence, finds the worktree on t.branch at t.path, and returns it with
+// the default branch to land on when pruneVerdict allows the delete.
+func (s *Service) pruneTarget(ctx context.Context, doc boardconfig.File, t mutationTarget) (board.LocalWorktree, string, error) {
+	const op = "dashboard.PruneSafe"
+	opts := remotegit.SummaryOpts{
+		Now:       s.clock,
+		Cache:     s.cache,
+		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
+		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
+	}
+	row := s.summarize(ctx, t.project, opts)
+	if !row.RemoteNamesOK {
+		return board.LocalWorktree{}, "", conflict(op, "cannot re-validate remote heads; refuse prune")
+	}
+	if !row.OpenOK {
+		return board.LocalWorktree{}, "", conflict(op, "cannot re-validate open reviews; refuse prune")
+	}
+	var disc localgit.Discovery
+	if len(doc.Local.Roots) > 0 {
+		disc = s.local.ScanRoots(ctx, doc.Local.Roots)
+	}
+	row.Local = s.attachLocal(ctx, t.project, localInputs{
+		disc:          disc,
+		labels:        projectLabelsByKey(doc.Projects),
+		fetchTTL:      time.Duration(doc.EffectiveFetchSeconds()) * time.Second,
+		forgeBranches: forgeBranchNames(filterHiddenBranches(row.Branches, doc.UI.HideBranches)),
+	})
+	if row.Local == nil || !row.Local.Mapped {
+		return board.LocalWorktree{}, "", invalid(op, "project has no mapped local checkout")
+	}
+	canon := func(p string) string { return canonicalCheckoutPath(ctx, s.local, p) }
+	if !repoPathAllowedCanon(row.Local, t.path, canon) {
+		return board.LocalWorktree{}, "", invalid(op, "worktree_path is not a mapped checkout for this project")
+	}
+	s.annotatePrune(ctx, t.project, &row, opts)
+
+	wt, ok := findWorktree(row.Local, t.branch, t.path, canon)
+	if !ok {
+		return board.LocalWorktree{}, "", conflict(op, fmt.Sprintf("branch %q is not checked out at worktree_path", t.branch))
+	}
+	sc := newPruneScope(&row)
+	if v := pruneVerdict(sc.inputs(wt)); !v.Allow {
+		return board.LocalWorktree{}, "", conflict(op, fmt.Sprintf("branch %q is not safe to remove: %s", t.branch, v.Reason))
+	}
+	return wt, sc.defaultBranch, nil
+}
+
+// findWorktree returns the worktree on branch whose path (or appearance
+// path) is absPath, with Path set to absPath.
+func findWorktree(local *board.LocalStatus, branch, absPath string, canon func(string) string) (board.LocalWorktree, bool) {
 	if local == nil {
 		return board.LocalWorktree{}, false
 	}
@@ -180,9 +120,6 @@ func findSafeWorktree(local *board.LocalStatus, branch, absPath string, canon fu
 			continue
 		}
 		if !sameCheckoutPath(wt.Path, absPath, canon) && !sameCheckoutPath(wt.AppearancePath, absPath, canon) {
-			continue
-		}
-		if wt.PruneHint != board.PruneSafe {
 			continue
 		}
 		wt.Path = absPath
@@ -201,27 +138,23 @@ func sameCheckoutPath(a, b string, canon func(string) string) bool {
 	return a != "" && a == b
 }
 
+// cleanRepoPath is localgit.ResolvePath, or the cleaned input when the path
+// cannot be expanded; empty stays empty.
 func cleanRepoPath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
 	}
-	path = filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+	if resolved, err := localgit.ResolvePath(path); err == nil {
 		return resolved
 	}
-	return path
+	return filepath.Clean(path)
 }
 
-func canonicalCheckoutPath(ctx context.Context, local LocalGit, path string) string {
+func canonicalCheckoutPath(ctx context.Context, local LocalComparer, path string) string {
 	path = cleanRepoPath(path)
 	if path == "" || local == nil {
 		return path
 	}
-	if c, ok := local.(interface {
-		CanonicalCheckoutPath(context.Context, string) string
-	}); ok {
-		return c.CanonicalCheckoutPath(ctx, path)
-	}
-	return path
+	return local.CanonicalCheckoutPath(ctx, path)
 }

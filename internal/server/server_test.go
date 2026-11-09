@@ -11,17 +11,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/llm"
-	"github.com/behaviorengineering/gitboard/internal/pruneagent"
+	"github.com/behaviorengineering/gitboard/internal/ai/llm"
+	"github.com/behaviorengineering/gitboard/internal/ai/pruneagent"
+	"github.com/behaviorengineering/gitboard/internal/ai/triage"
+	"github.com/behaviorengineering/gitboard/internal/observability"
 	"github.com/behaviorengineering/gitboard/internal/server"
-	"github.com/behaviorengineering/gitboard/internal/triage"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/cliexec"
 	"github.com/behaviorengineering/gitboard/pkg/dashboard"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
-	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 type fakeExec struct {
@@ -40,7 +40,9 @@ func (f *syncLocalFake) InspectPath(_ context.Context, path string) localgit.Sta
 	return localgit.Status{Mapped: true, Path: path, Branch: "main"}
 }
 
-func (f *syncLocalFake) EnrichOriginSync(context.Context, *localgit.Status) {}
+func (f *syncLocalFake) OriginSync(context.Context, string) (localgit.RepoSync, error) {
+	return localgit.RepoSync{}, nil
+}
 
 func (f *syncLocalFake) CommonGitDir(_ context.Context, path string) (string, error) {
 	return path, nil
@@ -50,11 +52,7 @@ func (f *syncLocalFake) ListLocalHeads(context.Context, string) ([]string, error
 	return nil, nil
 }
 
-func (f *syncLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) (bool, error) {
-	return false, nil
-}
-
-func (f *syncLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) (bool, error) {
+func (f *syncLocalFake) FetchOriginSmart(context.Context, string, localgit.FetchPolicy, *localgit.OriginFetchCache) (bool, error) {
 	return true, nil
 }
 
@@ -62,8 +60,8 @@ func (f *syncLocalFake) OriginRemote(context.Context, string) (string, error) {
 	return "https://example.test/acme/app.git", nil
 }
 
-func (f *syncLocalFake) PullFFOnly(context.Context, string, string) error {
-	return nil
+func (f *syncLocalFake) PullFFOnly(context.Context, string, string) (localgit.PullPhases, error) {
+	return localgit.PullPhases{}, nil
 }
 
 func (f *syncLocalFake) RemoveSafeCheckout(context.Context, string, string, string) error {
@@ -78,12 +76,16 @@ func (f *syncLocalFake) ContentOnDefault(context.Context, string, string, string
 	return false, "", nil
 }
 
-func (f *syncLocalFake) InspectSync(context.Context, string, string) (localgit.SyncInspection, error) {
+func (f *syncLocalFake) CompareSync(context.Context, string, string) (localgit.SyncInspection, error) {
 	return f.result, nil
 }
 
-func (f *syncLocalFake) CompareSync(context.Context, string, string) (localgit.SyncInspection, error) {
-	return f.result, nil
+func (f *syncLocalFake) CanonicalCheckoutPath(_ context.Context, path string) string {
+	return path
+}
+
+func (f *syncLocalFake) Mutator(*localgit.MutationLease) (dashboard.LocalMutator, error) {
+	return f, nil
 }
 
 func (f *fakeExec) LookPath(name string) (string, error) {
@@ -119,6 +121,14 @@ func (f *fakeExec) RunJSON(ctx context.Context, name string, args ...string) ([]
 	return out, nil
 }
 
+// newDash wires every forge client on run plus local (nil for forge-only tests).
+func newDash(run cliexec.Exec, local dashboard.LocalGit) *dashboard.Service {
+	cfg := dashboard.DefaultServiceConfig(run)
+	cfg.Local = local
+	cfg.Mutations = localgit.NewMutationCoordinator(nil)
+	return cfg.CreateService()
+}
+
 func testFake() *fakeExec {
 	return &fakeExec{
 		responses: map[string][]byte{
@@ -140,12 +150,14 @@ func testMux(t *testing.T, fx *fakeExec, triageA *triage.Analyzer) http.Handler 
 	if fx == nil {
 		fx = testFake()
 	}
-	projects := []config.Project{
-		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	projects := []boardconfig.Project{
+		{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
+	dash := newDash(fx, nil)
 	return server.NewMux(server.Options{
-		Doc:         config.File{Projects: projects},
+		Addr:        testAddr,
+		Log:         observability.NewLogger(),
+		Doc:         boardconfig.File{Projects: projects},
 		Dash:        dash,
 		Commands:    dashboard.NewCommands(dash),
 		Triage:      triageA,
@@ -167,20 +179,22 @@ func TestDashboardHidesBranchesFromInitialDoc(t *testing.T) {
 			"--state merged": []byte(`[]`),
 		},
 	}
-	projects := []config.Project{
-		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	projects := []boardconfig.Project{
+		{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
+	dash := newDash(fx, nil)
 	mux := server.NewMux(server.Options{
-		Doc: config.File{
+		Addr: testAddr,
+		Log:  observability.NewLogger(),
+		Doc: boardconfig.File{
 			Projects: projects,
-			UI:       config.UI{HideBranches: []string{"majordomo-context/*"}},
+			UI:       boardconfig.UI{HideBranches: []string{"majordomo-context/*"}},
 		},
 		Dash:        dash,
 		Commands:    dashboard.NewCommands(dash),
 		PollSeconds: 30,
 	})
-	res := httptest.NewRequest(http.MethodGet, "/api/dashboard?fresh=1", nil)
+	res := apiRequest(http.MethodGet, "/api/dashboard?fresh=1", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -216,14 +230,14 @@ func TestDashboardHidesBranchesFromInitialDoc(t *testing.T) {
 func TestHealthAndMeta(t *testing.T) {
 	mux := testMux(t, nil, nil)
 
-	res := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	res := apiRequest(http.MethodGet, "/api/health", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "ok") {
 		t.Fatalf("health: %d %q", rec.Code, rec.Body.String())
 	}
 
-	res = httptest.NewRequest(http.MethodGet, "/api/meta", nil)
+	res = apiRequest(http.MethodGet, "/api/meta", nil)
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -255,7 +269,7 @@ func TestHealthAndMeta(t *testing.T) {
 
 func TestMethodNotAllowed(t *testing.T) {
 	mux := testMux(t, nil, nil)
-	res := httptest.NewRequest(http.MethodPost, "/api/dashboard", nil)
+	res := apiRequest(http.MethodPost, "/api/dashboard", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -265,7 +279,7 @@ func TestMethodNotAllowed(t *testing.T) {
 
 func TestDashboardHappy(t *testing.T) {
 	mux := testMux(t, nil, nil)
-	res := httptest.NewRequest(http.MethodGet, "/api/dashboard?fresh=1", nil)
+	res := apiRequest(http.MethodGet, "/api/dashboard?fresh=1", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -296,95 +310,103 @@ func TestDashboardStream(t *testing.T) {
 			"--state merged": []byte(`[]`),
 		},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
+	dash := newDash(fx, nil)
 	mux := server.NewMux(server.Options{
-		Doc: config.File{
-			Projects: []config.Project{
-				{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+		Addr: testAddr,
+		Log:  observability.NewLogger(),
+		Doc: boardconfig.File{
+			Projects: []boardconfig.Project{
+				{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 			},
 		},
 		Dash:        dash,
 		Commands:    dashboard.NewCommands(dash),
 		PollSeconds: 30,
 	})
-	res := httptest.NewRequest(http.MethodGet, "/api/dashboard?stream=1&fresh=1", nil)
+	res := apiRequest(http.MethodGet, "/api/dashboard?stream=1&fresh=1", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
 	}
-	ct := rec.Header().Get("Content-Type")
-	if !strings.Contains(ct, "ndjson") {
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "ndjson") {
 		t.Fatalf("content-type: %q", ct)
 	}
+	events := decodeStream(t, rec.Body.Bytes())
 	var types []string
-	var shellProjects int
-	var sawProjectID string
-	dec := json.NewDecoder(bytes.NewReader(rec.Body.Bytes()))
-	for {
-		var ev map[string]any
-		if err := dec.Decode(&ev); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			t.Fatalf("decode: %v body=%s", err, rec.Body.String())
-		}
-		typ, _ := ev["type"].(string)
-		types = append(types, typ)
-		switch typ {
-		case "shell":
-			dashObj, _ := ev["dashboard"].(map[string]any)
-			projects, _ := dashObj["projects"].([]any)
-			shellProjects = len(projects)
-			for _, p := range projects {
-				row, _ := p.(map[string]any)
-				if br, ok := row["branches"]; ok && br != nil {
-					if list, ok := br.([]any); ok && len(list) > 0 {
-						t.Fatalf("shell branches not empty: %+v", br)
-					}
-				}
-			}
-		case "project":
-			proj, _ := ev["project"].(map[string]any)
-			sawProjectID, _ = proj["id"].(string)
-			branches, _ := proj["branches"].([]any)
-			if len(branches) == 0 {
-				t.Fatalf("project event missing branches: %+v", proj)
-			}
-		case "done":
-			if _, ok := ev["tooling"]; !ok {
-				t.Fatal("done missing tooling")
-			}
-			if _, ok := ev["generated_at"]; !ok {
-				t.Fatal("done missing generated_at")
-			}
-		case "error":
-			t.Fatalf("stream error: %+v", ev)
-		}
+	for _, ev := range events {
+		types = append(types, ev.Type)
+		checkStreamEvent(t, ev)
 	}
-	if len(types) < 3 || types[0] != "shell" || types[len(types)-1] != "done" {
+	if len(types) != 3 || types[0] != "shell" || types[1] != "project" || types[2] != "done" {
 		t.Fatalf("event types: %v", types)
 	}
-	if shellProjects != 1 {
-		t.Fatalf("shell projects: %d", shellProjects)
+	if n := len(events[0].Dashboard.Projects); n != 1 {
+		t.Fatalf("shell projects: %d", n)
 	}
-	if sawProjectID != "gh-app" {
-		t.Fatalf("project id: %q", sawProjectID)
+	if id := events[1].Project.ID; id != "gh-app" {
+		t.Fatalf("project id: %q", id)
 	}
-	projectCount := 0
-	for _, typ := range types {
-		if typ == "project" {
-			projectCount++
+}
+
+// streamEvent is the NDJSON event shape the UI reads.
+type streamEvent struct {
+	Type      string `json:"type"`
+	Dashboard *struct {
+		Projects []board.ProjectSummary `json:"projects"`
+	} `json:"dashboard"`
+	Project     *board.ProjectSummary `json:"project"`
+	Error       string                `json:"error"`
+	Tooling     *board.Tooling        `json:"tooling"`
+	GeneratedAt string                `json:"generated_at"`
+}
+
+func decodeStream(t *testing.T, body []byte) []streamEvent {
+	t.Helper()
+	var out []streamEvent
+	dec := json.NewDecoder(bytes.NewReader(body))
+	for {
+		var ev streamEvent
+		err := dec.Decode(&ev)
+		if errors.Is(err, io.EOF) {
+			return out
 		}
+		if err != nil {
+			t.Fatalf("decode: %v body=%s", err, body)
+		}
+		out = append(out, ev)
 	}
-	if projectCount != 1 {
-		t.Fatalf("project events: %d types=%v", projectCount, types)
+}
+
+// checkStreamEvent checks one event against what its type promises.
+func checkStreamEvent(t *testing.T, ev streamEvent) {
+	t.Helper()
+	switch ev.Type {
+	case "shell":
+		if ev.Dashboard == nil {
+			t.Fatal("shell missing dashboard")
+		}
+		for _, p := range ev.Dashboard.Projects {
+			if len(p.Branches) > 0 {
+				t.Fatalf("shell branches not empty: %+v", p.Branches)
+			}
+		}
+	case "project":
+		if ev.Project == nil || len(ev.Project.Branches) == 0 {
+			t.Fatalf("project event missing branches: %+v", ev.Project)
+		}
+	case "done":
+		if ev.Tooling == nil || ev.GeneratedAt == "" {
+			t.Fatalf("done missing tooling or generated_at: %+v", ev)
+		}
+	case "error":
+		t.Fatalf("stream error: %+v", ev)
 	}
 }
 
 func TestFailuresUnknownProject(t *testing.T) {
 	mux := testMux(t, nil, nil)
-	res := httptest.NewRequest(http.MethodGet, "/api/failures?project=missing&run_id=99", nil)
+	res := apiRequest(http.MethodGet, "/api/failures?project=missing&run_id=99", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusBadRequest {
@@ -394,7 +416,7 @@ func TestFailuresUnknownProject(t *testing.T) {
 
 func TestFailuresHappy(t *testing.T) {
 	mux := testMux(t, nil, nil)
-	res := httptest.NewRequest(http.MethodGet, "/api/failures?project=gh-app&run_id=99", nil)
+	res := apiRequest(http.MethodGet, "/api/failures?project=gh-app&run_id=99", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -413,7 +435,7 @@ func TestFailuresHappy(t *testing.T) {
 
 func TestPruneSafeBadJSON(t *testing.T) {
 	mux := testMux(t, nil, nil)
-	res := httptest.NewRequest(http.MethodPost, "/api/prune/safe", strings.NewReader("{"))
+	res := apiRequest(http.MethodPost, "/api/prune/safe", strings.NewReader("{"))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusBadRequest {
@@ -423,18 +445,20 @@ func TestPruneSafeBadJSON(t *testing.T) {
 
 func TestPruneSafeValidation(t *testing.T) {
 	fx := testFake()
-	projects := []config.Project{
-		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	projects := []boardconfig.Project{
+		{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), localgit.NewInspector(fx))
+	dash := newDash(fx, dashboard.NewLocalGit(fx))
 	mux := server.NewMux(server.Options{
-		Doc:         config.File{Projects: projects},
+		Addr:        testAddr,
+		Log:         observability.NewLogger(),
+		Doc:         boardconfig.File{Projects: projects},
 		Dash:        dash,
 		Commands:    dashboard.NewCommands(dash),
 		PollSeconds: 42,
 	})
 	body := `{"project_id":"gh-app","branch":"feat","worktree_path":"/tmp/x"}`
-	res := httptest.NewRequest(http.MethodPost, "/api/prune/safe", strings.NewReader(body))
+	res := apiRequest(http.MethodPost, "/api/prune/safe", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusBadRequest {
@@ -447,29 +471,35 @@ type timedPullLocalFake struct {
 	phases localgit.PullPhases
 }
 
-func (f *timedPullLocalFake) PullFFOnlyWithPhases(context.Context, string, string) (localgit.PullPhases, error) {
+func (f *timedPullLocalFake) PullFFOnly(context.Context, string, string) (localgit.PullPhases, error) {
 	return f.phases, nil
+}
+
+func (f *timedPullLocalFake) Mutator(*localgit.MutationLease) (dashboard.LocalMutator, error) {
+	return f, nil
 }
 
 func TestPullFFEmitsPhaseTimings(t *testing.T) {
 	path := t.TempDir()
 	local := &timedPullLocalFake{phases: localgit.PullPhases{FetchMs: 11, MergeMs: 5}}
-	projects := []config.Project{{
+	projects := []boardconfig.Project{{
 		ID:        "gh-app",
 		Label:     "App",
-		Host:      config.HostGitHub,
+		Host:      boardconfig.HostGitHub,
 		Path:      "acme/app",
 		LocalPath: path,
 	}}
 	fx := testFake()
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), local)
+	dash := newDash(fx, local)
 	mux := server.NewMux(server.Options{
-		Doc:      config.File{Projects: projects},
+		Addr:     testAddr,
+		Log:      observability.NewLogger(),
+		Doc:      boardconfig.File{Projects: projects},
 		Dash:     dash,
 		Commands: dashboard.NewCommands(dash),
 	})
 	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"main","repo_path":%q}`, path)
-	res := httptest.NewRequest(http.MethodPost, "/api/pull/ff", strings.NewReader(body))
+	res := apiRequest(http.MethodPost, "/api/pull/ff", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -499,22 +529,24 @@ func TestLocalSyncInvestigate(t *testing.T) {
 			BehindCount: 6,
 		},
 	}
-	projects := []config.Project{{
+	projects := []boardconfig.Project{{
 		ID:        "gh-app",
 		Label:     "App",
-		Host:      config.HostGitHub,
+		Host:      boardconfig.HostGitHub,
 		Path:      "acme/app",
 		LocalPath: path,
 	}}
 	fx := testFake()
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), local)
+	dash := newDash(fx, local)
 	mux := server.NewMux(server.Options{
-		Doc:      config.File{Projects: projects},
+		Addr:     testAddr,
+		Log:      observability.NewLogger(),
+		Doc:      boardconfig.File{Projects: projects},
 		Dash:     dash,
 		Commands: dashboard.NewCommands(dash),
 	})
 	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"main","repo_path":%q}`, path)
-	res := httptest.NewRequest(http.MethodPost, "/api/local/sync/investigate", strings.NewReader(body))
+	res := apiRequest(http.MethodPost, "/api/local/sync/investigate", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -555,7 +587,7 @@ func TestTriageWithLogBody(t *testing.T) {
 	}
 	mux := testMux(t, nil, analyzer)
 	payload := `{"project_id":"gh-app","run_id":"99","job_id":"github:1001","log":"panic: nil"}`
-	res := httptest.NewRequest(http.MethodPost, "/api/triage", bytes.NewReader([]byte(payload)))
+	res := apiRequest(http.MethodPost, "/api/triage", bytes.NewReader([]byte(payload)))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -572,7 +604,7 @@ func TestTriageWithLogBody(t *testing.T) {
 
 func TestPruneInvestigateUnavailable(t *testing.T) {
 	mux := testMux(t, nil, nil) // Prune nil.
-	res := httptest.NewRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(`{}`))
+	res := apiRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusServiceUnavailable {
@@ -614,26 +646,33 @@ func TestPruneInvestigateLLM(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	agentsRoot := t.TempDir()
-	prune, err := pruneagent.New(agentsRoot, fx, &llm.Client{
-		BaseURL: srv.URL,
-		Model:   "prune-model",
-		HTTP:    srv.Client(),
-	})
+	prune, err := pruneagent.Config{
+		AgentsDir: agentsRoot,
+		Exec:      fx,
+		LLM: &llm.Client{
+			BaseURL: srv.URL,
+			Model:   "prune-model",
+			HTTP:    srv.Client(),
+		},
+		Mutations: localgit.NewMutationCoordinator(nil),
+	}.CreateService()
 	if err != nil {
 		t.Fatal(err)
 	}
-	projects := []config.Project{
-		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
+	projects := []boardconfig.Project{
+		{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), localgit.NewInspector(fx))
+	dash := newDash(fx, dashboard.NewLocalGit(fx))
 	mux := server.NewMux(server.Options{
-		Doc:      config.File{Projects: projects},
+		Addr:     testAddr,
+		Log:      observability.NewLogger(),
+		Doc:      boardconfig.File{Projects: projects},
 		Dash:     dash,
 		Commands: dashboard.NewCommands(dash),
 		Prune:    prune,
 	})
 	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"feat/x","worktree_path":%q,"default_branch":"main"}`, dir)
-	res := httptest.NewRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(body))
+	res := apiRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -665,26 +704,33 @@ func TestPruneInvestigateLLMFallback(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	agentsRoot := t.TempDir()
-	prune, err := pruneagent.New(agentsRoot, fx, &llm.Client{
-		BaseURL: srv.URL,
-		Model:   "prune-model",
-		HTTP:    srv.Client(),
-	})
+	prune, err := pruneagent.Config{
+		AgentsDir: agentsRoot,
+		Exec:      fx,
+		LLM: &llm.Client{
+			BaseURL: srv.URL,
+			Model:   "prune-model",
+			HTTP:    srv.Client(),
+		},
+		Mutations: localgit.NewMutationCoordinator(nil),
+	}.CreateService()
 	if err != nil {
 		t.Fatal(err)
 	}
-	projects := []config.Project{
-		{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app", LocalPath: dir},
+	projects := []boardconfig.Project{
+		{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app", LocalPath: dir},
 	}
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), localgit.NewInspector(fx))
+	dash := newDash(fx, dashboard.NewLocalGit(fx))
 	mux := server.NewMux(server.Options{
-		Doc:      config.File{Projects: projects},
+		Addr:     testAddr,
+		Log:      observability.NewLogger(),
+		Doc:      boardconfig.File{Projects: projects},
 		Dash:     dash,
 		Commands: dashboard.NewCommands(dash),
 		Prune:    prune,
 	})
 	body := fmt.Sprintf(`{"project_id":"gh-app","branch":"feat/x","worktree_path":%q,"default_branch":"main"}`, dir)
-	res := httptest.NewRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(body))
+	res := apiRequest(http.MethodPost, "/api/agents/prune/investigate", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -699,5 +745,35 @@ func TestPruneInvestigateLLMFallback(t *testing.T) {
 	}
 	if got.Card.Verdict != "drop" {
 		t.Fatalf("rules drop card: %+v", got.Card)
+	}
+}
+
+// Forge and git causes carry argv, stderr and local paths. Clients get the
+// stable message and code only.
+func TestHandlersSendStableMessageAndCode(t *testing.T) {
+	mux := testMux(t, nil, nil)
+
+	// run view 404 has no canned response, so the fake's error names the argv.
+	res := apiRequest(http.MethodGet, "/api/failures?project=gh-app&run_id=404", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failures: want 503, got %d %s", rec.Code, rec.Body.String())
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != "failed to list jobs" {
+		t.Fatalf("failures body = %q", body)
+	}
+	if got := rec.Header().Get("X-Gitboard-Error-Code"); got != "unavailable" {
+		t.Fatalf("failures code header = %q", got)
+	}
+
+	res = apiRequest(http.MethodGet, "/api/dashboard?view=nope", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, res)
+	if rec.Code != http.StatusBadRequest || strings.Contains(rec.Body.String(), "nope") {
+		t.Fatalf("unknown view: %d %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Gitboard-Error-Code"); got != "invalid" {
+		t.Fatalf("unknown view code header = %q", got)
 	}
 }

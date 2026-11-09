@@ -4,6 +4,7 @@ package localgit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,20 +35,21 @@ func (FlockOSLocker) Lock(ctx context.Context, commonDir string) (func() error, 
 		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
 			return func() error {
-				_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
-				return f.Close()
+				unlockErr := unix.Flock(int(f.Fd()), unix.LOCK_UN)
+				if unlockErr != nil {
+					unlockErr = fmt.Errorf("unlock mutation lock: %w", unlockErr)
+				}
+				return errors.Join(unlockErr, f.Close())
 			}, nil
 		}
-		if err != unix.EWOULDBLOCK && err != unix.EAGAIN {
-			_ = f.Close()
-			return nil, fmt.Errorf("flock mutation lock: %w", err)
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
+			return nil, errors.Join(fmt.Errorf("flock mutation lock: %w", err), f.Close())
 		}
 		timer := time.NewTimer(25 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			_ = f.Close()
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), f.Close())
 		case <-timer.C:
 		}
 	}

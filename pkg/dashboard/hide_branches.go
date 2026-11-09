@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 )
 
 // filterHiddenBranches drops branches whose names match any path.Match pattern.
@@ -66,7 +67,7 @@ func syncOpenItemsToVisibleBranches(row *board.ProjectSummary) {
 		}
 	}
 	row.OpenItems = board.OpenItems{}
-	if strings.EqualFold(strings.TrimSpace(row.Host), "gitlab") {
+	if host, err := boardconfig.ParseHost(row.Host); err == nil && host.UsesMergeRequests() {
 		row.OpenItems.MergeRequests = n
 		return
 	}

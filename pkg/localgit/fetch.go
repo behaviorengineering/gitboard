@@ -3,46 +3,37 @@ package localgit
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/behaviorengineering/gitboard/pkg/clock"
 )
 
 // OriginFetchCache TTL-gates full origin fetches by common git dir and records
 // which branches were refreshed by a targeted fetch while the full TTL is warm.
 type OriginFetchCache struct {
 	mu       sync.Mutex
-	now      func() time.Time
+	now      clock.Clock
 	fullAt   map[string]time.Time
 	branchAt map[string]map[string]time.Time
 	group    singleflight.Group
 }
 
-// NewOriginFetchCache returns an empty fetch TTL cache.
-func NewOriginFetchCache() *OriginFetchCache {
+// NewOriginFetchCache returns an empty fetch TTL cache that reads now for
+// every freshness stamp. Panics if now is nil (required dependency at wire-up).
+func NewOriginFetchCache(now clock.Clock) *OriginFetchCache {
+	if now == nil {
+		panic("localgit.NewOriginFetchCache: Clock is required")
+	}
 	return &OriginFetchCache{
-		now:      time.Now,
+		now:      now,
 		fullAt:   map[string]time.Time{},
 		branchAt: map[string]map[string]time.Time{},
 	}
-}
-
-// SetNow injects a clock for tests.
-func (c *OriginFetchCache) SetNow(now func() time.Time) {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if now == nil {
-		c.now = time.Now
-		return
-	}
-	c.now = now
 }
 
 // Clear drops all fetch timestamps.
@@ -61,7 +52,7 @@ func (c *OriginFetchCache) Invalidate(commonDir string) {
 	if c == nil {
 		return
 	}
-	commonDir = filepath.Clean(commonDir)
+	commonDir = normalizeCommonDir(commonDir)
 	if commonDir == "" {
 		return
 	}
@@ -71,21 +62,26 @@ func (c *OriginFetchCache) Invalidate(commonDir string) {
 	delete(c.branchAt, commonDir)
 }
 
+// clock reads the injected time source; callers hold c.mu and have checked usable.
 func (c *OriginFetchCache) clock() time.Time {
-	if c == nil || c.now == nil {
-		return time.Now()
-	}
 	return c.now()
+}
+
+// usable reports whether c can stamp entries. A nil cache or a zero value
+// built without NewOriginFetchCache (no clock) behaves like no cache: every
+// fetch is needed and nothing is recorded.
+func (c *OriginFetchCache) usable() bool {
+	return c != nil && c.now != nil
 }
 
 // NeedsFullFetch reports whether a full `git fetch --prune origin` is required.
 // ttl <= 0 or fresh always needs a full fetch. A nil cache always needs a full fetch.
 func (c *OriginFetchCache) NeedsFullFetch(commonDir string, ttl time.Duration, fresh bool) bool {
-	commonDir = filepath.Clean(commonDir)
+	commonDir = normalizeCommonDir(commonDir)
 	if commonDir == "" {
 		return true
 	}
-	if c == nil || ttl <= 0 || fresh {
+	if !c.usable() || ttl <= 0 || fresh {
 		return true
 	}
 	c.mu.Lock()
@@ -97,19 +93,14 @@ func (c *OriginFetchCache) NeedsFullFetch(commonDir string, ttl time.Duration, f
 	return c.clock().Sub(at) >= ttl
 }
 
-// NeedsFetch is an alias for NeedsFullFetch for callers that only care about full prune TTL.
-func (c *OriginFetchCache) NeedsFetch(commonDir string, ttl time.Duration, fresh bool) bool {
-	return c.NeedsFullFetch(commonDir, ttl, fresh)
-}
-
 // StaleBranches returns branches that still need a targeted refresh while the full TTL is warm.
 func (c *OriginFetchCache) StaleBranches(commonDir string, ttl time.Duration, branches []string) []string {
-	commonDir = filepath.Clean(commonDir)
+	commonDir = normalizeCommonDir(commonDir)
 	cleaned := sanitizeBranchList(branches)
 	if commonDir == "" || len(cleaned) == 0 {
 		return nil
 	}
-	if c == nil || ttl <= 0 {
+	if !c.usable() || ttl <= 0 {
 		return cleaned
 	}
 	c.mu.Lock()
@@ -128,10 +119,10 @@ func (c *OriginFetchCache) StaleBranches(commonDir string, ttl time.Duration, br
 
 // MarkFullSuccess records a successful full prune fetch for commonDir.
 func (c *OriginFetchCache) MarkFullSuccess(commonDir string) {
-	if c == nil {
+	if !c.usable() {
 		return
 	}
-	commonDir = filepath.Clean(commonDir)
+	commonDir = normalizeCommonDir(commonDir)
 	if commonDir == "" {
 		return
 	}
@@ -140,23 +131,21 @@ func (c *OriginFetchCache) MarkFullSuccess(commonDir string) {
 	if c.fullAt == nil {
 		c.fullAt = map[string]time.Time{}
 	}
+	if c.branchAt == nil {
+		c.branchAt = map[string]map[string]time.Time{}
+	}
 	now := c.clock()
 	c.fullAt[commonDir] = now
 	// A full prune refreshes every remote head we care about next.
 	c.branchAt[commonDir] = map[string]time.Time{}
 }
 
-// MarkSuccess is an alias for MarkFullSuccess.
-func (c *OriginFetchCache) MarkSuccess(commonDir string) {
-	c.MarkFullSuccess(commonDir)
-}
-
 // MarkBranchesSuccess records a successful targeted fetch for the named branches.
 func (c *OriginFetchCache) MarkBranchesSuccess(commonDir string, branches []string) {
-	if c == nil {
+	if !c.usable() {
 		return
 	}
-	commonDir = filepath.Clean(commonDir)
+	commonDir = normalizeCommonDir(commonDir)
 	cleaned := sanitizeBranchList(branches)
 	if commonDir == "" || len(cleaned) == 0 {
 		return
@@ -177,37 +166,24 @@ func (c *OriginFetchCache) MarkBranchesSuccess(commonDir string, branches []stri
 	}
 }
 
-// FetchOrigin runs git fetch --prune origin to refresh refs/remotes/origin/*.
-func (in *Inspector) FetchOrigin(ctx context.Context, repoPath string) error {
-	if in == nil {
-		return ErrInspectorMissing
-	}
-	abs, err := ExpandPath(repoPath)
-	if err != nil {
-		return fmt.Errorf("expand path: %w", err)
-	}
-	if _, err := in.git(ctx, abs, "fetch", "--prune", "origin"); err != nil {
+// fetchOrigin runs git fetch --prune origin to refresh refs/remotes/origin/*.
+// abs must already be bound to the lease.
+func (m *Mutator) fetchOrigin(ctx context.Context, abs string) error {
+	if _, err := m.in.git(ctx, abs, "fetch", "--prune", "origin"); err != nil {
 		return fmt.Errorf("fetch --prune origin: %w", err)
 	}
 	return nil
 }
 
-// FetchOriginBranches refreshes only the named origin branches (no --prune).
+// fetchOriginBranches refreshes only the named origin branches (no --prune).
 // An empty or invalid branch list is a no-op (never falls back to full prune).
-func (in *Inspector) FetchOriginBranches(ctx context.Context, repoPath string, branches []string) error {
-	if in == nil {
-		return ErrInspectorMissing
-	}
-	abs, err := ExpandPath(repoPath)
-	if err != nil {
-		return fmt.Errorf("expand path: %w", err)
-	}
+func (m *Mutator) fetchOriginBranches(ctx context.Context, abs string, branches []string) error {
 	cleaned := sanitizeBranchList(branches)
 	if len(cleaned) == 0 {
 		return nil
 	}
 	args := append([]string{"fetch", "origin"}, cleaned...)
-	if _, err := in.git(ctx, abs, args...); err != nil {
+	if _, err := m.in.git(ctx, abs, args...); err != nil {
 		return fmt.Errorf("fetch origin branches: %w", err)
 	}
 	return nil
@@ -222,27 +198,15 @@ func (in *Inspector) ListLocalHeads(ctx context.Context, repoPath string) ([]str
 	if err != nil {
 		return nil, fmt.Errorf("expand path: %w", err)
 	}
-	return in.listRefShortNames(ctx, abs, "refs/heads/")
+	return in.listRefShortNames(ctx, abs, headsPrefix)
 }
 
-// FetchOriginCached fetches origin when the full-fetch TTL says the common git dir is stale.
+// fetchOriginCached fetches origin when the full-fetch TTL says common is stale.
 // Concurrent misses for the same common dir coalesce to one full fetch.
 // updated is true when this call performed (or shared) a real full fetch.
-func (in *Inspector) FetchOriginCached(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *OriginFetchCache) (updated bool, err error) {
-	if in == nil {
-		return false, ErrInspectorMissing
-	}
-	abs, err := ExpandPath(repoPath)
-	if err != nil {
-		return false, fmt.Errorf("expand path: %w", err)
-	}
-	common, err := in.CommonGitDir(ctx, abs)
-	if err != nil || common == "" {
-		common = abs
-	}
-	common = filepath.Clean(common)
+func (m *Mutator) fetchOriginCached(ctx context.Context, abs, common string, ttl time.Duration, fresh bool, cache *OriginFetchCache) (updated bool, err error) {
 	if cache == nil {
-		if err := in.FetchOrigin(ctx, abs); err != nil {
+		if err := m.fetchOrigin(ctx, abs); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -250,43 +214,58 @@ func (in *Inspector) FetchOriginCached(ctx context.Context, repoPath string, ttl
 	if !cache.NeedsFullFetch(common, ttl, fresh) {
 		return false, nil
 	}
-	v, err, _ := cache.group.Do("full:"+common, func() (any, error) {
+	return doFlight(&cache.group, "full:"+common, func() (bool, error) {
 		if !cache.NeedsFullFetch(common, ttl, fresh) {
 			return false, nil
 		}
-		if err := in.FetchOrigin(ctx, abs); err != nil {
+		if err := m.fetchOrigin(ctx, abs); err != nil {
 			return false, err
 		}
 		cache.MarkFullSuccess(common)
 		return true, nil
 	})
+}
+
+// doFlight runs fn through g with a statically typed result, so a shared
+// result of the wrong type is an error rather than a silent zero value.
+func doFlight[T any](g *singleflight.Group, key string, fn func() (T, error)) (T, error) {
+	var zero T
+	v, err, _ := g.Do(key, func() (any, error) { return fn() })
 	if err != nil {
-		return false, err
+		return zero, err
 	}
-	did, _ := v.(bool)
-	return did, nil
+	out, ok := v.(T)
+	if !ok {
+		return zero, fmt.Errorf("singleflight %q: unexpected result %T", key, v)
+	}
+	return out, nil
+}
+
+// FetchPolicy says when FetchOriginSmart may skip the network.
+type FetchPolicy struct {
+	// TTL is how long a full fetch stays warm; zero or less always fetches.
+	TTL time.Duration
+	// Fresh forces a full fetch whatever the TTL says.
+	Fresh bool
+	// Branches are refreshed by a targeted fetch while the full TTL is warm.
+	Branches []string
 }
 
 // FetchOriginSmart chooses full prune vs targeted branch fetch.
 // Fresh or expired full TTL → git fetch --prune origin.
 // Warm full TTL → targeted fetch of stale branches only; empty branch list skips network.
 // updated is true when this call performed (or shared) a real network fetch.
-func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl time.Duration, fresh bool, cache *OriginFetchCache, branches []string) (updated bool, err error) {
-	if in == nil {
-		return false, ErrInspectorMissing
-	}
-	abs, err := ExpandPath(repoPath)
+// A nil cache always runs a full fetch. repoPath must resolve to the lease's
+// common git directory.
+func (m *Mutator) FetchOriginSmart(ctx context.Context, repoPath string, policy FetchPolicy, cache *OriginFetchCache) (updated bool, err error) {
+	abs, common, err := m.bind(ctx, repoPath)
 	if err != nil {
-		return false, fmt.Errorf("expand path: %w", err)
+		return false, err
 	}
-	common, err := in.CommonGitDir(ctx, abs)
-	if err != nil || common == "" {
-		common = abs
-	}
-	common = filepath.Clean(common)
+	ttl, fresh, branches := policy.TTL, policy.Fresh, policy.Branches
 
 	if cache == nil || cache.NeedsFullFetch(common, ttl, fresh) {
-		updated, err := in.FetchOriginCached(ctx, abs, ttl, fresh, cache)
+		updated, err := m.fetchOriginCached(ctx, abs, common, ttl, fresh, cache)
 		if err != nil {
 			return false, err
 		}
@@ -304,12 +283,12 @@ func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl 
 	}
 
 	key := "branches:" + common + ":" + strings.Join(stale, ",")
-	v, err, _ := cache.group.Do(key, func() (any, error) {
+	did, err := doFlight(&cache.group, key, func() (bool, error) {
 		need := cache.StaleBranches(common, ttl, stale)
 		if len(need) == 0 {
 			return false, nil
 		}
-		if err := in.FetchOriginBranches(ctx, abs, need); err != nil {
+		if err := m.fetchOriginBranches(ctx, abs, need); err != nil {
 			return false, err
 		}
 		cache.MarkBranchesSuccess(common, need)
@@ -318,7 +297,6 @@ func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl 
 	if err != nil {
 		return false, err
 	}
-	did, _ := v.(bool)
 
 	// A concurrent singleflight may have covered a different subset; fetch any leftovers.
 	leftover := cache.StaleBranches(common, ttl, branches)
@@ -326,12 +304,12 @@ func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl 
 		return did, nil
 	}
 	leftoverKey := "branches:" + common + ":" + strings.Join(leftover, ",")
-	v2, err, _ := cache.group.Do(leftoverKey, func() (any, error) {
+	did2, err := doFlight(&cache.group, leftoverKey, func() (bool, error) {
 		need := cache.StaleBranches(common, ttl, leftover)
 		if len(need) == 0 {
 			return false, nil
 		}
-		if err := in.FetchOriginBranches(ctx, abs, need); err != nil {
+		if err := m.fetchOriginBranches(ctx, abs, need); err != nil {
 			return false, err
 		}
 		cache.MarkBranchesSuccess(common, need)
@@ -340,10 +318,7 @@ func (in *Inspector) FetchOriginSmart(ctx context.Context, repoPath string, ttl 
 	if err != nil {
 		return false, err
 	}
-	if did2, ok := v2.(bool); ok && did2 {
-		did = true
-	}
-	return did, nil
+	return did || did2, nil
 }
 
 func sanitizeBranchList(branches []string) []string {

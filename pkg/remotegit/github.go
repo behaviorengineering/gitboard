@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/cliexec"
 )
 
@@ -23,49 +24,54 @@ func NewGitHub(run cliexec.Exec) *GitHub {
 	return &GitHub{Run: run}
 }
 
-func (g *GitHub) AuthStatus(ctx context.Context) (bool, bool, string) {
-	if _, err := g.Run.LookPath("gh"); err != nil {
-		return false, false, "gh not on PATH"
+// ready reports a nil receiver or a literal GitHub{} without Run as
+// ErrClientMissing, so exported methods fail with an error instead of panicking.
+func (g *GitHub) ready() error {
+	if g == nil || g.Run == nil {
+		return clientMissing("remotegit.GitHub", "github")
 	}
-	_, err := g.Run.Run(ctx, "gh", "auth", "status")
-	if err != nil {
-		return true, false, strings.TrimPrefix(err.Error(), "gh auth status: ")
-	}
-	return true, true, ""
+	return nil
 }
 
-func (g *GitHub) authCacheID() string { return "github" }
+func (g *GitHub) AuthStatus(ctx context.Context) (bool, bool, string) {
+	if err := g.ready(); err != nil {
+		return false, false, err.Error()
+	}
+	return cliAuthStatus(ctx, g.Run, "gh not on PATH", "gh", "auth", "status")
+}
+
+func (g *GitHub) host() boardconfig.Host { return boardconfig.HostGitHub }
 
 func (g *GitHub) unauthMsg(detail string) string {
 	return "gh not authenticated: " + detail
 }
 
-func (g *GitHub) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (board.ProjectSummary, error) {
-	return projectSummaryShared(ctx, p, opts, g)
+func (g *GitHub) ProjectSummary(ctx context.Context, p boardconfig.Project, opts SummaryOpts) (board.ProjectSummary, error) {
+	return projectSummaryShared(ctx, p, opts, g.ready(), g)
 }
 
 // seedHeads loads the default branch and the first page of remote branches.
 // This replaces the old 50-page census; open PR branches are added separately
 // by loadOpenReviews.
 func (g *GitHub) seedHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
+	const op = "remotegit.GitHub.seedHeads"
 	var snap HeadsSnapshot
 	raw, err := g.Run.RunJSON(ctx, "gh", "api", "repos/"+repo, "--jq", "{default: .default_branch}")
 	if err != nil {
-		return snap, fmt.Errorf("github default branch: %w", err)
+		return snap, forgeErr(err, op, "read github default branch failed", repo)
 	}
 	var meta struct {
 		Default string `json:"default"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return snap, fmt.Errorf("parse github default branch: %w", err)
+		return snap, forgeErr(err, op, "parse github default branch failed", repo)
 	}
 	snap.DefaultBranch = meta.Default
 
-	const perPage = 100
-	path := fmt.Sprintf("repos/%s/branches?per_page=%d&page=1", repo, perPage)
+	path := fmt.Sprintf("repos/%s/branches?per_page=%d&page=1", repo, listPageSize)
 	raw, err = g.Run.RunJSON(ctx, "gh", "api", path)
 	if err != nil {
-		return snap, fmt.Errorf("github branches page 1: %w", err)
+		return snap, forgeErr(err, op, "list github branches failed", repo)
 	}
 	var heads []struct {
 		Name   string `json:"name"`
@@ -81,7 +87,7 @@ func (g *GitHub) seedHeads(ctx context.Context, repo string) (HeadsSnapshot, err
 		} `json:"commit"`
 	}
 	if err := json.Unmarshal(raw, &heads); err != nil {
-		return snap, fmt.Errorf("parse github branches: %w", err)
+		return snap, forgeErr(err, op, "parse github branches failed", repo)
 	}
 	for _, h := range heads {
 		snap.Heads = append(snap.Heads, RemoteHead{
@@ -93,14 +99,14 @@ func (g *GitHub) seedHeads(ctx context.Context, repo string) (HeadsSnapshot, err
 }
 
 func (g *GitHub) loadCI(ctx context.Context, repo string) (CISnapshot, error) {
-	var snap CISnapshot
+	const op = "remotegit.GitHub.loadCI"
 	raw, err := g.Run.RunJSON(ctx, "gh", "run", "list",
 		"--repo", repo,
 		"--limit", "20",
 		"--json", "databaseId,status,conclusion,displayTitle,url,headBranch,updatedAt,workflowName",
 	)
 	if err != nil {
-		return snap, err
+		return CISnapshot{}, forgeErr(err, op, "list github workflow runs failed", repo)
 	}
 	var runs []struct {
 		ID         int64  `json:"databaseId"`
@@ -113,40 +119,33 @@ func (g *GitHub) loadCI(ctx context.Context, repo string) (CISnapshot, error) {
 		Workflow   string `json:"workflowName"`
 	}
 	if err := json.Unmarshal(raw, &runs); err != nil {
-		return snap, err
+		return CISnapshot{}, forgeErr(err, op, "parse github workflow runs failed", repo)
 	}
-	for i, r := range runs {
-		status := firstNonEmpty(r.Conclusion, r.Status)
-		runID := fmt.Sprintf("%d", r.ID)
-		snap.Runs = append(snap.Runs, CachedCIRun{
-			Branch: r.Branch, Status: status, URL: r.URL, UpdatedAt: r.UpdatedAt, RunID: runID,
+	rows := make([]ciRow, 0, len(runs))
+	for _, r := range runs {
+		rows = append(rows, ciRow{
+			run: CachedCIRun{
+				Branch: r.Branch, Status: firstNonEmpty(r.Conclusion, r.Status), URL: r.URL,
+				UpdatedAt: r.UpdatedAt, RunID: strconv.FormatInt(r.ID, 10),
+			},
+			conclusion: r.Conclusion,
+			name:       firstNonEmpty(r.Workflow, r.Title),
 		})
-		if i == 0 {
-			snap.Latest = &board.CIStatus{
-				Status:     status,
-				Conclusion: r.Conclusion,
-				Ref:        r.Branch,
-				Name:       firstNonEmpty(r.Workflow, r.Title),
-				WebURL:     r.URL,
-				UpdatedAt:  r.UpdatedAt,
-				RunID:      runID,
-			}
-		}
 	}
-	return snap, nil
+	return newCISnapshot(rows), nil
 }
 
 func (g *GitHub) loadOpenReviews(ctx context.Context, repo string) (OpenReviewsSnapshot, error) {
-	var snap OpenReviewsSnapshot
+	const op = "remotegit.GitHub.loadOpenReviews"
 	prRaw, err := g.Run.RunJSON(ctx, "gh", "pr", "list",
 		"--repo", repo,
 		"--state", "open",
 		"--json", "number,headRefName,url,mergeable,mergeStateStatus,updatedAt,isDraft",
 	)
 	if err != nil {
-		return snap, err
+		return OpenReviewsSnapshot{}, forgeErr(err, op, "list github open pull requests failed", repo)
 	}
-	var prs []struct {
+	var rows []struct {
 		Number           int    `json:"number"`
 		Head             string `json:"headRefName"`
 		URL              string `json:"url"`
@@ -155,12 +154,12 @@ func (g *GitHub) loadOpenReviews(ctx context.Context, repo string) (OpenReviewsS
 		UpdatedAt        string `json:"updatedAt"`
 		IsDraft          bool   `json:"isDraft"`
 	}
-	if err := json.Unmarshal(prRaw, &prs); err != nil {
-		return snap, err
+	if err := json.Unmarshal(prRaw, &rows); err != nil {
+		return OpenReviewsSnapshot{}, forgeErr(err, op, "parse github open pull requests failed", repo)
 	}
-	snap.PullRequests = len(prs)
-	for _, pr := range prs {
-		snap.Reviews = append(snap.Reviews, CachedOpenReview{
+	prs := make([]forgePR, 0, len(rows))
+	for _, pr := range rows {
+		prs = append(prs, forgePR{
 			Branch:    pr.Head,
 			ID:        pr.Number,
 			URL:       pr.URL,
@@ -169,10 +168,11 @@ func (g *GitHub) loadOpenReviews(ctx context.Context, repo string) (OpenReviewsS
 			Draft:     pr.IsDraft,
 		})
 	}
-	return snap, nil
+	return newOpenReviews(boardconfig.HostGitHub, prs), nil
 }
 
 func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]board.MergedReview, error) {
+	const op = "remotegit.GitHub.loadMerged"
 	raw, err := g.Run.RunJSON(ctx, "gh", "pr", "list",
 		"--repo", repo,
 		"--state", "merged",
@@ -180,15 +180,20 @@ func (g *GitHub) loadMerged(ctx context.Context, repo string) ([]board.MergedRev
 		"--json", "number,headRefName,url,mergedAt",
 	)
 	if err != nil {
-		return nil, err
+		return nil, forgeErr(err, op, "list github merged pull requests failed", repo)
 	}
-	return decodeGitHubMerged(raw)
+	prs, err := decodeGitHubMerged(raw)
+	if err != nil {
+		return nil, forgeErr(err, op, "parse github merged pull requests failed", repo)
+	}
+	return mergedReviews(prs), nil
 }
 
 // MergedForBranch looks up merged PRs whose head branch matches branch.
 func (g *GitHub) MergedForBranch(ctx context.Context, repo, branch string) ([]board.MergedReview, error) {
-	if g == nil {
-		return nil, fmt.Errorf("github client missing")
+	const op = "remotegit.GitHub.MergedForBranch"
+	if err := g.ready(); err != nil {
+		return nil, err
 	}
 	branch = trimBranch(branch)
 	if err := forgeBranchNameOK(branch); err != nil {
@@ -202,47 +207,54 @@ func (g *GitHub) MergedForBranch(ctx context.Context, repo, branch string) ([]bo
 		"--json", "number,headRefName,url,mergedAt",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("github merged for %s: %w", branch, err)
+		return nil, forgeErr(err, op, "look up github merged pull request failed", repo).With("branch", branch)
 	}
-	return decodeGitHubMerged(raw)
+	prs, err := decodeGitHubMerged(raw)
+	if err != nil {
+		return nil, forgeErr(err, op, "parse github merged pull request failed", repo).With("branch", branch)
+	}
+	return mergedReviews(prs), nil
 }
 
-func decodeGitHubMerged(raw []byte) ([]board.MergedReview, error) {
-	var prs []struct {
+func decodeGitHubMerged(raw []byte) ([]forgePR, error) {
+	var rows []struct {
 		Number   int    `json:"number"`
 		Head     string `json:"headRefName"`
 		URL      string `json:"url"`
 		MergedAt string `json:"mergedAt"`
 	}
-	if err := json.Unmarshal(raw, &prs); err != nil {
+	if err := json.Unmarshal(raw, &rows); err != nil {
 		return nil, err
 	}
-	out := make([]board.MergedReview, 0, len(prs))
-	for _, pr := range prs {
-		name := trimBranch(pr.Head)
-		if name == "" {
-			continue
-		}
-		out = append(out, board.MergedReview{
-			Branch:   name,
-			ID:       pr.Number,
-			URL:      pr.URL,
-			MergedAt: pr.MergedAt,
-		})
+	out := make([]forgePR, 0, len(rows))
+	for _, pr := range rows {
+		out = append(out, forgePR{Branch: pr.Head, ID: pr.Number, URL: pr.URL, MergedAt: pr.MergedAt})
 	}
 	return out, nil
 }
 
-func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string) ([]board.FailedJob, error) {
-	if strings.TrimSpace(runID) == "" {
-		return nil, fmt.Errorf("missing run id")
+// githubHasConflict reads gh's mergeable and merge-state fields; either one
+// reporting a conflict marks the PR.
+func githubHasConflict(mergeable, mergeState string) bool {
+	m := strings.ToUpper(strings.TrimSpace(mergeable))
+	s := strings.ToUpper(strings.TrimSpace(mergeState))
+	return m == "CONFLICTING" || s == "DIRTY" || s == "CONFLICTING"
+}
+
+func (g *GitHub) FailedJobs(ctx context.Context, p boardconfig.Project, runID string) ([]board.FailedJob, error) {
+	const op = "remotegit.GitHub.FailedJobs"
+	if err := g.ready(); err != nil {
+		return nil, err
+	}
+	if err := requireArg(op, "run id", runID); err != nil {
+		return nil, err
 	}
 	raw, err := g.Run.RunJSON(ctx, "gh", "run", "view", runID,
 		"--repo", p.Path,
 		"--json", "jobs",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("github failed jobs: %w", err)
+		return nil, forgeErr(err, op, "list github jobs failed", p.Path).With("run_id", runID)
 	}
 	var payload struct {
 		Jobs []struct {
@@ -253,7 +265,7 @@ func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string)
 		} `json:"jobs"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("parse github jobs: %w", err)
+		return nil, forgeErr(err, op, "parse github jobs failed", p.Path).With("run_id", runID)
 	}
 	var out []board.FailedJob
 	for _, j := range payload.Jobs {
@@ -269,11 +281,15 @@ func (g *GitHub) FailedJobs(ctx context.Context, p config.Project, runID string)
 	return out, nil
 }
 
-func (g *GitHub) JobLog(ctx context.Context, p config.Project, runID, jobID string) (string, error) {
+func (g *GitHub) JobLog(ctx context.Context, p boardconfig.Project, runID, jobID string) (string, error) {
+	const op = "remotegit.GitHub.JobLog"
+	if err := g.ready(); err != nil {
+		return "", err
+	}
 	runID = strings.TrimSpace(runID)
 	jobID = strings.TrimPrefix(strings.TrimSpace(jobID), "github:")
-	if runID == "" {
-		return "", fmt.Errorf("missing run id")
+	if err := requireArg(op, "run id", runID); err != nil {
+		return "", err
 	}
 	args := []string{"run", "view", runID, "--repo", p.Path}
 	if jobID != "" {
@@ -283,24 +299,28 @@ func (g *GitHub) JobLog(ctx context.Context, p config.Project, runID, jobID stri
 	}
 	out, err := g.Run.Run(ctx, "gh", args...)
 	if err != nil {
-		return "", fmt.Errorf("github job log: %w", err)
+		return "", forgeErr(err, op, "read github job log failed", p.Path).With("run_id", runID)
 	}
 	return truncateLog(string(out)), nil
 }
 
 // ListOrgRepos lists non-archived repositories for a GitHub org or user.
 func (g *GitHub) ListOrgRepos(ctx context.Context, org string) ([]RepoRef, error) {
+	const op = "remotegit.GitHub.ListOrgRepos"
+	if err := g.ready(); err != nil {
+		return nil, err
+	}
 	org = strings.TrimSpace(org)
-	if org == "" {
-		return nil, fmt.Errorf("missing github org")
+	if err := requireArg(op, "github org", org); err != nil {
+		return nil, err
 	}
 	raw, err := g.Run.RunJSON(ctx, "gh", "repo", "list", org,
-		"--limit", "1000",
+		"--limit", strconv.Itoa(maxListRepos),
 		"--no-archived",
 		"--json", "nameWithOwner,name,isArchived",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("github list repos: %w", err)
+		return nil, forgeErr(err, op, "list github repositories failed", org)
 	}
 	var rows []struct {
 		NameWithOwner string `json:"nameWithOwner"`
@@ -308,24 +328,16 @@ func (g *GitHub) ListOrgRepos(ctx context.Context, org string) ([]RepoRef, error
 		IsArchived    bool   `json:"isArchived"`
 	}
 	if err := json.Unmarshal(raw, &rows); err != nil {
-		return nil, fmt.Errorf("parse gh repo list: %w", err)
+		return nil, forgeErr(err, op, "parse github repositories failed", org)
 	}
 	out := make([]RepoRef, 0, len(rows))
 	for _, r := range rows {
 		if r.IsArchived {
 			continue
 		}
-		path := strings.Trim(r.NameWithOwner, "/")
-		name := r.Name
-		if name == "" {
-			parts := strings.Split(path, "/")
-			name = parts[len(parts)-1]
+		if ref, ok := newRepoRef(boardconfig.HostGitHub, r.NameWithOwner, r.Name); ok {
+			out = append(out, ref)
 		}
-		out = append(out, RepoRef{
-			Host: config.HostGitHub,
-			Path: path,
-			Name: name,
-		})
 	}
 	return out, nil
 }

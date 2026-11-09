@@ -3,12 +3,14 @@ package localgit
 import (
 	"net/url"
 	"strings"
+
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 )
 
 // RemoteRef is a forge identity parsed from a git remote URL.
 type RemoteRef struct {
-	Host string // github | gitlab.
-	Path string // owner/repo (no .git).
+	Host boardconfig.Host // boardconfig.HostGitHub or boardconfig.HostGitLab.
+	Path string           // owner/repo (no .git).
 }
 
 // ParseRemoteURL maps common GitHub/GitLab clone URLs to host+path.
@@ -58,12 +60,12 @@ func remoteFromHostPath(host, path string) (RemoteRef, bool) {
 	// Keep full path for nested GitLab groups (group/sub/repo).
 	path = strings.Join(parts, "/")
 
-	var forge string
+	var forge boardconfig.Host
 	switch {
 	case host == "github.com" || strings.HasSuffix(host, ".github.com"):
-		forge = "github"
+		forge = boardconfig.HostGitHub
 	case host == "gitlab.com" || strings.Contains(host, "gitlab"):
-		forge = "gitlab"
+		forge = boardconfig.HostGitLab
 	default:
 		return RemoteRef{}, false
 	}

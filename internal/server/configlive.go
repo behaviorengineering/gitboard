@@ -9,6 +9,8 @@ import (
 
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/observability"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 )
 
 // configLive reloads config from disk when the file mtime advances.
@@ -18,16 +20,14 @@ type configLive struct {
 	mu          sync.Mutex
 	path        string
 	mod         time.Time
-	doc         config.File
+	doc         boardconfig.File
 	poll        int
 	clearCaches func()
 	log         observability.Logger
 }
 
-func newConfigLive(path string, doc config.File, poll int, clearCaches func(), log observability.Logger) *configLive {
-	if log == nil {
-		log = observability.NewLogger()
-	}
+// newConfigLive builds the live config. log is required; NewMux checks it.
+func newConfigLive(path string, doc boardconfig.File, poll int, clearCaches func(), log observability.Logger) *configLive {
 	cl := &configLive{
 		path:        path,
 		doc:         doc,
@@ -46,22 +46,22 @@ func newConfigLive(path string, doc config.File, poll int, clearCaches func(), l
 // snapshot returns the current config. When ConfigPath is set and the file
 // mtime is newer, it reloads the full File from disk. Reload failure fails
 // closed (error) so callers do not keep serving a silent stale snapshot.
-func (c *configLive) snapshot() (config.File, int, error) {
+func (c *configLive) snapshot() (boardconfig.File, int, error) {
 	if c == nil {
-		return config.File{}, config.DefaultPollSeconds, fmt.Errorf("config unavailable")
+		return boardconfig.File{}, config.DefaultPollSeconds, fmt.Errorf("config unavailable")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.snapshotLocked()
 }
 
-func (c *configLive) snapshotLocked() (config.File, int, error) {
+func (c *configLive) snapshotLocked() (boardconfig.File, int, error) {
 	if c.path == "" {
 		return c.doc, c.poll, nil
 	}
 	st, err := os.Stat(c.path)
 	if err != nil {
-		return config.File{}, 0, fmt.Errorf("config stat: %w", err)
+		return boardconfig.File{}, 0, fmt.Errorf("config stat: %w", err)
 	}
 	mod := st.ModTime()
 	if !mod.After(c.mod) {
@@ -69,16 +69,9 @@ func (c *configLive) snapshotLocked() (config.File, int, error) {
 	}
 	doc, err := config.Load(c.path)
 	if err != nil {
-		return config.File{}, 0, fmt.Errorf("config reload: %w", err)
+		return boardconfig.File{}, 0, fmt.Errorf("config reload: %w", err)
 	}
-	if projectsChanged(c.doc.Projects, doc.Projects) || viewsChanged(c.doc.Views, doc.Views) || localRootsChanged(c.doc.Local.Roots, doc.Local.Roots) {
-		if c.clearCaches != nil {
-			c.clearCaches()
-		}
-	}
-	c.doc = doc
-	c.mod = mod
-	c.poll = doc.EffectivePollSeconds()
+	c.applyLocked(c.doc, doc, mod)
 	return c.doc, c.poll, nil
 }
 
@@ -88,7 +81,7 @@ func (c *configLive) writable() bool {
 }
 
 // replace saves doc to the config path and updates the in-memory snapshot immediately.
-func (c *configLive) replace(doc config.File) error {
+func (c *configLive) replace(doc boardconfig.File) error {
 	if c == nil {
 		return fmt.Errorf("config unavailable")
 	}
@@ -97,93 +90,69 @@ func (c *configLive) replace(doc config.File) error {
 	if strings.TrimSpace(c.path) == "" {
 		return fmt.Errorf("config path not set")
 	}
+	const op = "server.configLive.replace"
 	prev := c.doc
 	if err := config.Save(c.path, doc); err != nil {
-		return fmt.Errorf("configlive.replace save: %w", err)
+		return gberr.Wrap(err, gberr.CodeUnavailable, op, "saving the config file failed").With("path", c.path)
 	}
-	apply := doc
+	// Read the file back: memory must hold what the next process start will
+	// load. If the saved file cannot be reloaded, keep the previous snapshot
+	// and fail the request; the next snapshot retries the reload by mtime.
 	loaded, err := config.Load(c.path)
 	if err != nil {
-		c.log.With("path", c.path).Errorf("config reload after save failed: %v (applying saved doc)", err)
-	} else {
-		apply = loaded
+		return gberr.Wrap(err, gberr.CodeInternal, op, "config saved but reload failed").With("path", c.path)
 	}
-	st, sterr := os.Stat(c.path)
-	mod := time.Time{}
-	if sterr == nil {
-		mod = st.ModTime()
-	} else {
-		c.log.With("path", c.path).Errorf("config stat after save failed: %v", sterr)
+	st, err := os.Stat(c.path)
+	if err != nil {
+		return gberr.Wrap(err, gberr.CodeInternal, op, "config saved but stat failed").With("path", c.path)
 	}
-	c.applyLocked(prev, apply, mod)
+	c.applyLocked(prev, loaded, st.ModTime())
 	return nil
 }
 
-func (c *configLive) applyLocked(prev, apply config.File, mod time.Time) {
-	if projectsChanged(prev.Projects, apply.Projects) || viewsChanged(prev.Views, apply.Views) || localRootsChanged(prev.Local.Roots, apply.Local.Roots) {
-		if c.clearCaches != nil {
-			c.clearCaches()
-		}
+// applyLocked installs apply as the live snapshot and clears the TTL caches
+// when a cache-relevant field changed.
+func (c *configLive) applyLocked(prev, apply boardconfig.File, mod time.Time) {
+	if cacheRelevantChange(prev, apply) && c.clearCaches != nil {
+		c.clearCaches()
 	}
 	c.doc = apply
 	if !mod.IsZero() {
 		c.mod = mod
 	}
-	c.poll = apply.EffectivePollSeconds()
+	c.poll = config.EffectivePollSeconds(apply)
 }
 
-func projectsChanged(a, b []config.Project) bool {
-	if len(a) != len(b) {
-		return true
-	}
-	seen := make(map[string]struct{}, len(a))
-	for _, p := range a {
-		seen[projectFingerprint(p)] = struct{}{}
-	}
-	for _, p := range b {
-		if _, ok := seen[projectFingerprint(p)]; !ok {
-			return true
-		}
-	}
-	return false
+// cacheRelevantChange reports whether the tracked projects, the views or the
+// local roots differ. Those feed the forge, origin-fetch and scan caches.
+func cacheRelevantChange(prev, next boardconfig.File) bool {
+	return setChanged(prev.Projects, next.Projects, projectFingerprint) ||
+		setChanged(prev.Views, next.Views, viewFingerprint) ||
+		setChanged(prev.Local.Roots, next.Local.Roots, func(s string) string { return s })
 }
 
-func viewsChanged(a, b []config.View) bool {
+// setChanged reports whether a and b differ as sets of key(item). Equal
+// lengths with the same members count as unchanged, in any order.
+func setChanged[T any](a, b []T, key func(T) string) bool {
 	if len(a) != len(b) {
 		return true
 	}
 	seen := make(map[string]struct{}, len(a))
 	for _, v := range a {
-		seen[viewFingerprint(v)] = struct{}{}
+		seen[key(v)] = struct{}{}
 	}
 	for _, v := range b {
-		if _, ok := seen[viewFingerprint(v)]; !ok {
+		if _, ok := seen[key(v)]; !ok {
 			return true
 		}
 	}
 	return false
 }
 
-func localRootsChanged(a, b []string) bool {
-	if len(a) != len(b) {
-		return true
-	}
-	seen := make(map[string]struct{}, len(a))
-	for _, r := range a {
-		seen[r] = struct{}{}
-	}
-	for _, r := range b {
-		if _, ok := seen[r]; !ok {
-			return true
-		}
-	}
-	return false
-}
-
-func projectFingerprint(p config.Project) string {
+func projectFingerprint(p boardconfig.Project) string {
 	return string(p.Host) + "\x00" + p.Path + "\x00" + p.ID + "\x00" + p.LocalPath
 }
 
-func viewFingerprint(v config.View) string {
+func viewFingerprint(v boardconfig.View) string {
 	return v.ID + "\x00" + v.Label + "\x00" + strings.Join(v.Projects, "\x01")
 }

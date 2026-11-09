@@ -25,7 +25,7 @@ func TestMutationCoordinatorSerializesSameDir(t *testing.T) {
 				t.Errorf("acquire: %v", err)
 				return
 			}
-			defer lease.Release()
+			defer releaseOrFail(t, lease)
 			n := atomic.AddInt32(&active, 1)
 			for {
 				old := atomic.LoadInt32(&maxActive)
@@ -52,7 +52,7 @@ func TestMutationCoordinatorAllowsDifferentDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer leaseA.Release()
+	defer releaseOrFail(t, leaseA)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -60,7 +60,7 @@ func TestMutationCoordinatorAllowsDifferentDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("different dirs must not block: %v", err)
 	}
-	leaseB.Release()
+	releaseOrFail(t, leaseB)
 }
 
 func TestMutationCoordinatorCancelsWhileQueued(t *testing.T) {
@@ -71,7 +71,7 @@ func TestMutationCoordinatorCancelsWhileQueued(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer held.Release()
+	defer releaseOrFail(t, held)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
@@ -120,12 +120,12 @@ func TestMutationCoordinatorLeaseEpochAtGrant(t *testing.T) {
 			return
 		}
 		gotEpoch = lease.Epoch()
-		lease.Release()
+		releaseOrFail(t, lease)
 		errCh <- nil
 	}()
 	<-started
 	time.Sleep(30 * time.Millisecond)
-	held.Release()
+	releaseOrFail(t, held)
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestMutationCoordinatorBumpEpoch(t *testing.T) {
 		t.Fatalf("lease epoch = %d", lease.Epoch())
 	}
 	got := lease.BumpEpoch()
-	lease.Release()
+	releaseOrFail(t, lease)
 	if got != 1 || c.Epoch(dir) != 1 {
 		t.Fatalf("epoch after bump = %d / %d", got, c.Epoch(dir))
 	}
@@ -162,8 +162,8 @@ func TestMutationCoordinatorReleaseAfterErrorPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease.Release()
-	lease.Release() // idempotent.
+	releaseOrFail(t, lease)
+	releaseOrFail(t, lease) // idempotent.
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -171,7 +171,7 @@ func TestMutationCoordinatorReleaseAfterErrorPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease2.Release()
+	releaseOrFail(t, lease2)
 }
 
 func TestResolveCommonDirRejectsEmpty(t *testing.T) {
@@ -217,5 +217,14 @@ func TestMutationCoordinatorOSLockCanceled(t *testing.T) {
 	err := <-errCh
 	if !errors.Is(err, ErrMutationCanceled) {
 		t.Fatalf("want canceled, got %v", err)
+	}
+}
+
+// releaseOrFail releases lease and reports a failed OS unlock. It uses Errorf
+// so goroutines may call it.
+func releaseOrFail(t *testing.T, lease *MutationLease) {
+	t.Helper()
+	if err := lease.Release(); err != nil {
+		t.Errorf("release: %v", err)
 	}
 }

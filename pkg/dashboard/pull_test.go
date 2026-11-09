@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
@@ -26,7 +27,9 @@ func (f *pullLocalFake) InspectPath(_ context.Context, path string) localgit.Sta
 	return localgit.Status{Mapped: true, Path: path, Branch: "main"}
 }
 
-func (f *pullLocalFake) EnrichOriginSync(context.Context, *localgit.Status) {}
+func (f *pullLocalFake) OriginSync(context.Context, string) (localgit.RepoSync, error) {
+	return localgit.RepoSync{}, nil
+}
 
 func (f *pullLocalFake) CommonGitDir(_ context.Context, path string) (string, error) {
 	return path, nil
@@ -36,11 +39,7 @@ func (f *pullLocalFake) ListLocalHeads(context.Context, string) ([]string, error
 	return nil, nil
 }
 
-func (f *pullLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) (bool, error) {
-	return false, nil
-}
-
-func (f *pullLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) (bool, error) {
+func (f *pullLocalFake) FetchOriginSmart(context.Context, string, localgit.FetchPolicy, *localgit.OriginFetchCache) (bool, error) {
 	return false, nil
 }
 
@@ -48,8 +47,8 @@ func (f *pullLocalFake) OriginRemote(context.Context, string) (string, error) {
 	return "https://example.test/acme/app.git", nil
 }
 
-func (f *pullLocalFake) PullFFOnly(context.Context, string, string) error {
-	return f.pullErr
+func (f *pullLocalFake) PullFFOnly(context.Context, string, string) (localgit.PullPhases, error) {
+	return localgit.PullPhases{}, f.pullErr
 }
 
 func (f *pullLocalFake) RemoveSafeCheckout(context.Context, string, string, string) error {
@@ -64,12 +63,16 @@ func (f *pullLocalFake) ContentOnDefault(context.Context, string, string, string
 	return false, "", nil
 }
 
-func (f *pullLocalFake) InspectSync(context.Context, string, string) (localgit.SyncInspection, error) {
+func (f *pullLocalFake) CompareSync(context.Context, string, string) (localgit.SyncInspection, error) {
 	return localgit.SyncInspection{}, fmt.Errorf("not used")
 }
 
-func (f *pullLocalFake) CompareSync(context.Context, string, string) (localgit.SyncInspection, error) {
-	return localgit.SyncInspection{}, fmt.Errorf("not used")
+func (f *pullLocalFake) CanonicalCheckoutPath(_ context.Context, path string) string {
+	return path
+}
+
+func (f *pullLocalFake) Mutator(*localgit.MutationLease) (LocalMutator, error) {
+	return f, nil
 }
 
 func TestPullFFTreatsUpToDateAsSuccess(t *testing.T) {
@@ -78,12 +81,12 @@ func TestPullFFTreatsUpToDateAsSuccess(t *testing.T) {
 		path:    path,
 		pullErr: fmt.Errorf("%w: %q", localgit.ErrUpToDate, "main"),
 	}
-	service := New(nil, nil, nil, nil, fake)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: path,
 		}},
@@ -111,12 +114,12 @@ func TestPullFFStillRejectsDiverged(t *testing.T) {
 		path:    path,
 		pullErr: fmt.Errorf("%w: %q", localgit.ErrDiverged, "main"),
 	}
-	service := New(nil, nil, nil, nil, fake)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: path,
 		}},
@@ -127,8 +130,8 @@ func TestPullFFStillRejectsDiverged(t *testing.T) {
 		Branch:    "main",
 		RepoPath:  path,
 	})
-	if err == nil || !IsBadRequest(err) {
-		t.Fatalf("diverged want bad request, got %v", err)
+	if err == nil || !gberr.HasCode(err, gberr.CodeConflict) {
+		t.Fatalf("diverged want conflict, got %v", err)
 	}
 }
 
@@ -142,12 +145,12 @@ func TestPullFFStaleIndexLockNeedsConfirm(t *testing.T) {
 			Age:      2 * time.Minute,
 		},
 	}
-	service := New(nil, nil, nil, nil, fake)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: path,
 		}},
@@ -176,12 +179,12 @@ func TestPullFFClearsStaleIndexLockWhenApproved(t *testing.T) {
 	var cleared bool
 	fake.indexErr = nil
 	// First call without clear is not used; with clear EnsureWritableIndex succeeds.
-	service := New(nil, nil, nil, nil, &pullClearFake{pullLocalFake: *fake, cleared: &cleared})
+	service := newTestService(&fakeExec{}, &pullClearFake{pullLocalFake: *fake, cleared: &cleared})
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: path,
 		}},
@@ -206,6 +209,10 @@ type pullClearFake struct {
 	cleared *bool
 }
 
+func (f *pullClearFake) Mutator(*localgit.MutationLease) (LocalMutator, error) {
+	return f, nil
+}
+
 func (f *pullClearFake) EnsureWritableIndex(_ context.Context, _ string, clearStale bool) error {
 	if clearStale && f.cleared != nil {
 		*f.cleared = true
@@ -219,8 +226,12 @@ type pullTimedFake struct {
 	err    error
 }
 
-func (f *pullTimedFake) PullFFOnlyWithPhases(context.Context, string, string) (localgit.PullPhases, error) {
+func (f *pullTimedFake) PullFFOnly(context.Context, string, string) (localgit.PullPhases, error) {
 	return f.phases, f.err
+}
+
+func (f *pullTimedFake) Mutator(*localgit.MutationLease) (LocalMutator, error) {
+	return f, nil
 }
 
 func TestPullFFReturnsPhaseTimings(t *testing.T) {
@@ -229,12 +240,12 @@ func TestPullFFReturnsPhaseTimings(t *testing.T) {
 		phases: localgit.PullPhases{FetchMs: 12, SubmodulePreMs: 3, MergeMs: 4, SubmodulePostMs: 5},
 	}
 	fake.pullErr = nil
-	service := New(nil, nil, nil, nil, fake)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: path,
 		}},
@@ -262,12 +273,12 @@ func TestPullFFUpToDateKeepsPhaseTimings(t *testing.T) {
 		phases: localgit.PullPhases{FetchMs: 7},
 		err:    fmt.Errorf("%w: %q", localgit.ErrUpToDate, "main"),
 	}
-	service := New(nil, nil, nil, nil, fake)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: path,
 		}},

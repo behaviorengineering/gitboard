@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
@@ -16,11 +16,12 @@ func TestConfirmMergedForCandidatesHit(t *testing.T) {
 			"--head feat/gone": []byte(`[{"number":25,"headRefName":"feat/gone","url":"https://example/pr/25","mergedAt":"2026-09-12T02:44:00Z"}]`),
 		},
 	}
-	s := New(remotegit.NewGitHub(fx), nil, nil, nil, nil)
-	p := config.Project{ID: "app", Host: config.HostGitHub, Path: "acme/app"}
+	s := newTestService(fx, nil)
+	p := boardconfig.Project{ID: "app", Host: boardconfig.HostGitHub, Path: "acme/app"}
 	row := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
+		OpenOK:        true,
 		MergedOK:      true,
 		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
@@ -34,7 +35,7 @@ func TestConfirmMergedForCandidatesHit(t *testing.T) {
 		},
 	}
 	s.confirmMergedForCandidates(context.Background(), p, row, remotegit.SummaryOpts{
-		Cache:    s.Cache,
+		Cache:    s.cache,
 		HeadsTTL: 0,
 		Fresh:    true,
 	})
@@ -44,7 +45,7 @@ func TestConfirmMergedForCandidatesHit(t *testing.T) {
 	if len(row.Merged) != 1 || row.Merged[0].ID != 25 {
 		t.Fatalf("merged: %+v", row.Merged)
 	}
-	remotegit.EnrichPruneHints(row)
+	enrichPruneHints(row)
 	if row.Local.Worktrees[0].PruneHint != board.PruneSafe {
 		t.Fatalf("hint=%q", row.Local.Worktrees[0].PruneHint)
 	}
@@ -56,11 +57,12 @@ func TestConfirmMergedForCandidatesMissIsLikely(t *testing.T) {
 			"--head feat/gone": []byte(`[]`),
 		},
 	}
-	s := New(remotegit.NewGitHub(fx), nil, nil, nil, nil)
-	p := config.Project{ID: "app", Host: config.HostGitHub, Path: "acme/app"}
+	s := newTestService(fx, nil)
+	p := boardconfig.Project{ID: "app", Host: boardconfig.HostGitHub, Path: "acme/app"}
 	row := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
+		OpenOK:        true,
 		MergedOK:      true,
 		Branches: []board.BranchRef{
 			{Name: "main", Default: true},
@@ -74,14 +76,14 @@ func TestConfirmMergedForCandidatesMissIsLikely(t *testing.T) {
 		},
 	}
 	s.confirmMergedForCandidates(context.Background(), p, row, remotegit.SummaryOpts{
-		Cache:    s.Cache,
+		Cache:    s.cache,
 		HeadsTTL: 0,
 		Fresh:    true,
 	})
 	if !row.MergedChecked["feat/gone"] {
 		t.Fatal("miss must still be checked")
 	}
-	remotegit.EnrichPruneHints(row)
+	enrichPruneHints(row)
 	if row.Local.Worktrees[0].PruneHint != board.PruneLikely {
 		t.Fatalf("hint=%q", row.Local.Worktrees[0].PruneHint)
 	}
@@ -89,11 +91,12 @@ func TestConfirmMergedForCandidatesMissIsLikely(t *testing.T) {
 
 func TestConfirmMergedForCandidatesLookupErrorNoLikely(t *testing.T) {
 	fx := &errExec{err: fmt.Errorf("glab failed")}
-	s := New(remotegit.NewGitHub(fx), nil, nil, nil, nil)
-	p := config.Project{ID: "app", Host: config.HostGitHub, Path: "acme/app"}
+	s := newTestService(fx, nil)
+	p := boardconfig.Project{ID: "app", Host: boardconfig.HostGitHub, Path: "acme/app"}
 	row := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
+		OpenOK:        true,
 		MergedOK:      true,
 		Local: &board.LocalStatus{
 			Mapped: true,
@@ -103,13 +106,13 @@ func TestConfirmMergedForCandidatesLookupErrorNoLikely(t *testing.T) {
 		},
 	}
 	s.confirmMergedForCandidates(context.Background(), p, row, remotegit.SummaryOpts{
-		Cache: s.Cache,
+		Cache: s.cache,
 		Fresh: true,
 	})
 	if row.MergedChecked["feat/gone"] {
 		t.Fatal("error must not mark checked")
 	}
-	remotegit.EnrichPruneHints(row)
+	enrichPruneHints(row)
 	if row.Local.Worktrees[0].PruneHint != "" {
 		t.Fatalf("hint=%q", row.Local.Worktrees[0].PruneHint)
 	}
@@ -117,27 +120,29 @@ func TestConfirmMergedForCandidatesLookupErrorNoLikely(t *testing.T) {
 
 func TestConfirmMergedForCandidatesSkipsBulkHit(t *testing.T) {
 	fx := &errExec{err: fmt.Errorf("should not lookup")}
-	s := New(remotegit.NewGitHub(fx), nil, nil, nil, nil)
-	p := config.Project{ID: "app", Host: config.HostGitHub, Path: "acme/app"}
+	s := newTestService(fx, nil)
+	p := boardconfig.Project{ID: "app", Host: boardconfig.HostGitHub, Path: "acme/app"}
 	row := &board.ProjectSummary{
 		RemoteNames:   []string{"main"},
 		RemoteNamesOK: true,
+		OpenOK:        true,
 		MergedOK:      true,
 		Merged: []board.MergedReview{
 			{Branch: "feat/gone", ID: 9},
 		},
 		Local: &board.LocalStatus{
-			Mapped: true,
+			Mapped:        true,
+			DefaultBranch: "main",
 			Worktrees: []board.LocalWorktree{
 				{Path: "/wt", Branch: "feat/gone"},
 			},
 		},
 	}
 	s.confirmMergedForCandidates(context.Background(), p, row, remotegit.SummaryOpts{
-		Cache: s.Cache,
+		Cache: s.cache,
 		Fresh: true,
 	})
-	remotegit.EnrichPruneHints(row)
+	enrichPruneHints(row)
 	if row.Local.Worktrees[0].PruneHint != board.PruneSafe {
 		t.Fatalf("bulk hit should stay safe without lookup, hint=%q", row.Local.Worktrees[0].PruneHint)
 	}

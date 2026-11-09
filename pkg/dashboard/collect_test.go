@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
-	"github.com/behaviorengineering/gitboard/pkg/remotegit"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/cliexec"
+	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
 // fakeExec mirrors forge client_test fake (kept local to avoid test helper packages).
@@ -49,6 +51,19 @@ func (f *fakeExec) RunJSON(ctx context.Context, name string, args ...string) ([]
 	return out, nil
 }
 
+// testConfig wires every forge client on run, the given local (may be nil)
+// and an in-process-only mutation coordinator.
+func testConfig(run cliexec.Exec, local LocalGit) ServiceConfig {
+	cfg := DefaultServiceConfig(run)
+	cfg.Local = local
+	cfg.Mutations = localgit.NewMutationCoordinator(nil)
+	return cfg
+}
+
+func newTestService(run cliexec.Exec, local LocalGit) *Service {
+	return testConfig(run, local).CreateService()
+}
+
 func dualHostFake() *fakeExec {
 	return &fakeExec{
 		responses: map[string][]byte{
@@ -74,13 +89,13 @@ func dualHostFake() *fakeExec {
 	}
 }
 
-func TestCollectWithFakeForge(t *testing.T) {
+func TestCollectFakeForge(t *testing.T) {
 	fx := dualHostFake()
-	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
-			{ID: "gl-lib", Label: "Lib", Host: config.HostGitLab, Path: "acme/lib"},
+	s := newTestService(fx, nil)
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
+			{ID: "gl-lib", Label: "Lib", Host: boardconfig.HostGitLab, Path: "acme/lib"},
 		},
 	}
 	out, err := s.Collect(context.Background(), doc, true, "")
@@ -115,11 +130,11 @@ func TestCollectWithFakeForge(t *testing.T) {
 
 func TestCollectHideBranches(t *testing.T) {
 	fx := dualHostFake()
-	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
-	doc := config.File{
-		UI: config.UI{HideBranches: []string{"feat/*"}},
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	s := newTestService(fx, nil)
+	doc := boardconfig.File{
+		UI: boardconfig.UI{HideBranches: []string{"feat/*"}},
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 		},
 	}
 	out, err := s.Collect(context.Background(), doc, true, "")
@@ -166,11 +181,11 @@ func TestCollectHideBranchesClearsOpenItems(t *testing.T) {
 	fx.responses["--state open"] = []byte(`[
 		{"number":9,"headRefName":"feat/x","url":"https://example/pr/9","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","updatedAt":"2026-01-02T00:00:00Z","isDraft":false}
 	]`)
-	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
-	doc := config.File{
-		UI: config.UI{HideBranches: []string{"feat/*"}},
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	s := newTestService(fx, nil)
+	doc := boardconfig.File{
+		UI: boardconfig.UI{HideBranches: []string{"feat/*"}},
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 		},
 	}
 	out, err := s.Collect(context.Background(), doc, true, "")
@@ -194,37 +209,63 @@ func TestCollectHideBranchesClearsOpenItems(t *testing.T) {
 	}
 }
 
-func TestCollectNilClients(t *testing.T) {
-	s := &Service{}
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh", Host: config.HostGitHub, Path: "acme/app"},
-			{ID: "gl", Host: config.HostGitLab, Path: "acme/lib"},
+func TestCollectUnsupportedHost(t *testing.T) {
+	s := newTestService(&fakeExec{}, nil)
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "odd", Host: boardconfig.Host("gitea"), Path: "acme/app"},
 		},
 	}
 	out, err := s.Collect(context.Background(), doc, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Projects) != 2 {
-		t.Fatalf("projects: %d", len(out.Projects))
+	if len(out.Projects) != 1 || out.Projects[0].Error != "unsupported host" {
+		t.Fatalf("projects: %+v", out.Projects)
 	}
-	for _, p := range out.Projects {
-		if p.Error == "" {
-			t.Fatalf("want client-missing error for %s", p.ID)
+}
+
+func TestCreateServiceRequiresForgeClients(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("want panic for missing forge clients")
 		}
+	}()
+	cfg := DefaultServiceConfig(&fakeExec{})
+	cfg.Bitbucket = nil
+	cfg.CreateService()
+}
+
+func TestCollectStampsFromClock(t *testing.T) {
+	cfg := testConfig(dualHostFake(), nil)
+	fixed := time.Date(2026, 11, 8, 9, 30, 0, 0, time.UTC)
+	cfg.Clock = func() time.Time { return fixed }
+	s := cfg.CreateService()
+	out, err := s.Collect(context.Background(), boardconfig.File{}, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.GeneratedAt != "2026-11-08T09:30:00Z" {
+		t.Fatalf("generated_at=%q", out.GeneratedAt)
+	}
+	shell, err := s.Shell(boardconfig.File{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shell.GeneratedAt != out.GeneratedAt {
+		t.Fatalf("shell generated_at=%q", shell.GeneratedAt)
 	}
 }
 
 func TestCollectViewFiltersProjects(t *testing.T) {
 	fx := dualHostFake()
-	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
-			{ID: "gl-lib", Label: "Lib", Host: config.HostGitLab, Path: "acme/lib"},
+	s := newTestService(fx, nil)
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
+			{ID: "gl-lib", Label: "Lib", Host: boardconfig.HostGitLab, Path: "acme/lib"},
 		},
-		Views: []config.View{
+		Views: []boardconfig.View{
 			{ID: "work", Label: "Work", Projects: []string{"gh-app"}},
 		},
 	}
@@ -244,7 +285,7 @@ func TestCollectViewFiltersProjects(t *testing.T) {
 }
 
 func TestFindProject(t *testing.T) {
-	projects := []config.Project{
+	projects := []boardconfig.Project{
 		{ID: "a", Path: "acme/a"},
 		{ID: "b", Path: "acme/b"},
 	}

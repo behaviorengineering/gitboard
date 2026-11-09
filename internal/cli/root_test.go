@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 )
 
 func run(t *testing.T, interactive bool, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	root := NewRoot(Options{
+	root := newRoot(Options{
 		Version:     "v9.9.9",
 		Interactive: func() bool { return interactive },
 	})
@@ -110,5 +112,59 @@ func TestSyncWithoutTerminalRefuses(t *testing.T) {
 	}
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("refused sync still wrote %s", path)
+	}
+}
+
+// A dry run must write nothing, not even the missing config file.
+func TestSyncDryRunDoesNotCreateConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	path := filepath.Join(dir, "gitboard", "config.yaml")
+	out, _, err := run(t, false, "sync", "--config", path, "--dry-run")
+	if exitCode(err) != exitUsage {
+		t.Fatalf("err = %v (exit %d), want no sync sources (exit %d)", err, exitCode(err), exitUsage)
+	}
+	if !strings.Contains(out, "would create") {
+		t.Errorf("out = %q", out)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "gitboard")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("dry-run wrote under %s (stat err %v)", dir, statErr)
+	}
+}
+
+func TestExitCodes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"ok", nil, exitOK},
+		{"untyped", errors.New("boom"), exitInternal},
+		{"usage", usage(errNeedsTerminal), exitUsage},
+		{"invalid", gberr.New(gberr.CodeInvalid, "op", "bad"), exitUsage},
+		{"conflict", gberr.New(gberr.CodeConflict, "op", "dirty"), exitConflict},
+		{"confirm", gberr.New(gberr.CodeConfirmRequired, "op", "confirm"), exitConflict},
+		{"not found", gberr.New(gberr.CodeNotFound, "op", "none"), exitNotFound},
+		{"unavailable", gberr.New(gberr.CodeUnavailable, "op", "forge"), exitUnavailable},
+		{"canceled", context.Canceled, exitCanceled},
+		{"internal", gberr.New(gberr.CodeInternal, "op", "bug"), exitInternal},
+	}
+	for _, tc := range cases {
+		if got := exitCode(tc.err); got != tc.want {
+			t.Errorf("%s: exit %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestUnknownCommandIsUsage(t *testing.T) {
+	t.Parallel()
+	_, _, err := run(t, false, "not-a-command")
+	if exitCode(err) != exitUsage {
+		t.Fatalf("exit %d for %v, want %d", exitCode(err), err, exitUsage)
+	}
+	_, _, err = run(t, false, "version", "--no-such-flag")
+	if exitCode(err) != exitUsage {
+		t.Fatalf("exit %d for %v, want %d", exitCode(err), err, exitUsage)
 	}
 }

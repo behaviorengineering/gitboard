@@ -4,6 +4,7 @@ package localgit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -40,20 +41,21 @@ func (LockFileOSLocker) Lock(ctx context.Context, commonDir string) (func() erro
 		if err == nil {
 			return func() error {
 				var unlockOverlapped windows.Overlapped
-				_ = windows.UnlockFileEx(windows.Handle(f.Fd()), 0, lockBytes, 0, &unlockOverlapped)
-				return f.Close()
+				unlockErr := windows.UnlockFileEx(windows.Handle(f.Fd()), 0, lockBytes, 0, &unlockOverlapped)
+				if unlockErr != nil {
+					unlockErr = fmt.Errorf("unlock mutation lock: %w", unlockErr)
+				}
+				return errors.Join(unlockErr, f.Close())
 			}, nil
 		}
-		if err != windows.ERROR_LOCK_VIOLATION && err != windows.ERROR_IO_PENDING {
-			_ = f.Close()
-			return nil, fmt.Errorf("lockfile mutation lock: %w", err)
+		if !errors.Is(err, windows.ERROR_LOCK_VIOLATION) && !errors.Is(err, windows.ERROR_IO_PENDING) {
+			return nil, errors.Join(fmt.Errorf("lockfile mutation lock: %w", err), f.Close())
 		}
 		timer := time.NewTimer(25 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			_ = f.Close()
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), f.Close())
 		case <-timer.C:
 		}
 	}

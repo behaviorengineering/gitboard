@@ -11,8 +11,8 @@ _matches_extra_globs() {
   local g
   local -a patterns
   [[ -z "${globs}" ]] && return 1
-  # read -a splits on spaces without pathname expansion; an unquoted
-  # ${globs} would expand ".cursor/*" against the checkout and stop matching.
+  # read -a splits on spaces without pathname expansion. An unquoted ${globs}
+  # would expand ".agent-pack/*" against the checkout and stop matching.
   read -r -a patterns <<< "${globs}"
   for g in "${patterns[@]}"; do
     # shellcheck disable=SC2053
@@ -25,7 +25,7 @@ _matches_extra_globs() {
 is_harness_only_path() {
   local path="$1"
   case "${path}" in
-    lefthook.yml|lefthook/*|scripts/git-hooks/*) return 0 ;;
+    lefthook.yml|lefthook/*) return 0 ;;
     .claude/*) return 0 ;;
     CLAUDE.md|*/CLAUDE.md|AGENTS.md|*/AGENTS.md) return 0 ;;
   esac

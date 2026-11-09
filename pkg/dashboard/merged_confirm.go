@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
@@ -13,7 +13,7 @@ import (
 // confirmMergedForCandidates runs a per-branch merged lookup for prune candidates
 // missing from the bulk merged list. Hits are appended to row.Merged. Confirmed
 // misses are recorded on row.MergedChecked so EnrichPruneHints can set likely.
-func (s *Service) confirmMergedForCandidates(ctx context.Context, p config.Project, row *board.ProjectSummary, opts remotegit.SummaryOpts) {
+func (s *Service) confirmMergedForCandidates(ctx context.Context, p boardconfig.Project, row *board.ProjectSummary, opts remotegit.SummaryOpts) {
 	if s == nil || row == nil || row.Local == nil || !row.Local.Mapped || !row.RemoteNamesOK {
 		return
 	}
@@ -21,17 +21,15 @@ func (s *Service) confirmMergedForCandidates(ctx context.Context, p config.Proje
 	if client == nil {
 		return
 	}
-
 	cache := opts.Cache
 	if cache == nil {
-		cache = s.Cache
+		cache = s.cache
 	}
-	key := remotegit.CacheKey(string(p.Host), p.Path)
-
+	key := remotegit.CacheKey(p.Host, p.Path)
+	// A branch back on the remote must not keep a stale per-branch answer.
 	for _, name := range row.RemoteNames {
 		cache.ForgetMergedBranch(key, name)
 	}
-
 	candidates := pruneLookupBranches(row)
 	if len(candidates) == 0 {
 		return
@@ -39,86 +37,53 @@ func (s *Service) confirmMergedForCandidates(ctx context.Context, p config.Proje
 	if row.MergedChecked == nil {
 		row.MergedChecked = map[string]bool{}
 	}
-	known := map[string]struct{}{}
-	for _, m := range row.Merged {
-		if n := strings.TrimSpace(m.Branch); n != "" {
-			known[n] = struct{}{}
-		}
-	}
-
+	known := mergedBranches(row.Merged)
 	for _, branch := range candidates {
 		if ctx.Err() != nil {
 			return
 		}
-		if _, ok := known[branch]; ok {
+		if _, ok := known[branch]; ok || localgit.ValidateBranchName(branch) != nil {
 			continue
 		}
-		if err := localgit.ValidateBranchName(branch); err != nil {
-			continue
-		}
-		list, ok := cache.GetOrLoadMergedBranch(key, branch, opts.HeadsTTL, opts.Fresh, func() ([]board.MergedReview, error) {
+		list, err := cache.GetOrLoadMergedBranch(remotegit.MergedBranchQuery{Key: key, Branch: branch, NegativeTTL: opts.HeadsTTL, Fresh: opts.Fresh}, func() ([]board.MergedReview, error) {
 			return client.MergedForBranch(ctx, p.Path, branch)
 		})
-		if !ok {
+		if err != nil {
+			// Fail closed: the branch stays out of MergedChecked, so no
+			// merged prune hint is drawn from a lookup that did not run.
 			continue
 		}
 		row.MergedChecked[branch] = true
-		if len(list) == 0 {
-			continue
-		}
 		row.Merged = append(row.Merged, list...)
-		known[branch] = struct{}{}
 	}
 }
 
+// mergedBranches is the set of branch names with a merged review.
+func mergedBranches(merged []board.MergedReview) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, m := range merged {
+		if n := strings.TrimSpace(m.Branch); n != "" {
+			out[n] = struct{}{}
+		}
+	}
+	return out
+}
+
+// pruneLookupBranches lists the distinct branches of prune candidates: the
+// worktrees whose prune verdict passed every gate, so only merged or content
+// evidence is left to decide.
 func pruneLookupBranches(row *board.ProjectSummary) []string {
 	if row == nil || row.Local == nil {
 		return nil
 	}
-	remote := map[string]struct{}{}
-	open := map[string]struct{}{}
-	for _, name := range row.RemoteNames {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			remote[name] = struct{}{}
-		}
-	}
-	for _, b := range row.Branches {
-		name := strings.TrimSpace(b.Name)
-		if name == "" {
-			continue
-		}
-		remote[name] = struct{}{}
-		if b.OpenReview {
-			open[name] = struct{}{}
-		}
-	}
-	defaultName := strings.TrimSpace(row.Local.DefaultBranch)
-	for _, b := range row.Branches {
-		if b.Default {
-			if n := strings.TrimSpace(b.Name); n != "" {
-				defaultName = n
-			}
-			break
-		}
-	}
-
+	sc := newPruneScope(row)
 	seen := map[string]struct{}{}
 	var out []string
 	for _, wt := range row.Local.Worktrees {
+		if !pruneVerdict(sc.inputs(wt)).Candidate {
+			continue
+		}
 		branch := strings.TrimSpace(wt.Branch)
-		if branch == "" || wt.Detached || wt.Bare || wt.Dirty {
-			continue
-		}
-		if defaultName != "" && branch == defaultName {
-			continue
-		}
-		if _, onRemote := remote[branch]; onRemote {
-			continue
-		}
-		if _, stillOpen := open[branch]; stillOpen {
-			continue
-		}
 		if _, dup := seen[branch]; dup {
 			continue
 		}

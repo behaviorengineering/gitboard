@@ -3,7 +3,6 @@
 package localgit_test
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +44,7 @@ func TestInspectPathWorktree(t *testing.T) {
 	run(mainDir, "worktree", "add", wt, "feature")
 
 	in := localgit.NewInspector(cliexec.New())
-	st := in.InspectPath(context.Background(), mainDir)
+	st := in.InspectPath(testCtx(t), mainDir)
 	if !st.Mapped || st.Error != "" {
 		t.Fatalf("status: %+v", st)
 	}
@@ -97,7 +96,7 @@ func TestInspectPathDetachedExactTag(t *testing.T) {
 	run("checkout", "--detach", "v0.1.1")
 
 	in := localgit.NewInspector(cliexec.New())
-	st := in.InspectPath(context.Background(), dir)
+	st := in.InspectPath(testCtx(t), dir)
 	if !st.Mapped || st.Error != "" {
 		t.Fatalf("status: %+v", st)
 	}
@@ -145,7 +144,7 @@ func TestInspectPathDetachedUntagged(t *testing.T) {
 	run("checkout", "--detach", "HEAD")
 
 	in := localgit.NewInspector(cliexec.New())
-	st := in.InspectPath(context.Background(), dir)
+	st := in.InspectPath(testCtx(t), dir)
 	if !st.Mapped || st.Error != "" {
 		t.Fatalf("status: %+v", st)
 	}
@@ -220,8 +219,8 @@ func TestEnrichOriginSync(t *testing.T) {
 	run(local, "checkout", "main")
 
 	in := localgit.NewInspector(cliexec.New())
-	st := in.InspectPath(context.Background(), local)
-	in.EnrichOriginSync(context.Background(), &st)
+	st := in.InspectPath(testCtx(t), local)
+	in.EnrichOriginSync(testCtx(t), &st)
 	if st.Error != "" {
 		t.Fatalf("status: %+v", st)
 	}

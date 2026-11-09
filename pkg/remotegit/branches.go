@@ -1,34 +1,32 @@
 package remotegit
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/clock"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 )
 
 // staleAfter is how long without updates before a branch is marked stale.
 const staleAfter = 14 * 24 * time.Hour
 
+// maxBranchesPerRow caps the branches one project row shows.
+const maxBranchesPerRow = 20
+
 type branchAccum struct {
 	byName map[string]*board.BranchRef
 	order  []string
-	now    func() time.Time
+	now    clock.Clock
 }
 
-func newBranchAccum() *branchAccum {
+// newBranchAccum returns an empty accumulator that marks staleness against now.
+func newBranchAccum(now clock.Clock) *branchAccum {
 	return &branchAccum{
 		byName: map[string]*board.BranchRef{},
-		now:    func() time.Time { return time.Now().UTC() },
-	}
-}
-
-// setNow injects a clock (for tests).
-func (a *branchAccum) setNow(fn func() time.Time) {
-	if fn != nil {
-		a.now = fn
+		now:    now,
 	}
 }
 
@@ -94,24 +92,24 @@ func (a *branchAccum) setOpenReview(name string, info reviewInfo) {
 	a.touchUpdated(name, info.UpdatedAt)
 }
 
-func (a *branchAccum) setCI(name, status, webURL, updatedAt, runID string) {
-	name = trimBranch(name)
+func (a *branchAccum) setCI(run CachedCIRun) {
+	name := trimBranch(run.Branch)
 	b, ok := a.byName[name]
 	if !ok || b == nil {
 		// CI history alone must not invent branches (old Actions refs look like "local" noise).
 		return
 	}
 	// First call wins (callers pass runs newest-first → latest CI per branch).
-	if status != "" && b.CIStatus == "" {
-		b.CIStatus = status
+	if run.Status != "" && b.CIStatus == "" {
+		b.CIStatus = run.Status
 	}
-	if webURL != "" && b.CIURL == "" {
-		b.CIURL = webURL
+	if run.URL != "" && b.CIURL == "" {
+		b.CIURL = run.URL
 	}
-	if runID != "" && b.RunID == "" {
-		b.RunID = runID
+	if run.RunID != "" && b.RunID == "" {
+		b.RunID = run.RunID
 	}
-	a.touchUpdated(name, updatedAt)
+	a.touchUpdated(name, run.UpdatedAt)
 }
 
 func (a *branchAccum) touchUpdated(name, updatedAt string) {
@@ -172,9 +170,8 @@ func (a *branchAccum) list() []board.BranchRef {
 		}
 		return ai.Name < aj.Name
 	})
-	const max = 20
-	if len(out) > max {
-		out = out[:max]
+	if len(out) > maxBranchesPerRow {
+		out = out[:maxBranchesPerRow]
 	}
 	return out
 }
@@ -203,13 +200,16 @@ func trimBranch(name string) string {
 	return strings.TrimSpace(name)
 }
 
+// forgeBranchNameOK rejects a branch name that is empty or could be read as
+// a CLI flag or argument separator once passed to a forge CLI.
 func forgeBranchNameOK(branch string) error {
+	const op = "remotegit.forgeBranchNameOK"
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
-		return fmt.Errorf("branch is required")
+		return gberr.New(gberr.CodeInvalid, op, "branch is required")
 	}
 	if strings.ContainsAny(branch, " \t\n:") || strings.HasPrefix(branch, "-") {
-		return fmt.Errorf("invalid branch name %q", branch)
+		return gberr.New(gberr.CodeInvalid, op, "branch name is not valid").With("branch", branch)
 	}
 	return nil
 }

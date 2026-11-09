@@ -2,50 +2,42 @@ package dashboard
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
-// InvalidateProject drops forge TTL state for one tracked project.
-func (s *Service) InvalidateProject(host, path string) {
-	if s == nil || s.Cache == nil {
+// InvalidateProject drops forge TTL state for one tracked project. The key is
+// remotegit.CacheKey, the one the summary loader writes.
+func (s *Service) InvalidateProject(host boardconfig.Host, path string) {
+	if s == nil {
 		return
 	}
-	s.Cache.ForgetProject(remotegit.CacheKey(host, strings.Trim(path, "/")))
+	s.cache.ForgetProject(remotegit.CacheKey(host, path))
 }
 
 // InvalidateOrigin drops the origin-fetch TTL for one common git dir.
 func (s *Service) InvalidateOrigin(commonDir string) {
-	if s == nil || s.OriginFetch == nil {
+	if s == nil {
 		return
 	}
-	s.OriginFetch.Invalidate(commonDir)
+	s.originFetch.Invalidate(commonDir)
 }
 
 // mappedPathAllowlist returns whether abs belongs to the project without a full
-// attachLocal (no origin fetch, no EnrichOriginSync). Uses cached scan when possible.
-func (s *Service) mappedPathAllowlist(ctx context.Context, doc config.File, p config.Project, abs string) (bool, error) {
-	if s == nil || s.Local == nil {
-		return false, ErrLocalInspectorMissing
+// attachLocal (no origin fetch, no origin sync). Uses cached scan when possible.
+func (s *Service) mappedPathAllowlist(ctx context.Context, doc boardconfig.File, p boardconfig.Project, abs string) (bool, error) {
+	if s == nil || s.local == nil {
+		return false, unavailable("dashboard.mappedPathAllowlist", ErrLocalInspectorMissing)
 	}
-	abs = filepath.Clean(abs)
-	explicit := strings.TrimSpace(p.LocalPath)
-	if explicit != "" {
-		exp, err := localgit.ExpandPath(explicit)
-		if err == nil {
-			if resolved, err := filepath.EvalSymlinks(exp); err == nil {
-				exp = resolved
-			}
-			if filepath.Clean(exp) == abs {
-				return true, nil
-			}
-		}
+	abs = cleanRepoPath(abs)
+	explicit := explicitLocalPath(p)
+	if explicit != "" && cleanRepoPath(explicit) == abs {
+		return true, nil
 	}
 
 	var disc localgit.Discovery
@@ -53,29 +45,31 @@ func (s *Service) mappedPathAllowlist(ctx context.Context, doc config.File, p co
 		scanTTL := time.Duration(doc.EffectiveScanSeconds()) * time.Second
 		disc = s.scanRootsCached(ctx, doc.Local.Roots, scanTTL, false)
 	}
-	checkouts := disc.Appearances(string(p.Host), p.Path)
+	checkouts := disc.Appearances(p.Host, p.Path)
 	if explicit != "" {
-		if exp, err := localgit.ExpandPath(explicit); err == nil {
-			c := localgit.Checkout{Path: exp, Role: localgit.RoleStandalone}
-			localgit.FillCheckoutMeta(&c)
-			checkouts = append(checkouts, c)
-		}
+		c := localgit.Checkout{Path: explicit, Role: board.AppearanceStandalone}
+		localgit.FillCheckoutMeta(&c)
+		checkouts = append(checkouts, c)
 	}
-	local := &board.LocalStatus{Mapped: len(checkouts) > 0}
-	for _, c := range checkouts {
-		local.Appearances = append(local.Appearances, board.LocalAppearance{Path: c.Path})
-		if local.Path == "" {
-			local.Path = c.Path
-		}
-	}
-	if !local.Mapped && explicit == "" {
+	if len(checkouts) == 0 {
 		return false, nil
 	}
-	if local.Path == "" && explicit != "" {
-		if exp, err := localgit.ExpandPath(explicit); err == nil {
-			local.Path = exp
-			local.Mapped = true
-		}
+	local := &board.LocalStatus{Mapped: true, Path: checkouts[0].Path}
+	for _, c := range checkouts {
+		local.Appearances = append(local.Appearances, board.LocalAppearance{Path: c.Path})
 	}
 	return repoPathAllowed(local, abs), nil
+}
+
+// explicitLocalPath is p.LocalPath expanded, or "" when unset or unusable.
+func explicitLocalPath(p boardconfig.Project) string {
+	raw := strings.TrimSpace(p.LocalPath)
+	if raw == "" {
+		return ""
+	}
+	exp, err := localgit.ExpandPath(raw)
+	if err != nil {
+		return ""
+	}
+	return exp
 }

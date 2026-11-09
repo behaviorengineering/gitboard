@@ -3,6 +3,7 @@ package localgit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,22 +12,24 @@ import (
 
 func TestEnsureWritableIndexNoLock(t *testing.T) {
 	dir := t.TempDir()
+	common := filepath.Join(dir, ".git")
 	fk := &fakeExec{responses: map[string][]byte{
 		"rev-parse --git-path index.lock": []byte(".git/index.lock\n"),
+		"--git-common-dir":                []byte(common + "\n"),
 	}}
-	in := NewInspector(fk)
-	if err := in.EnsureWritableIndex(context.Background(), dir, false); err != nil {
+	m := leasedMutator(t, fk, common)
+	if err := m.EnsureWritableIndex(context.Background(), dir, false); err != nil {
 		t.Fatalf("want nil, got %v", err)
 	}
 }
 
 func TestEnsureWritableIndexFreshIsBusy(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	lock := filepath.Join(dir, ".git", "index.lock")
-	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
@@ -36,8 +39,8 @@ func TestEnsureWritableIndexFreshIsBusy(t *testing.T) {
 	fk := &fakeExec{responses: map[string][]byte{
 		"rev-parse --git-path index.lock": []byte(".git/index.lock\n"),
 	}}
-	in := NewInspector(fk)
-	err := in.EnsureWritableIndexAge(context.Background(), dir, true, time.Minute)
+	m := leasedMutator(t, fk, dir)
+	err := m.ensureWritableIndex(context.Background(), dir, true, time.Minute)
 	if !errors.Is(err, ErrIndexLockBusy) {
 		t.Fatalf("want ErrIndexLockBusy, got %v", err)
 	}
@@ -48,11 +51,11 @@ func TestEnsureWritableIndexFreshIsBusy(t *testing.T) {
 
 func TestEnsureWritableIndexStaleNeedsConfirm(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	lock := filepath.Join(dir, ".git", "index.lock")
-	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-2 * time.Minute)
@@ -62,8 +65,8 @@ func TestEnsureWritableIndexStaleNeedsConfirm(t *testing.T) {
 	fk := &fakeExec{responses: map[string][]byte{
 		"rev-parse --git-path index.lock": []byte(".git/index.lock\n"),
 	}}
-	in := NewInspector(fk)
-	err := in.EnsureWritableIndexAge(context.Background(), dir, false, 30*time.Second)
+	m := leasedMutator(t, fk, dir)
+	err := m.ensureWritableIndex(context.Background(), dir, false, 30*time.Second)
 	var stale *StaleIndexLockError
 	if !errors.As(err, &stale) {
 		t.Fatalf("want StaleIndexLockError, got %v", err)
@@ -81,11 +84,11 @@ func TestEnsureWritableIndexStaleNeedsConfirm(t *testing.T) {
 
 func TestEnsureWritableIndexStaleCleared(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	lock := filepath.Join(dir, ".git", "index.lock")
-	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-2 * time.Minute)
@@ -95,8 +98,8 @@ func TestEnsureWritableIndexStaleCleared(t *testing.T) {
 	fk := &fakeExec{responses: map[string][]byte{
 		"rev-parse --git-path index.lock": []byte(".git/index.lock\n"),
 	}}
-	in := NewInspector(fk)
-	if err := in.EnsureWritableIndexAge(context.Background(), dir, true, 30*time.Second); err != nil {
+	m := leasedMutator(t, fk, dir)
+	if err := m.ensureWritableIndex(context.Background(), dir, true, 30*time.Second); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	if _, err := os.Stat(lock); !os.IsNotExist(err) {
@@ -105,8 +108,16 @@ func TestEnsureWritableIndexStaleCleared(t *testing.T) {
 }
 
 func TestIsIndexLockError(t *testing.T) {
-	if !IsIndexLockError(errors.New(`fatal: Unable to create '/tmp/repo/.git/index.lock': File exists.`)) {
-		t.Fatal("expected index.lock message match")
+	if !IsIndexLockError(fmt.Errorf("pull: %w", &StaleIndexLockError{LockPath: "/tmp/repo/.git/index.lock"})) {
+		t.Fatal("stale lock error must match")
+	}
+	if !IsIndexLockError(fmt.Errorf("%w at /tmp/x", ErrIndexLockBusy)) {
+		t.Fatal("busy lock error must match")
+	}
+	// Message text alone is not a classification: a path or stderr that
+	// mentions index.lock must not trigger lock recovery.
+	if IsIndexLockError(errors.New(`fatal: Unable to create '/tmp/repo/.git/index.lock': File exists.`)) {
+		t.Fatal("message text must not match")
 	}
 	if IsIndexLockError(errors.New("merge conflict")) {
 		t.Fatal("unrelated error")

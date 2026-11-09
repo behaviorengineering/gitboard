@@ -3,13 +3,14 @@ package localgit_test
 import (
 	"testing"
 
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
 func TestParseRemoteURL(t *testing.T) {
 	cases := []struct {
 		in   string
-		host string
+		host boardconfig.Host
 		path string
 		ok   bool
 	}{

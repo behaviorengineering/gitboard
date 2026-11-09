@@ -1,9 +1,10 @@
-// Package cliexec re-exports the shared gitvalet git executor.
+// Package cliexec is public API: the injectable CLI runner that forge clients
+// (pkg/remotegit) and local git (pkg/localgit) call. It re-exports the shared
+// gitvalet executor; retry, circuit breaking and the per-call timeout live in
+// gitvalet/pkg/gitexec.
 package cliexec
 
 import (
-	"time"
-
 	"github.com/behaviorengineering/gitvalet/pkg/gitexec"
 )
 
@@ -19,12 +20,4 @@ var ErrMissingDeadline = gitexec.ErrMissingDeadline
 // New returns a runner with a sensible default timeout.
 func New() *Runner {
 	return gitexec.New()
-}
-
-// SetTimeout is a test helper to adjust the per-invocation cap.
-func SetTimeout(r *Runner, d time.Duration) {
-	if r == nil {
-		return
-	}
-	r.Timeout = d
 }

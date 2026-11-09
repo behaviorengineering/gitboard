@@ -3,12 +3,14 @@ package remotegit
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"strconv"
 	"strings"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/cliexec"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 )
 
 // AzureDevOps uses the Azure CLI (`az`) with DevOps extensions.
@@ -25,79 +27,96 @@ func NewAzureDevOps(run cliexec.Exec) *AzureDevOps {
 	return &AzureDevOps{Run: run}
 }
 
-func (a *AzureDevOps) AuthStatus(ctx context.Context) (bool, bool, string) {
-	if _, err := a.Run.LookPath("az"); err != nil {
-		return false, false, "az not on PATH (install Azure CLI)"
+// ready reports a nil receiver or a literal AzureDevOps{} without Run as
+// ErrClientMissing, so exported methods fail with an error instead of panicking.
+func (a *AzureDevOps) ready() error {
+	if a == nil || a.Run == nil {
+		return clientMissing("remotegit.AzureDevOps", "azuredevops")
 	}
-	_, err := a.Run.Run(ctx, "az", "account", "show")
-	if err != nil {
-		return true, false, strings.TrimPrefix(err.Error(), "az account show: ")
-	}
-	return true, true, ""
+	return nil
 }
 
-func (a *AzureDevOps) authCacheID() string { return "azuredevops" }
+func (a *AzureDevOps) AuthStatus(ctx context.Context) (bool, bool, string) {
+	if err := a.ready(); err != nil {
+		return false, false, err.Error()
+	}
+	return cliAuthStatus(ctx, a.Run, "az not on PATH (install Azure CLI)", "az", "account", "show")
+}
+
+func (a *AzureDevOps) host() boardconfig.Host { return boardconfig.HostAzureDevOps }
 
 func (a *AzureDevOps) unauthMsg(detail string) string {
 	return "az not authenticated: " + detail
 }
 
-func (a *AzureDevOps) ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (board.ProjectSummary, error) {
-	return projectSummaryShared(ctx, p, opts, a)
+func (a *AzureDevOps) ProjectSummary(ctx context.Context, p boardconfig.Project, opts SummaryOpts) (board.ProjectSummary, error) {
+	return projectSummaryShared(ctx, p, opts, a.ready(), a)
+}
+
+// azureRepo is an org/project/repo path split for az arguments.
+type azureRepo struct {
+	orgURL, project, name string
+}
+
+// splitAzurePath splits an org/project/repo path; with more than three
+// segments the last one names the repository.
+func splitAzurePath(op, repo string) (azureRepo, error) {
+	parts, err := splitRepo(boardconfig.HostAzureDevOps, op, repo)
+	if err != nil {
+		return azureRepo{}, err
+	}
+	return azureRepo{orgURL: azureOrgURL(parts[0]), project: parts[1], name: parts[len(parts)-1]}, nil
+}
+
+// args returns the az flags that address the repository.
+func (r azureRepo) args() []string {
+	return []string{"--organization", r.orgURL, "--project", r.project, "--repository", r.name}
+}
+
+// runJSON runs the az subcommand sub (space separated, for example
+// "repos pr list") against the repository with extra flags and -o json.
+func (a *AzureDevOps) runJSON(ctx context.Context, r azureRepo, sub string, extra ...string) ([]byte, error) {
+	args := append(strings.Fields(sub), r.args()...)
+	args = append(args, extra...)
+	return a.Run.RunJSON(ctx, "az", append(args, "-o", "json")...)
 }
 
 // seedHeads loads the default branch and a bounded list of refs/heads.
 func (a *AzureDevOps) seedHeads(ctx context.Context, repo string) (HeadsSnapshot, error) {
+	const op = "remotegit.AzureDevOps.seedHeads"
 	var snap HeadsSnapshot
-	org, project, name, err := splitAzurePath(repo)
+	r, err := splitAzurePath(op, repo)
 	if err != nil {
 		return snap, err
 	}
-	orgURL := azureOrgURL(org)
-
-	raw, err := a.Run.RunJSON(ctx, "az", "repos", "show",
-		"--organization", orgURL,
-		"--project", project,
-		"--repository", name,
-		"-o", "json",
-	)
+	raw, err := a.runJSON(ctx, r, "repos show")
 	if err != nil {
-		return snap, fmt.Errorf("azuredevops default branch: %w", err)
+		return snap, forgeErr(err, op, "read azure devops default branch failed", repo)
 	}
 	var meta struct {
 		DefaultBranch string `json:"defaultBranch"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return snap, fmt.Errorf("parse azuredevops repo: %w", err)
+		return snap, forgeErr(err, op, "parse azure devops repository failed", repo)
 	}
 	snap.DefaultBranch = strings.TrimPrefix(meta.DefaultBranch, "refs/heads/")
 
-	raw, err = a.Run.RunJSON(ctx, "az", "repos", "ref", "list",
-		"--organization", orgURL,
-		"--project", project,
-		"--repository", name,
-		"--filter", "heads/",
-		"-o", "json",
-	)
+	raw, err = a.runJSON(ctx, r, "repos ref list", "--filter", "heads/")
 	if err != nil {
-		return snap, fmt.Errorf("azuredevops branches: %w", err)
+		return snap, forgeErr(err, op, "list azure devops branches failed", repo)
 	}
 	var refs []struct {
-		Name    string `json:"name"`
-		Creator struct {
-			DisplayName string `json:"displayName"`
-		} `json:"creator"`
+		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(raw, &refs); err != nil {
-		return snap, fmt.Errorf("parse azuredevops refs: %w", err)
+		return snap, forgeErr(err, op, "parse azure devops branches failed", repo)
 	}
-	const maxHeads = 100
-	for i, r := range refs {
-		if i >= maxHeads {
+	for i, ref := range refs {
+		if i >= listPageSize {
 			break
 		}
-		branch := strings.TrimPrefix(r.Name, "refs/heads/")
-		if branch == "" || branch == r.Name {
+		branch := strings.TrimPrefix(ref.Name, "refs/heads/")
+		if branch == "" || branch == ref.Name {
 			continue
 		}
 		snap.Heads = append(snap.Heads, RemoteHead{Name: branch})
@@ -106,21 +125,16 @@ func (a *AzureDevOps) seedHeads(ctx context.Context, repo string) (HeadsSnapshot
 }
 
 func (a *AzureDevOps) loadCI(ctx context.Context, repo string) (CISnapshot, error) {
-	var snap CISnapshot
-	org, project, name, err := splitAzurePath(repo)
+	const op = "remotegit.AzureDevOps.loadCI"
+	r, err := splitAzurePath(op, repo)
 	if err != nil {
-		return snap, nil
+		return CISnapshot{}, err
 	}
-	raw, err := a.Run.RunJSON(ctx, "az", "pipelines", "runs", "list",
-		"--organization", azureOrgURL(org),
-		"--project", project,
-		"--repository", name,
-		"--top", "20",
-		"-o", "json",
-	)
+	raw, err := a.runJSON(ctx, r, "pipelines runs list", "--top", "20")
 	if err != nil {
-		// Pipelines extension may be missing; keep board usable.
-		return snap, nil
+		// The pipelines extension may be missing. The loader shows this in
+		// the row's error and keeps heads and reviews, so the board stays usable.
+		return CISnapshot{}, forgeErr(err, op, "list azure devops pipeline runs failed", repo)
 	}
 	var runs []struct {
 		ID           int    `json:"id"`
@@ -140,180 +154,130 @@ func (a *AzureDevOps) loadCI(ctx context.Context, repo string) (CISnapshot, erro
 		} `json:"_links"`
 	}
 	if err := json.Unmarshal(raw, &runs); err != nil {
-		return snap, nil
+		return CISnapshot{}, forgeErr(err, op, "parse azure devops pipeline runs failed", repo)
 	}
-	for i, r := range runs {
-		status := firstNonEmpty(r.Result, r.State)
-		branch := strings.TrimPrefix(r.SourceBranch, "refs/heads/")
-		runID := fmt.Sprintf("%d", r.ID)
-		url := firstNonEmpty(r.Links.Web.Href, r.Pipeline.URL)
-		updated := firstNonEmpty(r.FinishedDate, r.CreatedDate)
-		snap.Runs = append(snap.Runs, CachedCIRun{
-			Branch: branch, Status: status, URL: url, UpdatedAt: updated, RunID: runID,
+	rows := make([]ciRow, 0, len(runs))
+	for _, run := range runs {
+		rows = append(rows, ciRow{
+			run: CachedCIRun{
+				Branch:    strings.TrimPrefix(run.SourceBranch, "refs/heads/"),
+				Status:    firstNonEmpty(run.Result, run.State),
+				URL:       firstNonEmpty(run.Links.Web.Href, run.Pipeline.URL),
+				UpdatedAt: firstNonEmpty(run.FinishedDate, run.CreatedDate),
+				RunID:     strconv.Itoa(run.ID),
+			},
+			conclusion: run.Result,
+			name:       firstNonEmpty(run.Pipeline.Name, "pipeline"),
 		})
-		if i == 0 {
-			snap.Latest = &board.CIStatus{
-				Status:     status,
-				Conclusion: r.Result,
-				Ref:        branch,
-				Name:       firstNonEmpty(r.Pipeline.Name, "pipeline"),
-				WebURL:     url,
-				UpdatedAt:  updated,
-				RunID:      runID,
-			}
-		}
 	}
-	return snap, nil
+	return newCISnapshot(rows), nil
 }
 
 func (a *AzureDevOps) loadOpenReviews(ctx context.Context, repo string) (OpenReviewsSnapshot, error) {
-	var snap OpenReviewsSnapshot
-	org, project, name, err := splitAzurePath(repo)
+	const op = "remotegit.AzureDevOps.loadOpenReviews"
+	r, err := splitAzurePath(op, repo)
 	if err != nil {
-		return snap, nil
+		return OpenReviewsSnapshot{}, err
 	}
-	raw, err := a.Run.RunJSON(ctx, "az", "repos", "pr", "list",
-		"--organization", azureOrgURL(org),
-		"--project", project,
-		"--repository", name,
-		"--status", "active",
-		"-o", "json",
-	)
+	raw, err := a.runJSON(ctx, r, "repos pr list", "--status", "active")
 	if err != nil {
-		return snap, nil
+		return OpenReviewsSnapshot{}, forgeErr(err, op, "list azure devops open pull requests failed", repo)
 	}
 	prs, err := decodeAzurePRs(raw)
 	if err != nil {
-		return snap, nil
+		return OpenReviewsSnapshot{}, forgeErr(err, op, "parse azure devops open pull requests failed", repo)
 	}
-	snap.PullRequests = len(prs)
-	for _, pr := range prs {
-		snap.Reviews = append(snap.Reviews, CachedOpenReview{
-			Branch:    pr.Branch,
-			ID:        pr.ID,
-			URL:       pr.URL,
-			Conflict:  pr.Conflict,
-			UpdatedAt: pr.UpdatedAt,
-			Draft:     pr.Draft,
-		})
-	}
-	return snap, nil
+	return newOpenReviews(boardconfig.HostAzureDevOps, prs), nil
 }
 
 func (a *AzureDevOps) loadMerged(ctx context.Context, repo string) ([]board.MergedReview, error) {
-	org, project, name, err := splitAzurePath(repo)
+	const op = "remotegit.AzureDevOps.loadMerged"
+	r, err := splitAzurePath(op, repo)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
-	raw, err := a.Run.RunJSON(ctx, "az", "repos", "pr", "list",
-		"--organization", azureOrgURL(org),
-		"--project", project,
-		"--repository", name,
-		"--status", "completed",
-		"--top", "50",
-		"-o", "json",
-	)
+	raw, err := a.runJSON(ctx, r, "repos pr list", "--status", "completed", "--top", "50")
 	if err != nil {
-		return nil, nil
+		return nil, forgeErr(err, op, "list azure devops completed pull requests failed", repo)
 	}
 	prs, err := decodeAzurePRs(raw)
 	if err != nil {
-		return nil, nil
+		return nil, forgeErr(err, op, "parse azure devops completed pull requests failed", repo)
 	}
-	out := make([]board.MergedReview, 0, len(prs))
-	for _, pr := range prs {
-		branch := trimBranch(pr.Branch)
-		if branch == "" {
-			continue
-		}
-		out = append(out, board.MergedReview{
-			Branch:   branch,
-			ID:       pr.ID,
-			URL:      pr.URL,
-			MergedAt: pr.MergedAt,
-		})
-	}
-	return out, nil
+	return mergedReviews(prs), nil
 }
 
 // MergedForBranch looks up completed PRs whose source branch matches branch.
 func (a *AzureDevOps) MergedForBranch(ctx context.Context, repo, branch string) ([]board.MergedReview, error) {
-	if a == nil {
-		return nil, fmt.Errorf("azuredevops client missing")
+	const op = "remotegit.AzureDevOps.MergedForBranch"
+	if err := a.ready(); err != nil {
+		return nil, err
 	}
 	branch = trimBranch(branch)
 	if err := forgeBranchNameOK(branch); err != nil {
 		return nil, err
 	}
-	org, project, name, err := splitAzurePath(repo)
+	r, err := splitAzurePath(op, repo)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := a.Run.RunJSON(ctx, "az", "repos", "pr", "list",
-		"--organization", azureOrgURL(org),
-		"--project", project,
-		"--repository", name,
-		"--status", "completed",
-		"--source-branch", branch,
-		"--top", "1",
-		"-o", "json",
-	)
+	raw, err := a.runJSON(ctx, r, "repos pr list",
+		"--status", "completed", "--source-branch", branch, "--top", "1")
 	if err != nil {
-		return nil, fmt.Errorf("azuredevops merged for %s: %w", branch, err)
+		return nil, forgeErr(err, op, "look up azure devops completed pull request failed", repo).With("branch", branch)
 	}
 	prs, err := decodeAzurePRs(raw)
 	if err != nil {
-		return nil, fmt.Errorf("azuredevops merged for %s: %w", branch, err)
+		return nil, forgeErr(err, op, "parse azure devops completed pull request failed", repo).With("branch", branch)
 	}
-	out := make([]board.MergedReview, 0, len(prs))
-	for _, pr := range prs {
-		b := trimBranch(pr.Branch)
-		if b == "" {
-			continue
-		}
-		out = append(out, board.MergedReview{
-			Branch:   b,
-			ID:       pr.ID,
-			URL:      pr.URL,
-			MergedAt: pr.MergedAt,
-		})
-	}
-	return out, nil
+	return mergedReviews(prs), nil
 }
 
-func (a *AzureDevOps) FailedJobs(ctx context.Context, p config.Project, runID string) ([]board.FailedJob, error) {
-	if strings.TrimSpace(runID) == "" {
-		return nil, fmt.Errorf("missing run id")
+func (a *AzureDevOps) FailedJobs(_ context.Context, _ boardconfig.Project, runID string) ([]board.FailedJob, error) {
+	const op = "remotegit.AzureDevOps.FailedJobs"
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	if err := requireArg(op, "run id", runID); err != nil {
+		return nil, err
 	}
 	// Detailed job listing via az varies by pipeline type; keep empty rather than panic.
 	return nil, nil
 }
 
-func (a *AzureDevOps) JobLog(ctx context.Context, p config.Project, runID, jobID string) (string, error) {
-	if strings.TrimSpace(runID) == "" {
-		return "", fmt.Errorf("missing run id")
+func (a *AzureDevOps) JobLog(_ context.Context, _ boardconfig.Project, runID, _ string) (string, error) {
+	const op = "remotegit.AzureDevOps.JobLog"
+	if err := a.ready(); err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("azuredevops job logs not supported yet")
+	if err := requireArg(op, "run id", runID); err != nil {
+		return "", err
+	}
+	return "", gberr.New(gberr.CodeInvalid, op, "azure devops job logs are not supported yet")
 }
 
 // ListOrgRepos lists repositories under an Azure DevOps organization.
 // Optional project names may be passed as org/project; bare org lists every project.
 func (a *AzureDevOps) ListOrgRepos(ctx context.Context, org string) ([]RepoRef, error) {
+	const op = "remotegit.AzureDevOps.ListOrgRepos"
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
 	org = strings.TrimSpace(org)
-	if org == "" {
-		return nil, fmt.Errorf("missing azuredevops org")
+	if err := requireArg(op, "azure devops org", org); err != nil {
+		return nil, err
 	}
 	orgURL := azureOrgURL(org)
-	projects, err := a.listProjects(ctx, orgURL)
+	projects, err := a.listProjects(ctx, op, org, orgURL)
 	if err != nil {
 		return nil, err
 	}
 	var out []RepoRef
 	for _, project := range projects {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, gberr.Wrap(err, gberr.CodeCanceled, op, "repository listing cancelled")
 		}
-		repos, err := a.listReposInProject(ctx, org, orgURL, project)
+		repos, err := a.listReposInProject(ctx, op, org, orgURL, project)
 		if err != nil {
 			return nil, err
 		}
@@ -322,37 +286,29 @@ func (a *AzureDevOps) ListOrgRepos(ctx context.Context, org string) ([]RepoRef, 
 	return out, nil
 }
 
-func (a *AzureDevOps) listProjects(ctx context.Context, orgURL string) ([]string, error) {
+func (a *AzureDevOps) listProjects(ctx context.Context, op, org, orgURL string) ([]string, error) {
 	raw, err := a.Run.RunJSON(ctx, "az", "devops", "project", "list",
 		"--organization", orgURL,
 		"-o", "json",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("azuredevops list projects: %w", err)
+		return nil, forgeErr(err, op, "list azure devops projects failed", org)
+	}
+	type projectRow struct {
+		Name string `json:"name"`
 	}
 	var payload struct {
-		Value []struct {
-			Name string `json:"name"`
-		} `json:"value"`
+		Value []projectRow `json:"value"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		// Some az versions return a bare array.
-		var rows []struct {
-			Name string `json:"name"`
-		}
-		if err2 := json.Unmarshal(raw, &rows); err2 != nil {
-			return nil, fmt.Errorf("parse azuredevops projects: %w", err)
-		}
-		names := make([]string, 0, len(rows))
-		for _, r := range rows {
-			if n := strings.TrimSpace(r.Name); n != "" {
-				names = append(names, n)
-			}
-		}
-		return names, nil
+	var rows []projectRow
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		rows = payload.Value
+	} else if err2 := json.Unmarshal(raw, &rows); err2 != nil {
+		// Some az versions return a bare array rather than {"value": [...]}.
+		return nil, forgeErr(errors.Join(err, err2), op, "parse azure devops projects failed", org)
 	}
-	names := make([]string, 0, len(payload.Value))
-	for _, r := range payload.Value {
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
 		if n := strings.TrimSpace(r.Name); n != "" {
 			names = append(names, n)
 		}
@@ -360,51 +316,36 @@ func (a *AzureDevOps) listProjects(ctx context.Context, orgURL string) ([]string
 	return names, nil
 }
 
-func (a *AzureDevOps) listReposInProject(ctx context.Context, org, orgURL, project string) ([]RepoRef, error) {
+func (a *AzureDevOps) listReposInProject(ctx context.Context, op, org, orgURL, project string) ([]RepoRef, error) {
 	raw, err := a.Run.RunJSON(ctx, "az", "repos", "list",
 		"--organization", orgURL,
 		"--project", project,
 		"-o", "json",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("azuredevops list repos: %w", err)
+		return nil, forgeErr(err, op, "list azure devops repositories failed", org).With("project", project)
 	}
 	var rows []struct {
 		Name       string `json:"name"`
 		IsDisabled bool   `json:"isDisabled"`
 	}
 	if err := json.Unmarshal(raw, &rows); err != nil {
-		return nil, fmt.Errorf("parse azuredevops repos: %w", err)
+		return nil, forgeErr(err, op, "parse azure devops repositories failed", org).With("project", project)
 	}
 	out := make([]RepoRef, 0, len(rows))
 	for _, r := range rows {
-		if r.IsDisabled {
-			continue
-		}
 		name := strings.TrimSpace(r.Name)
-		if name == "" {
+		if r.IsDisabled || name == "" {
 			continue
 		}
-		out = append(out, RepoRef{
-			Host: config.HostAzureDevOps,
-			Path: org + "/" + project + "/" + name,
-			Name: name,
-		})
+		if ref, ok := newRepoRef(boardconfig.HostAzureDevOps, org+"/"+project+"/"+name, name); ok {
+			out = append(out, ref)
+		}
 	}
 	return out, nil
 }
 
-type azurePR struct {
-	Branch    string
-	ID        int
-	URL       string
-	Conflict  bool
-	UpdatedAt string
-	MergedAt  string
-	Draft     bool
-}
-
-func decodeAzurePRs(raw []byte) ([]azurePR, error) {
+func decodeAzurePRs(raw []byte) ([]forgePR, error) {
 	var rows []struct {
 		PullRequestID int    `json:"pullRequestId"`
 		Status        string `json:"status"`
@@ -423,12 +364,11 @@ func decodeAzurePRs(raw []byte) ([]azurePR, error) {
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		return nil, err
 	}
-	out := make([]azurePR, 0, len(rows))
+	out := make([]forgePR, 0, len(rows))
 	for _, r := range rows {
-		branch := strings.TrimPrefix(r.SourceRefName, "refs/heads/")
 		merge := strings.ToLower(strings.TrimSpace(r.MergeStatus))
-		out = append(out, azurePR{
-			Branch:    branch,
+		out = append(out, forgePR{
+			Branch:    strings.TrimPrefix(r.SourceRefName, "refs/heads/"),
 			ID:        r.PullRequestID,
 			URL:       firstNonEmpty(r.Links.Web.Href, r.URL),
 			Conflict:  merge == "conflicts" || merge == "failure",
@@ -446,17 +386,4 @@ func azureOrgURL(org string) string {
 		return org
 	}
 	return "https://dev.azure.com/" + org
-}
-
-func splitAzurePath(repo string) (org, project, name string, err error) {
-	parts := strings.Split(strings.Trim(repo, "/"), "/")
-	if len(parts) < 3 {
-		return "", "", "", fmt.Errorf("azuredevops path must be org/project/repo")
-	}
-	for _, p := range parts {
-		if p == "" {
-			return "", "", "", fmt.Errorf("azuredevops path must be org/project/repo")
-		}
-	}
-	return parts[0], parts[1], parts[len(parts)-1], nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -17,111 +16,139 @@ import (
 //
 // Uses `git branch -D` because squash-merged branches are often not ancestors of default.
 // Callers must re-check forge prune safety first. Branch names are validated; dirty trees refuse.
-func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branch, defaultBranch string) error {
-	if in == nil {
-		return ErrInspectorMissing
-	}
-	branch = strings.TrimSpace(branch)
-	defaultBranch = strings.TrimSpace(defaultBranch)
-	if branch == "" {
-		return fmt.Errorf("branch is required")
-	}
-	if err := ValidateBranchName(branch); err != nil {
+// worktreePath must resolve to the lease's common git directory.
+func (m *Mutator) RemoveSafeCheckout(ctx context.Context, worktreePath, branch, defaultBranch string) error {
+	if _, _, err := m.bind(ctx, worktreePath); err != nil {
 		return err
 	}
-	if defaultBranch == "" {
-		defaultBranch = "main"
+	branch, defaultBranch, err := normalisePruneArgs(branch, defaultBranch)
+	if err != nil {
+		return err
 	}
-	if err := ValidateBranchName(defaultBranch); err != nil {
-		return fmt.Errorf("default branch: %w", err)
-	}
-	if branch == defaultBranch {
-		return fmt.Errorf("refusing to remove default branch %q", branch)
-	}
-
-	abs, err := ExpandPath(worktreePath)
+	abs, err := ResolvePath(worktreePath)
 	if err != nil {
 		return fmt.Errorf("worktree path: %w", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	abs = filepath.Clean(abs)
-	abs = in.CanonicalCheckoutPath(ctx, abs)
+	abs = m.in.CanonicalCheckoutPath(ctx, abs)
 
-	trees, err := in.listWorktrees(ctx, abs)
+	target, main, err := m.in.locateWorktree(ctx, abs)
 	if err != nil {
-		return fmt.Errorf("list worktrees: %w", err)
+		return err
 	}
-
-	var target *Worktree
-	var main *Worktree
-	for i := range trees {
-		wt := &trees[i]
-		path := in.CanonicalCheckoutPath(ctx, wt.Path)
-		wt.Path = path
-		if wt.Main {
-			main = wt
-		}
-		if path == abs {
-			target = wt
-		}
+	if err := checkRemovable(target, branch); err != nil {
+		return err
 	}
-	if target == nil {
-		return fmt.Errorf("worktree %s not found", abs)
-	}
-	if target.Bare {
-		return fmt.Errorf("refusing to remove bare worktree")
-	}
-	if target.Detached {
-		return fmt.Errorf("refusing to remove detached HEAD checkout")
-	}
-	if target.Locked {
-		return fmt.Errorf("refusing to remove locked worktree")
-	}
-	if target.Branch != branch {
-		if target.Branch == "" {
-			return fmt.Errorf("worktree branch unknown; expected %q", branch)
-		}
-		return fmt.Errorf("worktree is on %q, not %q", target.Branch, branch)
-	}
-
-	detail, err := in.inspectWorktree(ctx, abs, target.Main)
+	detail, err := m.in.inspectWorktree(ctx, abs, target.Main)
 	if err != nil {
 		return fmt.Errorf("re-check worktree: %w", err)
 	}
 	if detail.Dirty {
 		return fmt.Errorf("%w at %s; commit or stash before remove", ErrDirtyTree, abs)
 	}
-
 	if target.Main {
-		cur, err := in.git(ctx, abs, "branch", "--show-current")
-		if err != nil {
-			return fmt.Errorf("current branch: %w", err)
-		}
-		if got := strings.TrimSpace(string(cur)); got != "" && got != branch {
-			return fmt.Errorf("checkout is on %q, not %q", got, branch)
-		}
-		// Land on an up-to-date default instead of a stale tip after switch.
-		if err := in.ensureDefaultReadyForSafePrune(ctx, abs, defaultBranch); err != nil {
-			return fmt.Errorf("update default branch %s before remove: %w", defaultBranch, err)
-		}
-		if _, err := in.git(ctx, abs, "switch", defaultBranch); err != nil {
-			return fmt.Errorf("switch to %s: %w", defaultBranch, err)
-		}
-		if _, err := in.git(ctx, abs, "branch", "-D", branch); err != nil {
-			return fmt.Errorf("delete branch %s: %w", branch, err)
-		}
-		return nil
+		return m.removeMainCheckout(ctx, abs, branch, defaultBranch)
 	}
-
 	if main == nil {
 		return fmt.Errorf("main worktree not found for %s", abs)
 	}
-	if _, err := in.git(ctx, main.Path, "worktree", "remove", abs); err != nil {
+	return m.removeLinkedWorktree(ctx, main.Path, abs, branch)
+}
+
+// normalisePruneArgs trims and validates the branch to remove and the
+// default branch to land on, which falls back to main and must differ.
+func normalisePruneArgs(branch, defaultBranch string) (string, string, error) {
+	branch = strings.TrimSpace(branch)
+	defaultBranch = strings.TrimSpace(defaultBranch)
+	if branch == "" {
+		return "", "", fmt.Errorf("branch is required")
+	}
+	if err := ValidateBranchName(branch); err != nil {
+		return "", "", err
+	}
+	if defaultBranch == "" {
+		defaultBranch = defaultBranchFallback
+	}
+	if err := ValidateBranchName(defaultBranch); err != nil {
+		return "", "", fmt.Errorf("default branch: %w", err)
+	}
+	if branch == defaultBranch {
+		return "", "", fmt.Errorf("refusing to remove default branch %q", branch)
+	}
+	return branch, defaultBranch, nil
+}
+
+// locateWorktree finds the worktree at abs and the repository's main
+// worktree, comparing canonical paths.
+func (in *Inspector) locateWorktree(ctx context.Context, abs string) (target, main *Worktree, err error) {
+	trees, err := in.listWorktrees(ctx, abs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list worktrees: %w", err)
+	}
+	for i := range trees {
+		wt := &trees[i]
+		wt.Path = in.CanonicalCheckoutPath(ctx, wt.Path)
+		if wt.Main {
+			main = wt
+		}
+		if wt.Path == abs {
+			target = wt
+		}
+	}
+	if target == nil {
+		return nil, nil, fmt.Errorf("worktree %s not found", abs)
+	}
+	return target, main, nil
+}
+
+// checkRemovable refuses bare, detached and locked worktrees, and a
+// worktree that is not on branch.
+func checkRemovable(target *Worktree, branch string) error {
+	switch {
+	case target.Bare:
+		return fmt.Errorf("refusing to remove bare worktree")
+	case target.Detached:
+		return fmt.Errorf("refusing to remove detached HEAD checkout")
+	case target.Locked:
+		return fmt.Errorf("refusing to remove locked worktree")
+	case target.Branch == "":
+		return fmt.Errorf("worktree branch unknown; expected %q", branch)
+	case target.Branch != branch:
+		return fmt.Errorf("worktree is on %q, not %q", target.Branch, branch)
+	}
+	return nil
+}
+
+// removeMainCheckout lands the main worktree on an up-to-date default
+// branch, then deletes branch.
+func (m *Mutator) removeMainCheckout(ctx context.Context, abs, branch, defaultBranch string) error {
+	in := m.in
+	cur, err := in.git(ctx, abs, "branch", "--show-current")
+	if err != nil {
+		return fmt.Errorf("current branch: %w", err)
+	}
+	if got := strings.TrimSpace(string(cur)); got != "" && got != branch {
+		return fmt.Errorf("checkout is on %q, not %q", got, branch)
+	}
+	// Land on an up-to-date default instead of a stale tip after switch.
+	if err := m.ensureDefaultReadyForSafePrune(ctx, abs, defaultBranch); err != nil {
+		return fmt.Errorf("update default branch %s before remove: %w", defaultBranch, err)
+	}
+	if _, err := in.git(ctx, abs, "switch", defaultBranch); err != nil {
+		return fmt.Errorf("switch to %s: %w", defaultBranch, err)
+	}
+	if _, err := in.git(ctx, abs, "branch", "-D", branch); err != nil {
+		return fmt.Errorf("delete branch %s: %w", branch, err)
+	}
+	return nil
+}
+
+// removeLinkedWorktree removes the linked worktree at abs, then deletes
+// branch from the main worktree.
+func (m *Mutator) removeLinkedWorktree(ctx context.Context, mainPath, abs, branch string) error {
+	if _, err := m.in.git(ctx, mainPath, "worktree", "remove", abs); err != nil {
 		return fmt.Errorf("worktree remove: %w", err)
 	}
-	if _, err := in.git(ctx, main.Path, "branch", "-D", branch); err != nil {
+	if _, err := m.in.git(ctx, mainPath, "branch", "-D", branch); err != nil {
 		return fmt.Errorf("worktree removed at %s; delete branch %s: %w", abs, branch, err)
 	}
 	return nil
@@ -130,22 +157,23 @@ func (in *Inspector) RemoveSafeCheckout(ctx context.Context, worktreePath, branc
 // ensureDefaultReadyForSafePrune brings defaultBranch to origin before a main-worktree prune.
 // Prefers ff-only. If the branch is not checked out and has diverged, moves the local tip
 // to origin/<branch> so prune can land cleanly (discards local-only commits on that tip).
-func (in *Inspector) ensureDefaultReadyForSafePrune(ctx context.Context, repoPath, branch string) error {
-	err := in.ensureBranchFFFromOrigin(ctx, repoPath, branch)
+func (m *Mutator) ensureDefaultReadyForSafePrune(ctx context.Context, repoPath, branch string) error {
+	err := m.ensureBranchFFFromOrigin(ctx, repoPath, branch)
 	if err == nil {
 		return nil
 	}
 	if !errors.Is(err, ErrDiverged) {
 		return err
 	}
-	if _, checkedOut := in.worktreeOnBranch(ctx, repoPath, branch); checkedOut {
+	if _, checkedOut := m.in.worktreeOnBranch(ctx, repoPath, branch); checkedOut {
 		return err
 	}
-	return in.resetUnusedBranchToOrigin(ctx, repoPath, branch)
+	return m.resetUnusedBranchToOrigin(ctx, repoPath, branch)
 }
 
 // resetUnusedBranchToOrigin force-updates a non-checked-out local branch to origin/<branch>.
-func (in *Inspector) resetUnusedBranchToOrigin(ctx context.Context, repoPath, branch string) error {
+func (m *Mutator) resetUnusedBranchToOrigin(ctx context.Context, repoPath, branch string) error {
+	in := m.in
 	branch = strings.TrimSpace(branch)
 	if err := ValidateBranchName(branch); err != nil {
 		return err
@@ -158,7 +186,7 @@ func (in *Inspector) resetUnusedBranchToOrigin(ctx context.Context, repoPath, br
 	}
 	remoteRef := "origin/" + branch
 	if _, err := in.git(ctx, repoPath, "rev-parse", "--verify", remoteRef); err != nil {
-		return fmt.Errorf("missing %s after fetch", remoteRef)
+		return fmt.Errorf("missing %s after fetch: %w", remoteRef, err)
 	}
 	if _, err := in.git(ctx, repoPath, "branch", "-f", branch, remoteRef); err != nil {
 		return fmt.Errorf("reset local %s to %s: %w", branch, remoteRef, err)

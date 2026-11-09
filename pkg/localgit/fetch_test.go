@@ -16,7 +16,7 @@ import (
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
-func TestFetchOriginCachedRefreshesStaleTracking(t *testing.T) {
+func TestFetchOriginSmartRefreshesStaleTracking(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -25,7 +25,7 @@ func TestFetchOriginCachedRefreshesStaleTracking(t *testing.T) {
 	runGit(t, origin, "commit", "--allow-empty", "-m", "origin-ahead")
 
 	in := localgit.NewInspector(cliexec.New())
-	ctx := context.Background()
+	ctx := testCtx(t)
 
 	st := in.InspectPath(ctx, local)
 	in.EnrichOriginSync(ctx, &st)
@@ -33,9 +33,10 @@ func TestFetchOriginCachedRefreshesStaleTracking(t *testing.T) {
 		t.Fatalf("before fetch want in-sync vs stale origin, ahead=%d behind=%d", st.DefaultAhead, st.DefaultBehind)
 	}
 
-	cache := localgit.NewOriginFetchCache()
-	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
-		t.Fatalf("FetchOriginCached: %v", err)
+	cache := localgit.NewOriginFetchCache(time.Now)
+	m := mutatorFor(t, cliexec.New(), local)
+	if _, err := m.FetchOriginSmart(ctx, local, localgit.FetchPolicy{TTL: time.Minute}, cache); err != nil {
+		t.Fatalf("FetchOriginSmart: %v", err)
 	}
 
 	st = in.InspectPath(ctx, local)
@@ -48,7 +49,7 @@ func TestFetchOriginCachedRefreshesStaleTracking(t *testing.T) {
 	}
 }
 
-func TestFetchOriginCachedRespectsTTL(t *testing.T) {
+func TestFetchOriginSmartRespectsFullTTL(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -56,20 +57,19 @@ func TestFetchOriginCachedRespectsTTL(t *testing.T) {
 
 	var fetches atomic.Int32
 	run := &countingExec{inner: cliexec.New(), fetches: &fetches}
-	in := localgit.NewInspector(run)
-	ctx := context.Background()
-	cache := localgit.NewOriginFetchCache()
+	ctx := testCtx(t)
 	now := time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC)
-	cache.SetNow(func() time.Time { return now })
+	cache := localgit.NewOriginFetchCache(func() time.Time { return now })
+	m := mutatorFor(t, run, local)
 
-	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, local, localgit.FetchPolicy{TTL: time.Minute}, cache); err != nil {
 		t.Fatalf("first fetch: %v", err)
 	}
 	if got := fetches.Load(); got != 1 {
 		t.Fatalf("fetches after first=%d", got)
 	}
 
-	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, local, localgit.FetchPolicy{TTL: time.Minute}, cache); err != nil {
 		t.Fatalf("second fetch within TTL: %v", err)
 	}
 	if got := fetches.Load(); got != 1 {
@@ -77,14 +77,14 @@ func TestFetchOriginCachedRespectsTTL(t *testing.T) {
 	}
 
 	now = now.Add(2 * time.Minute)
-	if _, err := in.FetchOriginCached(ctx, local, time.Minute, false, cache); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, local, localgit.FetchPolicy{TTL: time.Minute}, cache); err != nil {
 		t.Fatalf("third fetch after TTL: %v", err)
 	}
 	if got := fetches.Load(); got != 2 {
 		t.Fatalf("want fetch after TTL, fetches=%d", got)
 	}
 
-	if _, err := in.FetchOriginCached(ctx, local, time.Minute, true, cache); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, local, localgit.FetchPolicy{TTL: time.Minute, Fresh: true}, cache); err != nil {
 		t.Fatalf("fresh fetch: %v", err)
 	}
 	if got := fetches.Load(); got != 3 {
@@ -93,13 +93,13 @@ func TestFetchOriginCachedRespectsTTL(t *testing.T) {
 }
 
 func TestOriginFetchCacheClear(t *testing.T) {
-	cache := localgit.NewOriginFetchCache()
-	cache.MarkSuccess("/tmp/repo.git")
-	if cache.NeedsFetch("/tmp/repo.git", time.Hour, false) {
+	cache := localgit.NewOriginFetchCache(time.Now)
+	cache.MarkFullSuccess("/tmp/repo.git")
+	if cache.NeedsFullFetch("/tmp/repo.git", time.Hour, false) {
 		t.Fatal("want cache hit")
 	}
 	cache.Clear()
-	if !cache.NeedsFetch("/tmp/repo.git", time.Hour, false) {
+	if !cache.NeedsFullFetch("/tmp/repo.git", time.Hour, false) {
 		t.Fatal("want needs fetch after clear")
 	}
 }

@@ -51,45 +51,39 @@ func (e *StaleIndexLockError) Unwrap() error {
 	return ErrStaleIndexLock
 }
 
-// IsIndexLockError reports whether err looks like a git index.lock conflict.
+// IsIndexLockError reports whether err is an index.lock conflict that
+// EnsureWritableIndex classified (ErrStaleIndexLock or ErrIndexLockBusy).
+// It does not read message text: a git command that failed on a lock is
+// re-checked on disk with EnsureWritableIndex instead.
 func IsIndexLockError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, ErrStaleIndexLock) || errors.Is(err, ErrIndexLockBusy) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "index.lock")
+	return errors.Is(err, ErrStaleIndexLock) || errors.Is(err, ErrIndexLockBusy)
 }
 
 // EnsureWritableIndex checks for index.lock under repoPath.
 // When clearStale is false and a stale lock exists, it returns *StaleIndexLockError.
 // When clearStale is true, it removes a stale lock. A fresh lock always returns
-// ErrIndexLockBusy (never deleted).
-func (in *Inspector) EnsureWritableIndex(ctx context.Context, repoPath string, clearStale bool) error {
-	return in.EnsureWritableIndexAge(ctx, repoPath, clearStale, DefaultStaleIndexLockAge)
+// ErrIndexLockBusy (never deleted). repoPath must resolve to the lease's
+// common git directory.
+func (m *Mutator) EnsureWritableIndex(ctx context.Context, repoPath string, clearStale bool) error {
+	if _, _, err := m.bind(ctx, repoPath); err != nil {
+		return err
+	}
+	return m.ensureWritableIndex(ctx, repoPath, clearStale, DefaultStaleIndexLockAge)
 }
 
-// EnsureWritableIndexAge is EnsureWritableIndex with an explicit stale threshold.
-func (in *Inspector) EnsureWritableIndexAge(ctx context.Context, repoPath string, clearStale bool, staleAfter time.Duration) error {
-	if in == nil {
-		return ErrInspectorMissing
-	}
+// ensureWritableIndex is EnsureWritableIndex with an explicit stale threshold.
+func (m *Mutator) ensureWritableIndex(ctx context.Context, repoPath string, clearStale bool, staleAfter time.Duration) error {
+	in := m.in
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if staleAfter <= 0 {
 		staleAfter = DefaultStaleIndexLockAge
 	}
-	abs, err := ExpandPath(repoPath)
+	abs, err := ResolvePath(repoPath)
 	if err != nil {
 		return fmt.Errorf("repo path: %w", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	abs = filepath.Clean(abs)
 
 	lockPath, err := in.resolveIndexLockPath(ctx, abs)
 	if err != nil {

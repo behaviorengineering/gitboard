@@ -6,345 +6,176 @@ import (
 	"strings"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
-	"github.com/behaviorengineering/gitboard/internal/syncproj"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/dashboard"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
+	"github.com/behaviorengineering/gitboard/pkg/projectsync"
 )
 
 const errConfigNotWritable = "config path not set; cannot mutate tracked projects"
 
-func registerSyncRoutes(mux *http.ServeMux, live *configLive, opts Options) {
-	mux.HandleFunc("/api/sync/candidates", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Commands == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		doc, _, ok := liveDoc(w, live)
+// registerSyncRoutes adds the Manage routes: discovery, tracked projects,
+// sync sources, local roots and views.
+func (a *api) registerSyncRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/sync/candidates", allow(a.syncCandidates, http.MethodGet))
+	mux.HandleFunc("/api/sync/projects", allow(configWrite[projectAction]{
+		op:     "api.sync.projects",
+		apply:  a.applyProjectAction,
+		render: renderSyncState,
+	}.handler(a), http.MethodPost))
+	mux.HandleFunc("/api/sync/selection", allow(configWrite[selectionBody]{
+		op:     "api.sync.selection",
+		budget: syncBudget,
+		apply:  a.applySelection,
+		render: renderSyncState,
+	}.handler(a), http.MethodPut))
+	mux.HandleFunc("/api/sync/sources", getOrPut(
+		a.readConfig(func(doc boardconfig.File) any { return syncSourcesOf(doc) }),
+		configWrite[dashboard.SyncSourceLists]{
+			op: "api.sync.sources",
+			apply: func(_ context.Context, doc boardconfig.File, body dashboard.SyncSourceLists) (boardconfig.File, error) {
+				return a.opts.Commands.SetSyncSources(doc, body)
+			},
+			render: func(doc boardconfig.File) any { return syncSourcesOf(doc) },
+		}.handler(a),
+	))
+	mux.HandleFunc("/api/local/roots", getOrPut(
+		a.readConfig(renderRoots),
+		configWrite[rootsResponse]{
+			op: "api.local.roots",
+			apply: func(_ context.Context, doc boardconfig.File, body rootsResponse) (boardconfig.File, error) {
+				return a.opts.Commands.SetLocalRoots(doc, body.Roots)
+			},
+			render: renderRoots,
+		}.handler(a),
+	))
+	mux.HandleFunc("/api/views", getOrPut(
+		a.readConfig(renderSyncState),
+		configWrite[viewsBody]{
+			op: "api.views",
+			apply: func(_ context.Context, doc boardconfig.File, body viewsBody) (boardconfig.File, error) {
+				return a.opts.Commands.SetViews(doc, body.Views)
+			},
+			render: renderSyncState,
+		}.handler(a),
+	))
+}
+
+func renderSyncState(doc boardconfig.File) any { return syncStateOf(doc) }
+
+func renderRoots(doc boardconfig.File) any { return rootsResponse{Roots: doc.Local.Roots} }
+
+// projectAction is the POST /api/sync/projects body.
+type projectAction struct {
+	Action    string           `json:"action"`
+	Host      boardconfig.Host `json:"host"`
+	Path      string           `json:"path"`
+	ID        string           `json:"id"`
+	LocalPath string           `json:"local_path"`
+}
+
+// selectionBody is the PUT /api/sync/selection body.
+type selectionBody struct {
+	Selected []projectsync.RepoRef `json:"selected"`
+	Host     string                `json:"host"`
+}
+
+// viewsBody is the PUT /api/views body.
+type viewsBody struct {
+	Views []boardconfig.View `json:"views"`
+}
+
+func (a *api) syncCandidates(w http.ResponseWriter, r *http.Request) {
+	if !a.requireCommands(w) {
+		return
+	}
+	doc, _, ok := a.liveDoc(w)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), syncBudget)
+	defer cancel()
+	res, err := a.opts.Commands.DiscoverCandidates(ctx, doc, strings.TrimSpace(r.URL.Query().Get("host")))
+	if err != nil {
+		writeError(w, a.log, "api.sync.candidates", err)
+		return
+	}
+	writeJSON(w, a.log, candidatesResponse{Candidates: res.Candidates, Warnings: res.Warnings})
+}
+
+func (a *api) applyProjectAction(_ context.Context, doc boardconfig.File, body projectAction) (boardconfig.File, error) {
+	switch strings.ToLower(strings.TrimSpace(body.Action)) {
+	case "add":
+		return a.opts.Commands.AddTrackedProject(doc, body.Host, body.Path)
+	case "remove":
+		return a.opts.Commands.RemoveTrackedProject(doc, body.ID)
+	case "set_local_path":
+		return a.opts.Commands.SetProjectLocalPath(doc, body.ID, body.LocalPath)
+	}
+	return doc, gberr.New(gberr.CodeInvalid, "server.applyProjectAction", `action must be "add", "remove", or "set_local_path"`)
+}
+
+func (a *api) applySelection(ctx context.Context, doc boardconfig.File, body selectionBody) (boardconfig.File, error) {
+	return a.opts.Commands.ApplySyncSelection(ctx, doc, body.Host, body.Selected)
+}
+
+// readConfig serves a read-only view of the live config.
+func (a *api) readConfig(render func(boardconfig.File) any) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		doc, _, ok := a.liveDoc(w)
 		if !ok {
 			return
 		}
-		hostFilter := strings.TrimSpace(r.URL.Query().Get("host"))
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
-		defer cancel()
-		res, err := opts.Commands.DiscoverCandidates(ctx, doc, hostFilter)
-		if err != nil {
-			if dashboard.IsBadRequest(err) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		_ = writeJSON(w, map[string]any{
-			"candidates": res.Candidates,
-			"warnings":   res.Warnings,
-		})
-	})
+		writeJSON(w, a.log, render(doc))
+	}
+}
 
-	mux.HandleFunc("/api/sync/projects", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
+// configWrite is one config-mutating route. Every such route runs the same
+// flow: guards, decode, apply, save, reload, render. The response is built
+// from the reloaded file, so it shows what the next process start will load.
+type configWrite[B any] struct {
+	op string
+	// budget bounds apply when it calls forges. Zero leaves the request
+	// context as it is.
+	budget time.Duration
+	apply  func(ctx context.Context, doc boardconfig.File, body B) (boardconfig.File, error)
+	render func(boardconfig.File) any
+}
+
+func (cw configWrite[B]) handler(a *api) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.requireCommands(w) {
 			return
 		}
-		if opts.Commands == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		if !live.writable() {
+		if !a.live.writable() {
 			http.Error(w, errConfigNotWritable, http.StatusServiceUnavailable)
 			return
 		}
-		var body struct {
-			Action    string      `json:"action"`
-			Host      config.Host `json:"host"`
-			Path      string      `json:"path"`
-			ID        string      `json:"id"`
-			LocalPath string      `json:"local_path"`
-		}
+		var body B
 		if err := decodeJSONBody(w, r, &body); err != nil {
 			return
 		}
-		doc, _, ok := liveDoc(w, live)
+		doc, _, ok := a.liveDoc(w)
 		if !ok {
 			return
 		}
-		action := strings.ToLower(strings.TrimSpace(body.Action))
-		var err error
-		switch action {
-		case "add":
-			doc, err = opts.Commands.AddTrackedProject(doc, body.Host, body.Path)
-		case "remove":
-			doc, err = opts.Commands.RemoveTrackedProject(doc, body.ID)
-		case "set_local_path":
-			doc, err = opts.Commands.SetProjectLocalPath(doc, body.ID, body.LocalPath)
-		default:
-			http.Error(w, `action must be "add", "remove", or "set_local_path"`, http.StatusBadRequest)
-			return
+		ctx := r.Context()
+		if cw.budget > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, cw.budget)
+			defer cancel()
 		}
+		doc, err := cw.apply(ctx, doc, body)
 		if err != nil {
-			writeSyncError(w, err)
+			writeError(w, a.log, cw.op, err)
 			return
 		}
-		if err := live.replace(doc); err != nil {
-			writeSyncError(w, err)
+		if err := a.live.replace(doc); err != nil {
+			writeError(w, a.log, cw.op, err)
 			return
 		}
-		doc, _, ok = liveDoc(w, live)
-		if !ok {
-			return
+		if doc, _, ok = a.liveDoc(w); ok {
+			writeJSON(w, a.log, cw.render(doc))
 		}
-		_ = writeJSON(w, syncStatePayload(doc))
-	})
-
-	mux.HandleFunc("/api/sync/selection", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Commands == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		if !live.writable() {
-			http.Error(w, errConfigNotWritable, http.StatusServiceUnavailable)
-			return
-		}
-		var body struct {
-			Selected []struct {
-				Host config.Host `json:"host"`
-				Path string      `json:"path"`
-			} `json:"selected"`
-			Host string `json:"host"`
-		}
-		if err := decodeJSONBody(w, r, &body); err != nil {
-			return
-		}
-		doc, _, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		refs := make([]syncproj.RepoRef, 0, len(body.Selected))
-		for _, s := range body.Selected {
-			refs = append(refs, syncproj.RepoRef{Host: s.Host, Path: s.Path})
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
-		defer cancel()
-		doc, err := opts.Commands.ApplySyncSelection(ctx, doc, body.Host, refs)
-		if err != nil {
-			if dashboard.IsBadRequest(err) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		if err := live.replace(doc); err != nil {
-			writeSyncError(w, err)
-			return
-		}
-		doc, _, ok = liveDoc(w, live)
-		if !ok {
-			return
-		}
-		_ = writeJSON(w, syncStatePayload(doc))
-	})
-
-	mux.HandleFunc("/api/sync/sources", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			doc, _, ok := liveDoc(w, live)
-			if !ok {
-				return
-			}
-			_ = writeJSON(w, map[string]any{
-				"github_orgs":          doc.Sync.GitHub.Orgs,
-				"gitlab_groups":        doc.Sync.GitLab.Groups,
-				"azuredevops_orgs":     doc.Sync.AzureDevOps.Orgs,
-				"bitbucket_workspaces": doc.Sync.Bitbucket.Workspaces,
-			})
-		case http.MethodPut:
-			if opts.Commands == nil {
-				http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-				return
-			}
-			if !live.writable() {
-				http.Error(w, errConfigNotWritable, http.StatusServiceUnavailable)
-				return
-			}
-			var body struct {
-				GitHubOrgs          []string `json:"github_orgs"`
-				GitLabGroups        []string `json:"gitlab_groups"`
-				AzureDevOpsOrgs     []string `json:"azuredevops_orgs"`
-				BitbucketWorkspaces []string `json:"bitbucket_workspaces"`
-			}
-			if err := decodeJSONBody(w, r, &body); err != nil {
-				return
-			}
-			doc, _, ok := liveDoc(w, live)
-			if !ok {
-				return
-			}
-			doc, err := opts.Commands.SetSyncSources(doc, body.GitHubOrgs, body.GitLabGroups, body.AzureDevOpsOrgs, body.BitbucketWorkspaces)
-			if err != nil {
-				writeSyncError(w, err)
-				return
-			}
-			if err := live.replace(doc); err != nil {
-				writeSyncError(w, err)
-				return
-			}
-			doc, _, ok = liveDoc(w, live)
-			if !ok {
-				return
-			}
-			_ = writeJSON(w, map[string]any{
-				"github_orgs":          doc.Sync.GitHub.Orgs,
-				"gitlab_groups":        doc.Sync.GitLab.Groups,
-				"azuredevops_orgs":     doc.Sync.AzureDevOps.Orgs,
-				"bitbucket_workspaces": doc.Sync.Bitbucket.Workspaces,
-			})
-		default:
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-		}
-	})
-
-	mux.HandleFunc("/api/local/roots", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			doc, _, ok := liveDoc(w, live)
-			if !ok {
-				return
-			}
-			_ = writeJSON(w, map[string]any{"roots": doc.Local.Roots})
-		case http.MethodPut:
-			if opts.Commands == nil {
-				http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-				return
-			}
-			if !live.writable() {
-				http.Error(w, errConfigNotWritable, http.StatusServiceUnavailable)
-				return
-			}
-			var body struct {
-				Roots []string `json:"roots"`
-			}
-			if err := decodeJSONBody(w, r, &body); err != nil {
-				return
-			}
-			doc, _, ok := liveDoc(w, live)
-			if !ok {
-				return
-			}
-			doc, err := opts.Commands.SetLocalRoots(doc, body.Roots)
-			if err != nil {
-				writeSyncError(w, err)
-				return
-			}
-			if err := live.replace(doc); err != nil {
-				writeSyncError(w, err)
-				return
-			}
-			doc, _, ok = liveDoc(w, live)
-			if !ok {
-				return
-			}
-			_ = writeJSON(w, map[string]any{"roots": doc.Local.Roots})
-		default:
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-		}
-	})
-
-	mux.HandleFunc("/api/views", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			doc, _, ok := liveDoc(w, live)
-			if !ok {
-				return
-			}
-			_ = writeJSON(w, syncStatePayload(doc))
-		case http.MethodPut:
-			if opts.Commands == nil {
-				http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-				return
-			}
-			if !live.writable() {
-				http.Error(w, errConfigNotWritable, http.StatusServiceUnavailable)
-				return
-			}
-			var body struct {
-				Views []config.View `json:"views"`
-			}
-			if err := decodeJSONBody(w, r, &body); err != nil {
-				return
-			}
-			doc, _, ok := liveDoc(w, live)
-			if !ok {
-				return
-			}
-			doc, err := opts.Commands.SetViews(doc, body.Views)
-			if err != nil {
-				writeSyncError(w, err)
-				return
-			}
-			if err := live.replace(doc); err != nil {
-				writeSyncError(w, err)
-				return
-			}
-			doc, _, ok = liveDoc(w, live)
-			if !ok {
-				return
-			}
-			_ = writeJSON(w, syncStatePayload(doc))
-		default:
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-		}
-	})
-}
-
-func writeSyncError(w http.ResponseWriter, err error) {
-	if err == nil {
-		return
 	}
-	if writeCommandError(w, err) {
-		return
-	}
-	http.Error(w, err.Error(), http.StatusInternalServerError)
-}
-
-func syncStatePayload(doc config.File) map[string]any {
-	projects := make([]map[string]any, 0, len(doc.Projects))
-	for _, p := range doc.Projects {
-		projects = append(projects, map[string]any{
-			"id":         p.ID,
-			"label":      p.Label,
-			"host":       p.Host,
-			"path":       p.Path,
-			"local_path": p.LocalPath,
-		})
-	}
-	return map[string]any{
-		"projects":  projects,
-		"views":     dashboard.ViewSummaries(doc),
-		"view_defs": effectiveViewDefs(doc),
-		"sync": map[string]any{
-			"github_orgs":          doc.Sync.GitHub.Orgs,
-			"gitlab_groups":        doc.Sync.GitLab.Groups,
-			"azuredevops_orgs":     doc.Sync.AzureDevOps.Orgs,
-			"bitbucket_workspaces": doc.Sync.Bitbucket.Workspaces,
-		},
-		"local": map[string]any{
-			"roots": doc.Local.Roots,
-		},
-	}
-}
-
-func effectiveViewDefs(doc config.File) []config.View {
-	views := doc.EffectiveViews()
-	out := make([]config.View, len(views))
-	copy(out, views)
-	return out
 }

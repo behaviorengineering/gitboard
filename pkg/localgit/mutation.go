@@ -5,8 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
-	"time"
+	"sync/atomic"
 )
 
 // ErrMutationCanceled means the request context ended while waiting for the
@@ -29,29 +30,13 @@ type OSLocker interface {
 }
 
 // MutationLease is exclusive ownership of one common git directory.
+// Mutator binds git writes to it.
 type MutationLease struct {
 	commonDir string
 	coord     *MutationCoordinator
 	osUnlock  func() error
-	waitMs    int64
 	epoch     uint64
-	released  bool
-}
-
-// CommonDir returns the coordinated common git directory.
-func (l *MutationLease) CommonDir() string {
-	if l == nil {
-		return ""
-	}
-	return l.commonDir
-}
-
-// WaitMs is how long Acquire blocked before ownership was granted.
-func (l *MutationLease) WaitMs() int64 {
-	if l == nil {
-		return 0
-	}
-	return l.waitMs
+	released  atomic.Bool
 }
 
 // Epoch is the mutation epoch observed when the lease was acquired.
@@ -70,19 +55,25 @@ func (l *MutationLease) BumpEpoch() uint64 {
 	return l.coord.bumpEpoch(l.commonDir)
 }
 
-// Release drops the OS lock then the in-process lock. Safe to call once.
-func (l *MutationLease) Release() {
-	if l == nil || l.released {
-		return
+// Release drops the OS lock then the in-process lock. Safe to call more than
+// once; only the first call does work. The in-process lock is always released;
+// a failed OS unlock is returned so the caller can report that another gitboard
+// process may stay blocked.
+func (l *MutationLease) Release() error {
+	if l == nil || !l.released.CompareAndSwap(false, true) {
+		return nil
 	}
-	l.released = true
+	var err error
 	if l.osUnlock != nil {
-		_ = l.osUnlock()
+		if uerr := l.osUnlock(); uerr != nil {
+			err = fmt.Errorf("release os lock for %s: %w", l.commonDir, uerr)
+		}
 		l.osUnlock = nil
 	}
 	if l.coord != nil {
 		l.coord.releaseProcess(l.commonDir)
 	}
+	return err
 }
 
 // MutationCoordinator serializes mutating git work per common git directory.
@@ -173,13 +164,11 @@ func (c *MutationCoordinator) Acquire(ctx context.Context, commonDir string) (*M
 	token := st.token
 	c.mu.Unlock()
 
-	start := time.Now()
 	select {
 	case token <- struct{}{}:
 	case <-ctx.Done():
 		return nil, fmt.Errorf("%w: %w", ErrMutationCanceled, ctx.Err())
 	}
-	waitMs := time.Since(start).Milliseconds()
 
 	// Sample epoch after the token is held so the lease matches grant time,
 	// not wait-start (concurrent bumpers may have advanced while queued).
@@ -191,7 +180,6 @@ func (c *MutationCoordinator) Acquire(ctx context.Context, commonDir string) (*M
 	lease := &MutationLease{
 		commonDir: commonDir,
 		coord:     c,
-		waitMs:    waitMs,
 		epoch:     epoch,
 	}
 
@@ -263,6 +251,26 @@ func ResolveCommonDir(ctx context.Context, common func(context.Context, string) 
 	cd = normalizeCommonDir(cd)
 	if cd == "" {
 		return "", ErrCommonDirRequired
+	}
+	return cd, nil
+}
+
+// CommonKey returns the key that per-repository maps (fetch errors, epochs,
+// shared origin sync) use for c: its CommonGitDir when set, else the common
+// dir resolved with common. When that fails the key is the cleaned checkout
+// path and err says why, so a map's writer and reader always derive the same
+// key. Mutations keep the strict ResolveCommonDir.
+func CommonKey(ctx context.Context, common func(context.Context, string) (string, error), c Checkout) (string, error) {
+	if cd := normalizeCommonDir(strings.TrimSpace(c.CommonGitDir)); cd != "" {
+		return cd, nil
+	}
+	path := strings.TrimSpace(c.Path)
+	if path == "" {
+		return "", ErrCommonDirRequired
+	}
+	cd, err := ResolveCommonDir(ctx, common, path)
+	if err != nil {
+		return filepath.Clean(path), err
 	}
 	return cd, nil
 }

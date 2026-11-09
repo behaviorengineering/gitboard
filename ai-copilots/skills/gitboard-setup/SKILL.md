@@ -95,13 +95,16 @@ before claiming a change is complete.
 Default user path: `~/.config/gitboard/config.yaml` (or
 `$XDG_CONFIG_HOME/gitboard/config.yaml`).
 
-Binary resolution order (`internal/config.DefaultPath`):
+Binary resolution order (`--config`, then `internal/config.DefaultPath`):
 
-1. `GITBOARD_CONFIG`
-2. legacy `GITBOARD_PROJECTS`
-3. existing user `config.yaml`
-4. cwd `config.yaml` / `projects.yaml`
-5. user config path (may not exist yet)
+1. `--config <path>`
+2. `GITBOARD_CONFIG`
+3. legacy `GITBOARD_PROJECTS`
+4. existing user `config.yaml`
+5. cwd `config.yaml` / legacy `projects.yaml`
+6. user config path (may not exist yet)
+
+`gitboard` with no arguments prints the same order, and the exit codes.
 
 `gitboard init` and `go tool task serve` create the file if missing and never overwrite
 an existing file. New files use restrictive permissions (`0600`).
@@ -125,6 +128,9 @@ OPENAI_API_KEY
 GITBOARD_POLL_SECONDS
 GITBOARD_OPENINFERENCE_ENABLED
 GITBOARD_OPENINFERENCE_ENDPOINT
+POLYPUS_OTLP_ENDPOINT
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, OTEL_EXPORTER_OTLP_ENDPOINT (used by olly when the three above are empty)
+OTEL_EXPORTER_OTLP_PROTOCOL
 ```
 
 **Note:** Tasks pass no config path, so `init`, `sync` and `serve` use the

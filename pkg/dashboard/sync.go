@@ -2,12 +2,9 @@ package dashboard
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
@@ -26,61 +23,55 @@ type SyncInvestigation struct {
 
 // InvestigateSync validates a mapped checkout, refreshes origin under the
 // mutation lease, then compares refs without holding the lease.
-func (c *Commands) InvestigateSync(ctx context.Context, doc config.File, req SyncInvestigationRequest) (SyncInvestigation, error) {
-	var zero SyncInvestigation
+func (c *Commands) InvestigateSync(ctx context.Context, doc boardconfig.File, req SyncInvestigationRequest) (SyncInvestigation, error) {
+	const op = "dashboard.InvestigateSync"
 	s, err := c.requireLocal()
 	if err != nil {
-		return zero, err
+		return SyncInvestigation{}, err
 	}
-	projectID := strings.TrimSpace(req.ProjectID)
-	branch := strings.TrimSpace(req.Branch)
-	repoPath := strings.TrimSpace(req.RepoPath)
-	if projectID == "" || branch == "" || repoPath == "" {
-		return zero, badRequest("project_id, branch, and repo_path are required")
-	}
-	if err := localgit.ValidateBranchName(branch); err != nil {
-		return zero, badRequestCause("", err)
-	}
-	abs, err := c.RequireMappedPath(ctx, doc, projectID, repoPath)
+	t, err := parseMutation(op, doc, mutationRequest{
+		ProjectID: req.ProjectID, Branch: req.Branch, Path: req.RepoPath, PathField: "repo_path",
+	})
 	if err != nil {
-		return zero, err
+		return SyncInvestigation{}, err
 	}
-	common, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, abs)
+	if err := s.requireMapped(ctx, op, doc, t, "repo_path"); err != nil {
+		return SyncInvestigation{}, err
+	}
+	common, err := s.commonDirFor(ctx, op, t.path)
 	if err != nil {
-		return zero, badRequestCause("resolve common git dir", err)
+		return SyncInvestigation{}, err
 	}
-
-	if err := c.refreshOriginForInvestigate(ctx, s, abs, common, branch); err != nil {
-		return zero, err
+	if err := s.refreshOriginForInvestigate(ctx, t, common); err != nil {
+		return SyncInvestigation{}, err
 	}
-
-	result, err := s.Local.CompareSync(ctx, abs, branch)
+	result, err := s.local.CompareSync(ctx, t.path, t.branch)
 	if err != nil {
-		return zero, fmt.Errorf("investigate sync: %w", err)
+		return SyncInvestigation{}, gitMutationErr(op, err)
 	}
-	return SyncInvestigation{
-		ProjectID: projectID,
-		Result:    result,
-	}, nil
+	return SyncInvestigation{ProjectID: t.project.ID, Result: result}, nil
 }
 
-func (c *Commands) refreshOriginForInvestigate(ctx context.Context, s *Service, abs, common, branch string) error {
-	lease, err := s.Mutations.Acquire(ctx, common)
-	if err != nil {
-		if errors.Is(err, localgit.ErrMutationCanceled) {
-			return err
-		}
-		return fmt.Errorf("mutation lock: %w", err)
-	}
-	defer lease.Release()
+// investigateFetchTTL is the TTL recorded by the forced investigate fetch.
+const investigateFetchTTL = time.Minute
 
-	// Fresh full fetch matches prior InspectSync (git fetch --prune origin).
-	updated, err := s.Local.FetchOriginSmart(ctx, abs, time.Minute, true, s.OriginFetch, []string{branch})
+// refreshOriginForInvestigate runs a fresh full fetch (git fetch --prune
+// origin) under the lease before the read-only compare.
+func (s *Service) refreshOriginForInvestigate(ctx context.Context, t mutationTarget, common string) error {
+	var updated bool
+	err := s.withLease(ctx, common, func(m LocalMutator) (bool, error) {
+		policy := localgit.FetchPolicy{TTL: investigateFetchTTL, Fresh: true, Branches: []string{t.branch}}
+		var err error
+		updated, err = m.FetchOriginSmart(ctx, t.path, policy, s.originFetch)
+		if err != nil {
+			return false, gitMutationErr("dashboard.InvestigateSync fetch", err)
+		}
+		return updated, nil
+	})
 	if err != nil {
-		return fmt.Errorf("investigate fetch: %w", err)
+		return err
 	}
 	if updated {
-		lease.BumpEpoch()
 		s.InvalidateOrigin(common)
 	}
 	return nil

@@ -47,7 +47,7 @@ jobs:
           MANUAL_BUMP: ${{ github.event.inputs.bump }}
           HEAD_MSG: ${{ github.event.head_commit.message }}
           # .cursor holds local agent rules.
-          AUTO_PATCH_EXTRA_HARNESS_PATHS: ".cursor/*"
+          AUTO_PATCH_EXTRA_HARNESS_PATHS: ".cursor/* scripts/git-hooks/*"
         run: bash scripts/auto-patch-decide.sh
 
       - name: Skip notice

@@ -1,10 +1,12 @@
+// Package observability holds the injectable process logger. Tracing and
+// failure dumps come from olly (github.com/behaviorengineering/olly), set up
+// at the CLI entrypoints.
 package observability
 
 import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 )
 
 // Logger is the injectable structured logger for services (C14).
@@ -36,10 +38,9 @@ func (l *stdLogger) With(fields ...any) Logger {
 	if len(fields) == 0 {
 		return l
 	}
-	var b strings.Builder
-	b.WriteString(l.prefix)
+	prefix := []byte(l.prefix)
 	for i := 0; i+1 < len(fields); i += 2 {
-		_, _ = fmt.Fprintf(&b, "%v=%v ", fields[i], fields[i+1])
+		prefix = fmt.Appendf(prefix, "%v=%v ", fields[i], fields[i+1])
 	}
-	return &stdLogger{out: l.out, prefix: b.String()}
+	return &stdLogger{out: l.out, prefix: string(prefix)}
 }
