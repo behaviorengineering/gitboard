@@ -42,6 +42,7 @@ func (a *api) meta(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), metaBudget)
 		defer cancel()
 		tooling := a.opts.Dash.ToolingStatus(ctx)
+		a.redact.tooling(&tooling)
 		resp.Tooling = &tooling
 	}
 	writeJSON(w, a.log, resp)
@@ -81,6 +82,9 @@ func (a *api) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	payload.PollIntervalSeconds = poll
 	payload.UI = boardUIConfig(doc)
+	a.redact.projects(payload.Projects)
+	a.redact.tooling(&payload.Tooling)
+	payload.LocalWarnings = a.redact.warnings("dashboard.local_warnings", payload.LocalWarnings)
 	cacheDesc := "warm"
 	if opts.Fresh {
 		cacheDesc = "fresh"

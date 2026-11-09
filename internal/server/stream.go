@@ -34,6 +34,7 @@ func (a *api) dashboardStream(w http.ResponseWriter, r *http.Request, opts dashb
 	w.WriteHeader(http.StatusOK)
 
 	out := &eventWriter{enc: json.NewEncoder(w), flush: flusher, a: a}
+	a.redact.projects(shell.Projects)
 	if !out.write(streamEvent{Type: eventShell, Dashboard: &streamShell{
 		GeneratedAt:         shell.GeneratedAt,
 		PollIntervalSeconds: poll,
@@ -48,6 +49,7 @@ func (a *api) dashboardStream(w http.ResponseWriter, r *http.Request, opts dashb
 	ctx, cancel := context.WithTimeout(r.Context(), dashboardBudget)
 	defer cancel()
 	payload, err := a.opts.Dash.CollectStream(ctx, doc, opts, func(row board.ProjectSummary) {
+		a.redact.project(&row)
 		if !out.write(streamEvent{Type: eventProject, Project: &row}) {
 			cancel()
 		}
@@ -61,11 +63,12 @@ func (a *api) dashboardStream(w http.ResponseWriter, r *http.Request, opts dashb
 		out.write(streamEvent{Type: eventError, Error: publicMessage(err), Code: gberr.CodeOf(err)})
 		return
 	}
+	a.redact.tooling(&payload.Tooling)
 	out.write(streamEvent{
 		Type:          eventDone,
 		Tooling:       &payload.Tooling,
 		GeneratedAt:   payload.GeneratedAt,
-		LocalWarnings: payload.LocalWarnings,
+		LocalWarnings: a.redact.warnings("dashboard.local_warnings", payload.LocalWarnings),
 	})
 }
 

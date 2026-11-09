@@ -100,7 +100,7 @@ func (a *api) syncCandidates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, a.log, "api.sync.candidates", err)
 		return
 	}
-	writeJSON(w, a.log, candidatesResponse{Candidates: res.Candidates, Warnings: res.Warnings})
+	writeJSON(w, a.log, candidatesResponse{Candidates: res.Candidates, Warnings: a.redact.warnings("api.sync.candidates", res.Warnings)})
 }
 
 func (a *api) applyProjectAction(_ context.Context, doc boardconfig.File, body projectAction) (boardconfig.File, error) {

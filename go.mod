@@ -3,7 +3,7 @@ module github.com/behaviorengineering/gitboard
 go 1.27.0
 
 require (
-	github.com/behaviorengineering/gitvalet v0.2.0
+	github.com/behaviorengineering/gitvalet v0.2.1
 	github.com/behaviorengineering/olly v0.2.1
 	github.com/behaviorengineering/strop v0.2.0
 	github.com/charmbracelet/huh v1.0.0

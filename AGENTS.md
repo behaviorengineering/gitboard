@@ -20,7 +20,7 @@ This module is the Gitboard CLI and local dashboard. Humans read [README.md](REA
 - `gitboard` prints the agent operating guide (config discovery order, exit codes); `gitboard help` lists commands.
 - Read-only: `gitboard version`, `gitboard sync --dry-run`, `gitboard init --dry-run`. Dry runs write nothing, not even a missing config file.
 - Mutating: `gitboard init`, `gitboard sync --host <host> --add owner/repo`, `gitboard sync --remove <id>`. Interactive `gitboard sync` needs a terminal; without one it exits 2 and names the flags.
-- Long-running: `gitboard serve` (127.0.0.1:1325) or `go tool task serve`. With `--allow-non-localhost`, mutating API calls need the token printed at startup in `X-Gitboard-Token`.
+- Long-running: `gitboard serve` (127.0.0.1:1325) or `go tool task serve`. With `--allow-non-localhost`, mutating API calls need the token printed at startup in `X-Gitboard-Token`, and the board shows a fixed message instead of raw error, warning and tooling detail (the detail goes to the server log).
 
 Exit codes (from the `pkg/gberr` code of the returned error):
 

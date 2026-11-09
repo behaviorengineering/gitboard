@@ -152,17 +152,19 @@ func newDashboardHandler(w dashboardWiring) (http.Handler, error) {
 		return nil, fmt.Errorf("prune agent: %w", err)
 	}
 	return server.NewMux(server.Options{
-		Addr:        w.addr,
-		Token:       w.token,
-		ServiceName: w.tracing.serviceName(),
-		ConfigPath:  w.path,
-		Doc:         w.doc,
-		Dash:        dash,
-		Commands:    dashboard.NewCommands(dash),
-		Triage:      &triage.Analyzer{LLM: llmClient},
-		Prune:       prune,
-		PollSeconds: config.EffectivePollSeconds(w.doc),
-		Log:         w.log,
+		Addr:  w.addr,
+		Token: w.token,
+		// A token is set only with --allow-non-localhost, when readers may be remote.
+		RedactErrorDetail: w.token != "",
+		ServiceName:       w.tracing.serviceName(),
+		ConfigPath:        w.path,
+		Doc:               w.doc,
+		Dash:              dash,
+		Commands:          dashboard.NewCommands(dash),
+		Triage:            &triage.Analyzer{LLM: llmClient},
+		Prune:             prune,
+		PollSeconds:       config.EffectivePollSeconds(w.doc),
+		Log:               w.log,
 	}), nil
 }
 
