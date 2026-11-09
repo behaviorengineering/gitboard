@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"testing"
+
+	"github.com/behaviorengineering/gitboard/pkg/cliexec"
 )
 
 // fakeExec returns canned git output matched by argv substrings (longest match wins).
@@ -50,4 +53,19 @@ func (f *fakeExec) Run(_ context.Context, name string, args ...string) ([]byte, 
 
 func (f *fakeExec) RunJSON(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return f.Run(ctx, name, args...)
+}
+
+// leasedMutator acquires an in-process lease on common and returns its mutator.
+func leasedMutator(t *testing.T, run cliexec.Exec, common string) *Mutator {
+	t.Helper()
+	lease, err := NewMutationCoordinator(nil).Acquire(context.Background(), common)
+	if err != nil {
+		t.Fatalf("acquire lease: %v", err)
+	}
+	t.Cleanup(func() { releaseOrFail(t, lease) })
+	m, err := lease.Mutator(run)
+	if err != nil {
+		t.Fatalf("lease mutator: %v", err)
+	}
+	return m
 }

@@ -3,7 +3,7 @@ package localgit
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -34,22 +34,8 @@ type SyncInspection struct {
 	CanFastForward bool         `json:"can_fast_forward"`
 }
 
-// InspectSync refreshes origin and compares a local branch with origin/<branch>.
-// Prefer FetchOrigin (under a mutation lease) plus CompareSync when the caller
-// already coordinates writers.
-func (in *Inspector) InspectSync(ctx context.Context, repoPath, branch string) (SyncInspection, error) {
-	out, abs, err := in.prepareSyncInspection(ctx, repoPath, branch)
-	if err != nil {
-		return out, err
-	}
-	if _, err := in.git(ctx, abs, "fetch", "--prune", "origin"); err != nil {
-		return out, fmt.Errorf("fetch --prune origin: %w", err)
-	}
-	return in.compareSync(ctx, abs, branch, out)
-}
-
 // CompareSync compares a local branch with origin/<branch> without fetching.
-// Callers that refresh origin must do so under the mutation coordinator first.
+// Callers that refresh origin first do so with Mutator.FetchOriginSmart.
 func (in *Inspector) CompareSync(ctx context.Context, repoPath, branch string) (SyncInspection, error) {
 	out, abs, err := in.prepareSyncInspection(ctx, repoPath, branch)
 	if err != nil {
@@ -67,16 +53,12 @@ func (in *Inspector) prepareSyncInspection(ctx context.Context, repoPath, branch
 	if err := ValidateBranchName(branch); err != nil {
 		return out, "", err
 	}
-	abs, err := ExpandPath(repoPath)
+	abs, err := ResolvePath(repoPath)
 	if err != nil {
 		return out, "", fmt.Errorf("expand path: %w", err)
 	}
-	if resolved, resolveErr := filepath.EvalSymlinks(abs); resolveErr == nil {
-		abs = resolved
-	}
-	abs = filepath.Clean(abs)
-	if !in.isGitDir(ctx, abs) {
-		return out, "", fmt.Errorf("not a git repository: %s", abs)
+	if err := in.requireGitDir(ctx, abs); err != nil {
+		return out, "", err
 	}
 	out.Path = abs
 	out.Branch = branch
@@ -85,8 +67,8 @@ func (in *Inspector) prepareSyncInspection(ctx context.Context, repoPath, branch
 }
 
 func (in *Inspector) compareSync(ctx context.Context, abs, branch string, out SyncInspection) (SyncInspection, error) {
-	localRef := "refs/heads/" + branch
-	remoteRef := "refs/remotes/origin/" + branch
+	localRef := headsPrefix + branch
+	remoteRef := originPrefix + branch
 	var err error
 	out.LocalSHA, err = in.revParse(ctx, abs, localRef)
 	if err != nil {
@@ -107,7 +89,7 @@ func (in *Inspector) compareSync(ctx context.Context, abs, branch string, out Sy
 		return out, fmt.Errorf("status: %w", statusErr)
 	}
 	if out.CurrentBranch == branch {
-		out.DirtyFiles = porcelainFiles(string(status))
+		out.DirtyFiles = nonEmptyLines(string(status))
 		out.Dirty = len(out.DirtyFiles) > 0
 	}
 
@@ -186,27 +168,31 @@ func (in *Inspector) syncCommits(ctx context.Context, dir, rangeSpec string) ([]
 	return commits, nil
 }
 
-func porcelainFiles(status string) []string {
-	var files []string
-	for _, line := range strings.Split(status, "\n") {
+// nonEmptyLines splits git output into trimmed, non-empty lines.
+func nonEmptyLines(out string) []string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
-			files = append(files, line)
+			lines = append(lines, line)
 		}
 	}
-	return files
+	return lines
 }
 
-func parseLeftRightCount(value string) (behind, ahead int, err error) {
+// parseLeftRightCount reads two whitespace-separated counts, as printed by
+// `git rev-list --left-right --count` ("<left>\t<right>") and by
+// %(ahead-behind:...) ("<ahead> <behind>").
+func parseLeftRightCount(value string) (left, right int, err error) {
 	parts := strings.Fields(strings.TrimSpace(value))
 	if len(parts) != 2 {
 		return 0, 0, fmt.Errorf("invalid count %q", strings.TrimSpace(value))
 	}
-	if _, err := fmt.Sscanf(parts[0], "%d", &behind); err != nil {
-		return 0, 0, fmt.Errorf("invalid behind count %q: %w", parts[0], err)
+	if left, err = strconv.Atoi(parts[0]); err != nil {
+		return 0, 0, fmt.Errorf("invalid left count %q: %w", parts[0], err)
 	}
-	if _, err := fmt.Sscanf(parts[1], "%d", &ahead); err != nil {
-		return 0, 0, fmt.Errorf("invalid ahead count %q: %w", parts[1], err)
+	if right, err = strconv.Atoi(parts[1]); err != nil {
+		return 0, 0, fmt.Errorf("invalid right count %q: %w", parts[1], err)
 	}
-	return behind, ahead, nil
+	return left, right, nil
 }

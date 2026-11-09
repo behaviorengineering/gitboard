@@ -1,19 +1,22 @@
 package remotegit
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 )
 
 var errMergedLoad = errors.New("merged load failed")
 
 func TestTTLCacheHeadsHit(t *testing.T) {
-	c := NewTTLCache()
 	fixed := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	c.SetNow(func() time.Time { return fixed })
+	now := fixed
+	c := NewTTLCache(func() time.Time { return now })
 
 	loads := 0
 	snap, err := c.GetOrLoadHeads("k", time.Minute, false, func() (HeadsSnapshot, error) {
@@ -32,7 +35,7 @@ func TestTTLCacheHeadsHit(t *testing.T) {
 		t.Fatalf("cache hit: %v loads=%d", err, loads)
 	}
 
-	c.SetNow(func() time.Time { return fixed.Add(2 * time.Minute) })
+	now = fixed.Add(2 * time.Minute)
 	snap, err = c.GetOrLoadHeads("k", time.Minute, false, func() (HeadsSnapshot, error) {
 		loads++
 		return HeadsSnapshot{DefaultBranch: "develop"}, nil
@@ -43,7 +46,7 @@ func TestTTLCacheHeadsHit(t *testing.T) {
 }
 
 func TestTTLCacheFreshBypassesCache(t *testing.T) {
-	c := NewTTLCache()
+	c := NewTTLCache(time.Now)
 	loads := 0
 	c.GetOrLoadHeads("k", time.Hour, false, func() (HeadsSnapshot, error) { //nolint
 		loads++
@@ -66,115 +69,121 @@ func TestTTLCacheFreshBypassesCache(t *testing.T) {
 }
 
 func TestTTLCacheMergedFreshWriteBack(t *testing.T) {
-	c := NewTTLCache()
+	c := NewTTLCache(time.Now)
 	loads := 0
-	c.GetOrLoadMerged("k", time.Hour, false, func() ([]board.MergedReview, error) {
+	if _, err := c.GetOrLoadMerged("k", time.Hour, false, func() ([]board.MergedReview, error) {
 		loads++
 		return []board.MergedReview{{Branch: "old", ID: 1}}, nil
-	})
-	list, ok := c.GetOrLoadMerged("k", time.Hour, true, func() ([]board.MergedReview, error) {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := c.GetOrLoadMerged("k", time.Hour, true, func() ([]board.MergedReview, error) {
 		loads++
 		return []board.MergedReview{{Branch: "feat/new", ID: 2}}, nil
 	})
-	if !ok || loads != 2 || len(list) != 1 || list[0].Branch != "feat/new" {
-		t.Fatalf("fresh merged: ok=%v loads=%d %+v", ok, loads, list)
+	if err != nil || loads != 2 || len(list) != 1 || list[0].Branch != "feat/new" {
+		t.Fatalf("fresh merged: err=%v loads=%d %+v", err, loads, list)
 	}
-	list, ok = c.GetOrLoadMerged("k", time.Hour, false, func() ([]board.MergedReview, error) {
+	list, err = c.GetOrLoadMerged("k", time.Hour, false, func() ([]board.MergedReview, error) {
 		t.Fatal("fresh merged success must write cache")
 		return nil, nil
 	})
-	if !ok || len(list) != 1 || list[0].ID != 2 {
-		t.Fatalf("merged write-back: ok=%v %+v", ok, list)
+	if err != nil || len(list) != 1 || list[0].ID != 2 {
+		t.Fatalf("merged write-back: err=%v %+v", err, list)
 	}
 }
 
 func TestTTLCacheMergedLoadErrorClearsOK(t *testing.T) {
-	c := NewTTLCache()
 	fixed := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	c.SetNow(func() time.Time { return fixed })
-	c.GetOrLoadMerged("k", time.Minute, false, func() ([]board.MergedReview, error) {
+	now := fixed
+	c := NewTTLCache(func() time.Time { return now })
+	if _, err := c.GetOrLoadMerged("k", time.Minute, false, func() ([]board.MergedReview, error) {
 		return []board.MergedReview{{Branch: "feat/a", ID: 1}}, nil
-	})
-	c.SetNow(func() time.Time { return fixed.Add(2 * time.Minute) })
-	list, ok := c.GetOrLoadMerged("k", time.Minute, false, func() ([]board.MergedReview, error) {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now = fixed.Add(2 * time.Minute)
+	list, err := c.GetOrLoadMerged("k", time.Minute, false, func() ([]board.MergedReview, error) {
 		return nil, errMergedLoad
 	})
-	if ok || list != nil {
-		t.Fatalf("expired failed refresh must not keep MergedOK: ok=%v %+v", ok, list)
+	if err == nil || list != nil {
+		t.Fatalf("expired failed refresh must not keep MergedOK: err=%v %+v", err, list)
 	}
 }
 
 func TestTTLCacheMergedBranchPositiveSticky(t *testing.T) {
-	c := NewTTLCache()
+	c := NewTTLCache(time.Now)
 	loads := 0
-	list, ok := c.GetOrLoadMergedBranch("k", "feat/a", time.Minute, false, func() ([]board.MergedReview, error) {
+	list, err := c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/a", NegativeTTL: time.Minute, Fresh: false}, func() ([]board.MergedReview, error) {
 		loads++
 		return []board.MergedReview{{Branch: "feat/a", ID: 9}}, nil
 	})
-	if !ok || loads != 1 || list[0].ID != 9 {
-		t.Fatalf("first branch load: ok=%v loads=%d %+v", ok, loads, list)
+	if err != nil || loads != 1 || list[0].ID != 9 {
+		t.Fatalf("first branch load: err=%v loads=%d %+v", err, loads, list)
 	}
-	list, ok = c.GetOrLoadMergedBranch("k", "feat/a", time.Minute, false, func() ([]board.MergedReview, error) {
+	list, err = c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/a", NegativeTTL: time.Minute, Fresh: false}, func() ([]board.MergedReview, error) {
 		t.Fatal("positive must not expire")
 		return nil, nil
 	})
-	if !ok || list[0].ID != 9 {
-		t.Fatalf("sticky positive: ok=%v %+v", ok, list)
+	if err != nil || list[0].ID != 9 {
+		t.Fatalf("sticky positive: err=%v %+v", err, list)
 	}
 	c.ForgetMergedBranch("k", "feat/a")
-	list, ok = c.GetOrLoadMergedBranch("k", "feat/a", time.Minute, false, func() ([]board.MergedReview, error) {
+	list, err = c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/a", NegativeTTL: time.Minute, Fresh: false}, func() ([]board.MergedReview, error) {
 		loads++
 		return nil, nil
 	})
-	if !ok || list != nil || loads != 2 {
-		t.Fatalf("after forget: ok=%v loads=%d %+v", ok, loads, list)
+	if err != nil || list != nil || loads != 2 {
+		t.Fatalf("after forget: err=%v loads=%d %+v", err, loads, list)
 	}
 }
 
 func TestTTLCacheMergedBranchNegativeTTL(t *testing.T) {
-	c := NewTTLCache()
 	fixed := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	c.SetNow(func() time.Time { return fixed })
+	now := fixed
+	c := NewTTLCache(func() time.Time { return now })
 	loads := 0
-	_, ok := c.GetOrLoadMergedBranch("k", "feat/gone", time.Minute, false, func() ([]board.MergedReview, error) {
+	_, err := c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/gone", NegativeTTL: time.Minute, Fresh: false}, func() ([]board.MergedReview, error) {
 		loads++
 		return nil, nil
 	})
-	if !ok || loads != 1 {
-		t.Fatalf("negative store: ok=%v loads=%d", ok, loads)
+	if err != nil || loads != 1 {
+		t.Fatalf("negative store: err=%v loads=%d", err, loads)
 	}
-	_, ok = c.GetOrLoadMergedBranch("k", "feat/gone", time.Minute, false, func() ([]board.MergedReview, error) {
+	_, err = c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/gone", NegativeTTL: time.Minute, Fresh: false}, func() ([]board.MergedReview, error) {
 		t.Fatal("negative still in TTL")
 		return nil, nil
 	})
-	if !ok {
+	if err != nil {
 		t.Fatal("negative hit")
 	}
-	c.SetNow(func() time.Time { return fixed.Add(2 * time.Minute) })
-	list, ok := c.GetOrLoadMergedBranch("k", "feat/gone", time.Minute, false, func() ([]board.MergedReview, error) {
+	now = fixed.Add(2 * time.Minute)
+	list, err := c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/gone", NegativeTTL: time.Minute, Fresh: false}, func() ([]board.MergedReview, error) {
 		loads++
 		return []board.MergedReview{{Branch: "feat/gone", ID: 3}}, nil
 	})
-	if !ok || loads != 2 || list[0].ID != 3 {
-		t.Fatalf("negative expired: ok=%v loads=%d %+v", ok, loads, list)
+	if err != nil || loads != 2 || list[0].ID != 3 {
+		t.Fatalf("negative expired: err=%v loads=%d %+v", err, loads, list)
 	}
 }
 
 func TestTTLCacheMergedBranchErrorKeepsPositive(t *testing.T) {
-	c := NewTTLCache()
-	c.GetOrLoadMergedBranch("k", "feat/a", time.Minute, false, func() ([]board.MergedReview, error) {
+	c := NewTTLCache(time.Now)
+	if _, err := c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/a", NegativeTTL: time.Minute, Fresh: false}, func() ([]board.MergedReview, error) {
 		return []board.MergedReview{{Branch: "feat/a", ID: 4}}, nil
-	})
-	list, ok := c.GetOrLoadMergedBranch("k", "feat/a", time.Minute, true, func() ([]board.MergedReview, error) {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := c.GetOrLoadMergedBranch(MergedBranchQuery{Key: "k", Branch: "feat/a", NegativeTTL: time.Minute, Fresh: true}, func() ([]board.MergedReview, error) {
 		return nil, errMergedLoad
 	})
-	if !ok || len(list) != 1 || list[0].ID != 4 {
-		t.Fatalf("error must keep positive: ok=%v %+v", ok, list)
+	if err != nil || len(list) != 1 || list[0].ID != 4 {
+		t.Fatalf("error must keep positive: err=%v %+v", err, list)
 	}
 }
 
 func TestTTLCacheClear(t *testing.T) {
-	c := NewTTLCache()
+	c := NewTTLCache(time.Now)
 	loads := 0
 	c.GetOrLoadHeads("k", time.Hour, false, func() (HeadsSnapshot, error) { //nolint
 		loads++
@@ -192,12 +201,54 @@ func TestTTLCacheClear(t *testing.T) {
 
 func TestTTLCacheNilSafe(t *testing.T) {
 	var c *TTLCache
-	c.SetNow(nil)
 	c.Clear()
 	_, err := c.GetOrLoadHeads("k", time.Minute, false, func() (HeadsSnapshot, error) {
 		return HeadsSnapshot{DefaultBranch: "main"}, nil
 	})
 	if err != nil {
 		t.Fatalf("nil cache should load: %v", err)
+	}
+}
+
+func TestNewTTLCacheRequiresClock(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("want panic for nil clock")
+		}
+	}()
+	NewTTLCache(nil)
+}
+
+func TestPageLoopStopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	pages := 0
+	err := pageLoop(ctx, func(int) (bool, error) {
+		pages++
+		cancel()
+		return false, nil
+	})
+	if pages != 1 || gberr.CodeOf(err) != gberr.CodeCanceled {
+		t.Fatalf("pages=%d err=%v", pages, err)
+	}
+}
+
+func TestNewRepoRefChecksShapeAndNamesFromPath(t *testing.T) {
+	if _, ok := newRepoRef(boardconfig.HostAzureDevOps, "org/repo", ""); ok {
+		t.Fatal("azure devops ref needs three segments")
+	}
+	ref, ok := newRepoRef(boardconfig.HostGitLab, "/g/sub/app/", "")
+	if !ok || ref.Path != "g/sub/app" || ref.Name != "app" {
+		t.Fatalf("ref=%+v ok=%v", ref, ok)
+	}
+}
+
+// TestCacheKeyTrimsPath keeps the loader's key and InvalidateProject's key
+// equal when the configured path carries spaces or slashes.
+func TestCacheKeyTrimsPath(t *testing.T) {
+	want := CacheKey(boardconfig.HostGitHub, "acme/app")
+	for _, path := range []string{" acme/app ", "/acme/app/", " /acme/app/ "} {
+		if got := CacheKey(boardconfig.HostGitHub, path); got != want {
+			t.Errorf("CacheKey(%q)=%q want %q", path, got, want)
+		}
 	}
 }

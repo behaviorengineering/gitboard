@@ -1,9 +1,10 @@
-// Local code-change board for GitLab and GitHub (127.0.0.1 only).
+// Command gitboard serves a local code-change board for GitHub, GitLab,
+// Azure DevOps and Bitbucket, bound to localhost unless --allow-non-localhost
+// is set.
 package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -36,7 +37,6 @@ func resolveVersion(ldflag, moduleVersion string) string {
 }
 
 func main() {
-	log.SetFlags(0)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := cli.Execute(ctx, cli.Options{Version: reportVersion()}, os.Args[1:])
 	stop()

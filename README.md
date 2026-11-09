@@ -49,6 +49,14 @@ Open [http://127.0.0.1:1325/](http://127.0.0.1:1325/). Stop with `go tool task s
 
 User config lives at `~/.config/gitboard/config.yaml` (or `$XDG_CONFIG_HOME/gitboard/config.yaml`).
 
+Every command finds the config file in this order; the first match wins:
+
+1. `--config <path>`
+2. `GITBOARD_CONFIG` (legacy: `GITBOARD_PROJECTS`)
+3. `$XDG_CONFIG_HOME/gitboard/config.yaml` (default `~/.config/gitboard/config.yaml`), if it exists
+4. `./config.yaml` in the current directory (legacy: `./projects.yaml`), if it exists
+5. otherwise the XDG path from step 3, which `init` and `serve` create
+
 | Section | Purpose |
 |---------|---------|
 | `llm` | Optional AI triage (`base_url`, `model`, `api_key`) |
@@ -78,7 +86,9 @@ Edit projects, views, roots, or `ui.hide_branches` while `serve` is running. The
 
 Board pulls are fast-forward only. After a pull, Gitboard runs `git submodule update --init --recursive` on the checked-out worktree.
 
-Override path with `GITBOARD_CONFIG`. LLM fields also accept env overrides: `GITBOARD_LLM_BASE_URL`, `GITBOARD_LLM_MODEL`, `GITBOARD_LLM_API_KEY`, `POLYPUS_BASE_URL`, `OPENAI_API_KEY`. Poll interval: `GITBOARD_POLL_SECONDS`. OpenInference: `GITBOARD_OPENINFERENCE_ENABLED`, `GITBOARD_OPENINFERENCE_ENDPOINT`.
+LLM fields also accept env overrides: `GITBOARD_LLM_BASE_URL`, `GITBOARD_LLM_MODEL`, `GITBOARD_LLM_API_KEY`, `POLYPUS_BASE_URL`, `OPENAI_API_KEY`. Poll interval: `GITBOARD_POLL_SECONDS`. OpenInference: `GITBOARD_OPENINFERENCE_ENABLED`.
+
+Tracing uses [olly](https://github.com/behaviorengineering/olly). `serve` and `sync` export spans over OTLP to the first endpoint set among `GITBOARD_OPENINFERENCE_ENDPOINT`, `POLYPUS_OTLP_ENDPOINT`, `openinference.endpoint`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_ENDPOINT`. An `http://` or `https://` endpoint is sent OTLP over HTTP; a bare `host:port` uses gRPC unless `OTEL_EXPORTER_OTLP_PROTOCOL` says otherwise. With no endpoint, nothing is exported. `serve` writes a failure dump (`<trace id>.json` under `openinference.failure_dump.dir`, default `~/.config/gitboard/logs/inference-failures`) when an API request fails with a 5xx; `sync` writes none.
 
 ## Commands
 
@@ -91,7 +101,9 @@ Override path with `GITBOARD_CONFIG`. LLM fields also accept env overrides: `GIT
 | `gitboard serve` | Direct dashboard (no process-compose) |
 | `gitboard version` | Print the build version |
 
-Sync helpers: `--add owner/repo --host github|gitlab|azuredevops|bitbucket`, `--remove id`, `--dry-run`, `--host github|gitlab|azuredevops|bitbucket`. Without a terminal, `sync` refuses the interactive path and names these flags. Bare `gitboard` prints an operating guide; `gitboard help` lists every command.
+Sync helpers: `--add owner/repo --host github|gitlab|azuredevops|bitbucket`, `--remove id`, `--dry-run`, `--host github|gitlab|azuredevops|bitbucket`. Without a terminal, `sync` refuses the interactive path and names these flags. `sync --dry-run` writes nothing, not even a missing config file. Bare `gitboard` prints an operating guide (with the exit codes); `gitboard help` lists every command.
+
+The dashboard API refuses requests a browser could send from another site: the `Host` header must name this server, and every write must be JSON with a same-site `Origin` (or none). `gitboard serve --allow-non-localhost` also prints a random token at startup; every write must send it in `X-Gitboard-Token` (the dashboard reads it from `/api/meta`).
 
 `go tool task sync` uses an interactive TUI (Charm huh): arrow keys, space to toggle, `/` to filter, enter to confirm. Already-tracked repos start checked. The interactive prompt currently lists GitHub and GitLab sources.
 
@@ -116,3 +128,5 @@ projects:
 - No tag is cut when every commit since the last `v*` is `docs:`, `chore:` or `ci:`, when every changed path is agent harness (`.cursor/`, `.claude/`, `AGENTS.md`, `CLAUDE.md`, `lefthook.yml`, `scripts/git-hooks/`), or when the tip commit says `[skip release]`.
 - Minor and major bumps are manual: run the **Auto patch release** workflow with the `bump` input.
 - Pin a consumer to `vX.Y.Z` only after that workflow run is green, including its `verify` job.
+- Merge the gitboard change first, then pin consumers to the post-merge `v*` tag (or the post-merge `main` SHA) in the same consumer PR as the related work. Never pin an open PR tip, and never open a pin-only follow-up PR.
+- Before opening a consumer PR, check every pin: the `go.mod` require and any gitlink or skill link that points at this module.

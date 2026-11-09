@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -25,7 +24,7 @@ func (in *Inspector) ContentOnDefault(ctx context.Context, repoPath, branch, def
 		return false, "", err
 	}
 	if defaultBranch == "" {
-		defaultBranch = "main"
+		defaultBranch = defaultBranchFallback
 	}
 	if err := ValidateBranchName(defaultBranch); err != nil {
 		return false, "", fmt.Errorf("default branch: %w", err)
@@ -34,14 +33,10 @@ func (in *Inspector) ContentOnDefault(ctx context.Context, repoPath, branch, def
 		return false, "branch is default", nil
 	}
 
-	abs, err := ExpandPath(repoPath)
+	abs, err := ResolvePath(repoPath)
 	if err != nil {
 		return false, "", fmt.Errorf("repo path: %w", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	abs = filepath.Clean(abs)
 
 	baseline, baselineReason, okBaseline := in.resolveContentBaseline(ctx, abs, defaultBranch)
 	if !okBaseline {
@@ -57,7 +52,7 @@ func (in *Inspector) ContentOnDefault(ctx context.Context, repoPath, branch, def
 	} else if code, hasCode := commandExitCode(err); hasCode && code == 1 {
 		// Not an ancestor; fall through to tip-tree comparison.
 	} else {
-		return false, "ancestor check: " + err.Error(), nil
+		return false, "", fmt.Errorf("ancestor check %s vs %s: %w", branch, baseline, err)
 	}
 
 	if _, err := in.git(ctx, abs, "diff", "--quiet", baseline, branch); err == nil {
@@ -65,15 +60,15 @@ func (in *Inspector) ContentOnDefault(ctx context.Context, repoPath, branch, def
 	} else if code, hasCode := commandExitCode(err); hasCode && code == 1 {
 		return false, "trees differ from " + baseline, nil
 	}
-	return false, "diff: " + err.Error(), nil
+	return false, "", fmt.Errorf("diff %s vs %s: %w", branch, baseline, err)
 }
 
 func (in *Inspector) resolveContentBaseline(ctx context.Context, abs, defaultBranch string) (ref, reason string, ok bool) {
-	originRef := "refs/remotes/origin/" + defaultBranch
+	originRef := originPrefix + defaultBranch
 	if _, err := in.git(ctx, abs, "rev-parse", "--verify", originRef); err == nil {
 		return originRef, "", true
 	}
-	localRef := "refs/heads/" + defaultBranch
+	localRef := headsPrefix + defaultBranch
 	if _, err := in.git(ctx, abs, "rev-parse", "--verify", localRef); err == nil {
 		return localRef, "", true
 	}

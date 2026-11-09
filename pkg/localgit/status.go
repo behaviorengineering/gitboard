@@ -1,17 +1,18 @@
+// Package localgit is public API: local checkout discovery and status through
+// the git CLI. Inspector only reads. Every write (fetch, pull, safe prune,
+// index.lock clear) goes through a Mutator, which only a MutationLease from
+// MutationCoordinator hands out, so writers to one repository are serialised.
 package localgit
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/behaviorengineering/gitboard/pkg/cliexec"
 )
@@ -58,20 +59,28 @@ type BranchSync struct {
 	Behind int    `json:"behind,omitempty"` // origin has commits local lacks.
 }
 
-// Inspector reads local git state via the git CLI.
+// Inspector reads local git state via the git CLI. It never writes; see Mutator.
 type Inspector struct {
 	Run cliexec.Exec
+
+	version *versionProbe // nil: treat git as older than 2.41.
 }
 
-// NewInspector returns an Inspector with a short timeout (status is cheap).
+// NewInspector returns an Inspector that runs git on run and probes the git
+// version once, on first use. Panics if run is nil.
 func NewInspector(run cliexec.Exec) *Inspector {
 	if run == nil {
 		panic("localgit.NewInspector: Exec is required")
 	}
-	return &Inspector{Run: run}
+	return &Inspector{Run: run, version: &versionProbe{}}
 }
 
+// git is the one place an Inspector runs git, so a nil receiver or a literal
+// Inspector{} without Run returns ErrInspectorMissing instead of panicking.
 func (in *Inspector) git(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	if in == nil || in.Run == nil {
+		return nil, ErrInspectorMissing
+	}
 	argv := append([]string{"-C", dir}, args...)
 	return in.Run.Run(ctx, "git", argv...)
 }
@@ -94,7 +103,7 @@ func (in *Inspector) InspectPath(ctx context.Context, path string) Status {
 		// Fall back to single-tree inspect.
 		wt, wtErr := in.inspectWorktree(ctx, abs, true)
 		if wtErr != nil {
-			return Status{Mapped: true, Path: abs, Error: err.Error()}
+			return Status{Mapped: true, Path: abs, Error: errors.Join(err, wtErr).Error()}
 		}
 		return summarize(abs, []Worktree{wt})
 	}
@@ -156,8 +165,16 @@ func pickPrimary(trees []Worktree) *Worktree {
 }
 
 func (in *Inspector) isGitDir(ctx context.Context, dir string) bool {
-	_, err := in.git(ctx, dir, "rev-parse", "--git-dir")
-	return err == nil
+	return in.requireGitDir(ctx, dir) == nil
+}
+
+// requireGitDir returns an error that keeps the git cause (timeout, missing
+// binary, permission) when dir is not usable as a git repository.
+func (in *Inspector) requireGitDir(ctx context.Context, dir string) error {
+	if _, err := in.git(ctx, dir, "rev-parse", "--git-dir"); err != nil {
+		return fmt.Errorf("not a git repository %s: %w", dir, err)
+	}
+	return nil
 }
 
 func (in *Inspector) listWorktrees(ctx context.Context, dir string) ([]Worktree, error) {
@@ -165,41 +182,29 @@ func (in *Inspector) listWorktrees(ctx context.Context, dir string) ([]Worktree,
 	if err != nil {
 		return nil, err
 	}
+	return parseWorktreeList(out)
+}
+
+// parseWorktreeList reads `git worktree list --porcelain`. The first entry is
+// the main worktree.
+func parseWorktreeList(out []byte) ([]Worktree, error) {
 	var trees []Worktree
-	var cur *Worktree
 	sc := bufio.NewScanner(bytes.NewReader(out))
+	open := false // a "worktree" line started the current block.
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
-			cur = nil
+			open = false
 			continue
 		}
 		key, val, _ := strings.Cut(line, " ")
-		switch key {
-		case "worktree":
-			wt := Worktree{Path: val, Main: len(trees) == 0}
-			trees = append(trees, wt)
-			cur = &trees[len(trees)-1]
-		case "bare":
-			if cur != nil {
-				cur.Bare = true
-			}
-		case "detached":
-			if cur != nil {
-				cur.Detached = true
-			}
-		case "branch":
-			if cur != nil {
-				cur.Branch = strings.TrimPrefix(val, "refs/heads/")
-			}
-		case "locked":
-			if cur != nil {
-				cur.Locked = true
-			}
-		case "prunable":
-			if cur != nil {
-				cur.Prunable = true
-			}
+		if key == "worktree" {
+			trees = append(trees, Worktree{Path: val, Main: len(trees) == 0})
+			open = true
+			continue
+		}
+		if open {
+			applyWorktreeAttr(&trees[len(trees)-1], key, val)
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -211,27 +216,38 @@ func (in *Inspector) listWorktrees(ctx context.Context, dir string) ([]Worktree,
 	return trees, nil
 }
 
+// applyWorktreeAttr sets one porcelain attribute line on wt.
+func applyWorktreeAttr(wt *Worktree, key, val string) {
+	switch key {
+	case "bare":
+		wt.Bare = true
+	case "detached":
+		wt.Detached = true
+	case "branch":
+		wt.Branch = strings.TrimPrefix(val, headsPrefix)
+	case "locked":
+		wt.Locked = true
+	case "prunable":
+		wt.Prunable = true
+	}
+}
+
 func looksLikeGitDir(path string) bool {
 	slash := filepath.ToSlash(path)
 	if strings.Contains(slash, "/.git/modules/") {
 		return true
 	}
-	base := filepath.Base(slash)
-	return base == ".git" || strings.HasSuffix(slash, "/.git")
+	return filepath.Base(slash) == gitDirName || strings.HasSuffix(slash, "/"+gitDirName)
 }
 
 // CanonicalCheckoutPath returns the working tree for path.
 // Submodule `git worktree list` often reports the git dir under .git/modules;
 // --show-toplevel follows core.worktree to the real checkout.
 func (in *Inspector) CanonicalCheckoutPath(ctx context.Context, path string) string {
-	abs, err := ExpandPath(path)
+	abs, err := ResolvePath(path)
 	if err != nil {
 		return strings.TrimSpace(path)
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	}
-	abs = filepath.Clean(abs)
 	if in == nil || !looksLikeGitDir(abs) {
 		return abs
 	}
@@ -277,8 +293,8 @@ func (in *Inspector) inspectWorktree(ctx context.Context, dir string, isMain boo
 	upOut, upErr := in.git(ctx, dir, "rev-parse", "--abbrev-ref", "@{upstream}")
 	if upErr == nil {
 		wt.Upstream = strings.TrimSpace(string(upOut))
-		ahead, behind, ok := in.leftRight(ctx, dir, "@{upstream}", "HEAD")
-		if ok {
+		ahead, behind, lrErr := in.leftRight(ctx, dir, "@{upstream}", "HEAD")
+		if lrErr == nil {
 			wt.Ahead = ahead
 			wt.Behind = behind
 		}
@@ -296,118 +312,18 @@ func (in *Inspector) exactTagAtHEAD(ctx context.Context, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func (in *Inspector) leftRight(ctx context.Context, dir, left, right string) (ahead, behind int, ok bool) {
-	// git rev-list --left-right --count A...B → "<behind>\t<ahead>" relative to B vs A
-	// With A=upstream and B=HEAD: left=commits reachable from A not B (behind), right=ahead.
+// leftRight counts commits only on right (ahead) and only on left (behind).
+// `git rev-list --left-right --count left...right` prints "<left> <right>".
+func (in *Inspector) leftRight(ctx context.Context, dir, left, right string) (ahead, behind int, err error) {
 	out, err := in.git(ctx, dir, "rev-list", "--left-right", "--count", left+"..."+right)
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, fmt.Errorf("compare %s...%s: %w", left, right, err)
 	}
-	parts := strings.Fields(strings.TrimSpace(string(out)))
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	behind, err1 := strconv.Atoi(parts[0])
-	ahead, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		return 0, 0, false
-	}
-	return ahead, behind, true
-}
-
-// EnrichOriginSync compares each local branch to origin/<same name>.
-// DefaultAhead/DefaultBehind copy the default-branch row when both refs exist.
-// Comparisons run in parallel (capped) to limit wall time when many branches share an origin twin.
-const originCompareParallel = 8
-
-func (in *Inspector) EnrichOriginSync(ctx context.Context, st *Status) {
-	if in == nil || st == nil || !st.Mapped || st.Path == "" || st.Error != "" {
-		return
-	}
-	if def, ok := in.defaultBranch(ctx, st.Path); ok {
-		st.DefaultBranch = def
-	}
-	localNames, err := in.listRefShortNames(ctx, st.Path, "refs/heads/")
+	behind, ahead, err = parseLeftRightCount(string(out))
 	if err != nil {
-		if st.Error == "" {
-			st.Error = "list local branches: " + err.Error()
-		}
-		return
+		return 0, 0, fmt.Errorf("compare %s...%s: %w", left, right, err)
 	}
-	remoteNames, err := in.listRefShortNames(ctx, st.Path, "refs/remotes/origin/")
-	if err != nil {
-		if st.Error == "" {
-			st.Error = "list origin branches: " + err.Error()
-		}
-		return
-	}
-	remoteSet := make(map[string]struct{}, len(remoteNames))
-	for _, n := range remoteNames {
-		n = strings.TrimPrefix(n, "origin/")
-		if n == "" || n == "HEAD" {
-			continue
-		}
-		remoteSet[n] = struct{}{}
-	}
-	var names []string
-	for _, name := range localNames {
-		if _, ok := remoteSet[name]; ok {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		st.OriginSync = nil
-		return
-	}
-
-	syncs := make([]BranchSync, len(names))
-	var wg sync.WaitGroup
-	var failed atomic.Bool
-	sem := make(chan struct{}, originCompareParallel)
-	for i, name := range names {
-		if ctx.Err() != nil {
-			failed.Store(true)
-			break
-		}
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int, name string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if ctx.Err() != nil {
-				failed.Store(true)
-				return
-			}
-			ahead, behind, ok := in.leftRight(ctx, st.Path, "refs/remotes/origin/"+name, "refs/heads/"+name)
-			if !ok {
-				failed.Store(true)
-				return
-			}
-			syncs[i] = BranchSync{Name: name, Ahead: ahead, Behind: behind}
-		}(i, name)
-	}
-	wg.Wait()
-
-	if failed.Load() {
-		if st.Error == "" {
-			st.Error = "could not compare local branches to origin"
-		}
-		st.OriginSync = nil
-		return
-	}
-	out := make([]BranchSync, 0, len(syncs))
-	for _, s := range syncs {
-		if s.Name == "" {
-			continue
-		}
-		out = append(out, s)
-		if s.Name == st.DefaultBranch {
-			st.DefaultAhead = s.Ahead
-			st.DefaultBehind = s.Behind
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	st.OriginSync = out
+	return ahead, behind, nil
 }
 
 func (in *Inspector) listRefShortNames(ctx context.Context, dir, prefix string) ([]string, error) {
@@ -428,23 +344,6 @@ func (in *Inspector) listRefShortNames(ctx context.Context, dir, prefix string) 
 		return nil, err
 	}
 	return names, nil
-}
-
-func (in *Inspector) defaultBranch(ctx context.Context, dir string) (string, bool) {
-	out, err := in.git(ctx, dir, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
-	if err == nil {
-		ref := strings.TrimSpace(string(out))
-		ref = strings.TrimPrefix(ref, "refs/remotes/origin/")
-		if ref != "" {
-			return ref, true
-		}
-	}
-	for _, name := range []string{"main", "master"} {
-		if _, err := in.git(ctx, dir, "rev-parse", "--verify", "refs/remotes/origin/"+name); err == nil {
-			return name, true
-		}
-	}
-	return "", false
 }
 
 // OriginRemote returns the origin URL for a checkout.

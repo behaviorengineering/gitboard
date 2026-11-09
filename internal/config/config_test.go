@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 )
 
 func TestLoadValidProjects(t *testing.T) {
@@ -50,18 +51,18 @@ func TestLoadRejectsBadHost(t *testing.T) {
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	doc := config.File{
-		LLM: config.LLM{
+	doc := boardconfig.File{
+		LLM: boardconfig.LLM{
 			BaseURL: "http://127.0.0.1:1320/v1",
 			Model:   "test-model",
 			APIKey:  "secret",
 		},
-		Sync: config.SyncSources{
-			GitHub: config.GitHubSync{Orgs: []string{"behaviorengineering"}},
-			GitLab: config.GitLabSync{Groups: []string{"behaviorengineering"}},
+		Sync: boardconfig.SyncSources{
+			GitHub: boardconfig.GitHubSync{Orgs: []string{"behaviorengineering"}},
+			GitLab: boardconfig.GitLabSync{Groups: []string{"behaviorengineering"}},
 		},
-		Projects: []config.Project{{
-			ID: "demo", Label: "Demo", Host: config.HostGitHub, Path: "org/repo",
+		Projects: []boardconfig.Project{{
+			ID: "demo", Label: "Demo", Host: boardconfig.HostGitHub, Path: "org/repo",
 		}},
 	}
 	if err := config.Save(path, doc); err != nil {
@@ -106,6 +107,24 @@ func TestInitDoesNotOverwrite(t *testing.T) {
 	}
 }
 
+// The init template spells out the dump retention; it must match the
+// defaults EffectiveOpenInference applies when the file omits them.
+func TestInitTemplateMatchesDumpDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if _, err := config.Init(path); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dump := doc.OpenInference.FailureDump
+	if dump.MaxAgeHours != config.DefaultDumpMaxAgeHours || dump.MaxFiles != config.DefaultDumpMaxFiles {
+		t.Fatalf("template max_age_hours=%d max_files=%d, defaults %d and %d",
+			dump.MaxAgeHours, dump.MaxFiles, config.DefaultDumpMaxAgeHours, config.DefaultDumpMaxFiles)
+	}
+}
+
 func TestDefaultPathUsesConfigEnv(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "custom.yaml")
@@ -134,8 +153,8 @@ func TestDefaultPathPrefersUserConfig(t *testing.T) {
 }
 
 func TestEffectiveLLMEnvOverridesFile(t *testing.T) {
-	doc := config.File{
-		LLM: config.LLM{
+	doc := boardconfig.File{
+		LLM: boardconfig.LLM{
 			BaseURL: "http://file/v1",
 			Model:   "file-model",
 			APIKey:  "file-key",
@@ -144,18 +163,18 @@ func TestEffectiveLLMEnvOverridesFile(t *testing.T) {
 	t.Setenv("GITBOARD_LLM_BASE_URL", "http://env/v1")
 	t.Setenv("GITBOARD_LLM_MODEL", "env-model")
 	t.Setenv("GITBOARD_LLM_API_KEY", "env-key")
-	got := doc.EffectiveLLM()
+	got := config.EffectiveLLM(doc)
 	if got.BaseURL != "http://env/v1" || got.Model != "env-model" || got.APIKey != "env-key" {
 		t.Fatalf("effective: %+v", got)
 	}
 }
 
-func TestDirUsesXDG(t *testing.T) {
+func TestAgentsDirUsesXDG(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
-	want := filepath.Join(xdg, "gitboard")
-	if got := config.Dir(); got != want {
-		t.Fatalf("Dir=%s want %s", got, want)
+	want := filepath.Join(xdg, "gitboard", "agents")
+	if got := config.AgentsDir(); got != want {
+		t.Fatalf("AgentsDir=%s want %s", got, want)
 	}
 }
 
@@ -188,95 +207,33 @@ projects:
 
 func TestEffectivePollSeconds(t *testing.T) {
 	t.Setenv("GITBOARD_POLL_SECONDS", "")
-	doc := config.File{}
-	if got := doc.EffectivePollSeconds(); got != config.DefaultPollSeconds {
+	doc := boardconfig.File{}
+	if got := config.EffectivePollSeconds(doc); got != config.DefaultPollSeconds {
 		t.Fatalf("default=%d want %d", got, config.DefaultPollSeconds)
 	}
 	zero := 0
 	doc.UI.PollSeconds = &zero
-	if got := doc.EffectivePollSeconds(); got != 0 {
+	if got := config.EffectivePollSeconds(doc); got != 0 {
 		t.Fatalf("explicit zero=%d", got)
 	}
 	forty := 40
 	doc.UI.PollSeconds = &forty
 	t.Setenv("GITBOARD_POLL_SECONDS", "15")
-	if got := doc.EffectivePollSeconds(); got != 15 {
+	if got := config.EffectivePollSeconds(doc); got != 15 {
 		t.Fatalf("env override=%d", got)
-	}
-}
-
-func TestEffectiveUpstreamSeconds(t *testing.T) {
-	doc := config.File{}
-	if got := doc.EffectiveHeadsSeconds(); got != config.DefaultHeadsSeconds {
-		t.Fatalf("heads default=%d", got)
-	}
-	if got := doc.EffectiveMergedSeconds(); got != config.DefaultMergedSeconds {
-		t.Fatalf("merged default=%d", got)
-	}
-	if got := doc.EffectiveFetchSeconds(); got != config.DefaultFetchSeconds {
-		t.Fatalf("fetch default=%d", got)
-	}
-	if got := doc.EffectiveScanSeconds(); got != config.DefaultScanSeconds {
-		t.Fatalf("scan default=%d", got)
-	}
-	zero := 0
-	doc.Upstream.HeadsSeconds = &zero
-	doc.Upstream.MergedSeconds = &zero
-	doc.Local.FetchSeconds = &zero
-	doc.Local.ScanSeconds = &zero
-	if got := doc.EffectiveHeadsSeconds(); got != 0 {
-		t.Fatalf("heads explicit zero=%d", got)
-	}
-	if got := doc.EffectiveMergedSeconds(); got != 0 {
-		t.Fatalf("merged explicit zero=%d", got)
-	}
-	if got := doc.EffectiveFetchSeconds(); got != 0 {
-		t.Fatalf("fetch explicit zero=%d", got)
-	}
-	if got := doc.EffectiveScanSeconds(); got != 0 {
-		t.Fatalf("scan explicit zero=%d", got)
-	}
-	neg := -5
-	doc.Upstream.HeadsSeconds = &neg
-	doc.Local.FetchSeconds = &neg
-	doc.Local.ScanSeconds = &neg
-	if got := doc.EffectiveHeadsSeconds(); got != config.DefaultHeadsSeconds {
-		t.Fatalf("heads negative=%d", got)
-	}
-	if got := doc.EffectiveFetchSeconds(); got != config.DefaultFetchSeconds {
-		t.Fatalf("fetch negative=%d", got)
-	}
-	if got := doc.EffectiveScanSeconds(); got != config.DefaultScanSeconds {
-		t.Fatalf("scan negative=%d", got)
-	}
-}
-
-func TestEffectiveViewsImplicitDefault(t *testing.T) {
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "a", Label: "A", Host: config.HostGitHub, Path: "o/a"},
-			{ID: "b", Label: "B", Host: config.HostGitHub, Path: "o/b"},
-		},
-	}
-	views := doc.EffectiveViews()
-	if len(views) != 1 || views[0].ID != config.DefaultViewID {
-		t.Fatalf("views: %+v", views)
-	}
-	if len(views[0].Projects) != 2 {
-		t.Fatalf("membership: %+v", views[0].Projects)
 	}
 }
 
 func TestProjectsForViewFilters(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "a", Label: "A", Host: config.HostGitHub, Path: "o/a"},
-			{ID: "b", Label: "B", Host: config.HostGitHub, Path: "o/b"},
-			{ID: "c", Label: "C", Host: config.HostGitHub, Path: "o/c"},
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "a", Label: "A", Host: boardconfig.HostGitHub, Path: "o/a"},
+			{ID: "b", Label: "B", Host: boardconfig.HostGitHub, Path: "o/b"},
+			{ID: "c", Label: "C", Host: boardconfig.HostGitHub, Path: "o/c"},
 		},
-		Views: []config.View{
+		Views: []boardconfig.View{
 			{ID: "work", Label: "Work", Projects: []string{"a", "c", "missing"}},
 		},
 	}
@@ -322,5 +279,24 @@ views:
 	}
 	if _, err := config.Load(path); err == nil {
 		t.Fatal("expected duplicate view id error")
+	}
+}
+
+func TestLoadRejectsBadPollEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("projects: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITBOARD_POLL_SECONDS", "30s")
+	if _, err := config.Load(path); err == nil {
+		t.Fatal("a GITBOARD_POLL_SECONDS typo must fail Load instead of falling back")
+	}
+	t.Setenv("GITBOARD_POLL_SECONDS", "15")
+	doc, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config.EffectivePollSeconds(doc); got != 15 {
+		t.Fatalf("poll = %d", got)
 	}
 }

@@ -10,40 +10,47 @@ import (
 	"testing"
 )
 
-// knownMutators lists Inspector methods that must acquire MutationCoordinator
-// ownership at the dashboard (or equivalent) call boundary. Update this list
-// when adding a new local Git writer, and wire the coordinator in the same change.
-var knownMutators = map[string]struct{}{
-	"FetchOrigin":                    {},
-	"FetchOriginBranches":            {},
-	"FetchOriginCached":              {},
-	"FetchOriginSmart":               {},
-	"PullFFOnly":                     {},
-	"PullFFOnlyWithPhases":           {},
-	"RemoveSafeCheckout":             {},
-	"EnsureWritableIndex":            {},
-	"EnsureWritableIndexAge":         {},
-	"InspectSync":                    {},
-	"resetUnusedBranchToOrigin":      {},
-	"ensureDefaultReadyForSafePrune": {},
-	"ensureBranchFFFromOrigin":       {},
-	"updateSubmodules":               {},
+// TestInspectorHasNoMutators keeps Inspector read-only: any method that looks
+// like a git writer belongs on Mutator, which only a held MutationLease hands out.
+func TestInspectorHasNoMutators(t *testing.T) {
+	for name := range methodsOf(t, "Inspector") {
+		if looksLikeMutator(name) {
+			t.Errorf("Inspector.%s looks like a git writer; move it onto Mutator so it runs under the lease", name)
+		}
+	}
 }
 
-func TestMutatorInventoryIsDocumented(t *testing.T) {
-	root := "."
-	entries, err := os.ReadDir(root)
+// TestMutatorExportsBindToLease checks that every exported Mutator method calls
+// bind, so a path outside the lease's common git directory is refused.
+func TestMutatorExportsBindToLease(t *testing.T) {
+	methods := methodsOf(t, "Mutator")
+	if len(methods) == 0 {
+		t.Fatal("no Mutator methods found")
+	}
+	for name, fn := range methods {
+		if !ast.IsExported(name) {
+			continue
+		}
+		if !callsSelector(fn, "bind") {
+			t.Errorf("Mutator.%s must call m.bind before running git", name)
+		}
+	}
+}
+
+func methodsOf(t *testing.T, recvName string) map[string]*ast.FuncDecl {
+	t.Helper()
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fset := token.NewFileSet()
-	found := map[string]struct{}{}
+	found := map[string]*ast.FuncDecl{}
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		src, err := parser.ParseFile(fset, filepath.Join(root, name), nil, 0)
+		src, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
@@ -52,44 +59,46 @@ func TestMutatorInventoryIsDocumented(t *testing.T) {
 			if !ok || fn.Recv == nil || fn.Name == nil {
 				continue
 			}
-			if !receiverIsInspector(fn.Recv) {
-				continue
-			}
-			n := fn.Name.Name
-			if looksLikeMutator(n, fn) {
-				found[n] = struct{}{}
+			if receiverName(fn.Recv) == recvName {
+				found[fn.Name.Name] = fn
 			}
 		}
 	}
-
-	for name := range found {
-		if _, ok := knownMutators[name]; !ok {
-			t.Errorf("Inspector.%s looks like a Git mutator but is not in knownMutators; wire MutationCoordinator and update the inventory", name)
-		}
-	}
-	for name := range knownMutators {
-		if _, ok := found[name]; !ok {
-			t.Errorf("knownMutators lists %s but no Inspector method was found; remove stale inventory entry", name)
-		}
-	}
+	return found
 }
 
-func receiverIsInspector(recv *ast.FieldList) bool {
+func receiverName(recv *ast.FieldList) string {
 	if recv == nil || len(recv.List) == 0 {
-		return false
+		return ""
 	}
 	switch t := recv.List[0].Type.(type) {
 	case *ast.StarExpr:
 		if id, ok := t.X.(*ast.Ident); ok {
-			return id.Name == "Inspector"
+			return id.Name
 		}
 	case *ast.Ident:
-		return t.Name == "Inspector"
+		return t.Name
 	}
-	return false
+	return ""
 }
 
-func looksLikeMutator(name string, fn *ast.FuncDecl) bool {
+func callsSelector(fn *ast.FuncDecl, sel string) bool {
+	found := false
+	ast.Inspect(fn, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if s, ok := call.Fun.(*ast.SelectorExpr); ok && s.Sel.Name == sel {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func looksLikeMutator(name string) bool {
 	lower := strings.ToLower(name)
 	prefixes := []string{"fetch", "pull", "push", "remove", "reset", "ensure", "update", "write", "delete", "switch", "checkout", "merge"}
 	for _, p := range prefixes {
@@ -97,9 +106,5 @@ func looksLikeMutator(name string, fn *ast.FuncDecl) bool {
 			return true
 		}
 	}
-	if strings.Contains(lower, "inspectsync") {
-		return true
-	}
-	_ = fn
 	return false
 }

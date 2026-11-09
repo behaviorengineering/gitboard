@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/internal/observability"
 	"github.com/behaviorengineering/gitboard/internal/server"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/dashboard"
-	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 func TestDashboardViewQuery(t *testing.T) {
@@ -24,14 +25,16 @@ func TestDashboardViewQuery(t *testing.T) {
 	fx.responses["mr list -R acme/lib --output json"] = []byte(`[]`)
 	fx.responses["--merged"] = []byte(`[]`)
 
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
+	dash := newDash(fx, nil)
 	mux := server.NewMux(server.Options{
-		Doc: config.File{
-			Projects: []config.Project{
-				{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
-				{ID: "gl-lib", Label: "Lib", Host: config.HostGitLab, Path: "acme/lib"},
+		Addr: testAddr,
+		Log:  observability.NewLogger(),
+		Doc: boardconfig.File{
+			Projects: []boardconfig.Project{
+				{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
+				{ID: "gl-lib", Label: "Lib", Host: boardconfig.HostGitLab, Path: "acme/lib"},
 			},
-			Views: []config.View{
+			Views: []boardconfig.View{
 				{ID: "work", Label: "Work", Projects: []string{"gh-app"}},
 			},
 		},
@@ -40,7 +43,7 @@ func TestDashboardViewQuery(t *testing.T) {
 		PollSeconds: 30,
 	})
 
-	res := httptest.NewRequest(http.MethodGet, "/api/dashboard?view=work", nil)
+	res := apiRequest(http.MethodGet, "/api/dashboard?view=work", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusOK {
@@ -61,7 +64,7 @@ func TestDashboardViewQuery(t *testing.T) {
 		t.Fatalf("projects: %d", len(projects))
 	}
 
-	res = httptest.NewRequest(http.MethodGet, "/api/dashboard?view=nope", nil)
+	res = apiRequest(http.MethodGet, "/api/dashboard?view=nope", nil)
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
 	if rec.Code != http.StatusBadRequest {
@@ -72,12 +75,12 @@ func TestDashboardViewQuery(t *testing.T) {
 func TestSyncProjectAddRemoveAndViews(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 		},
-		Sync: config.SyncSources{
-			GitHub: config.GitHubSync{Orgs: []string{"acme"}},
+		Sync: boardconfig.SyncSources{
+			GitHub: boardconfig.GitHubSync{Orgs: []string{"acme"}},
 		},
 	}
 	if err := config.Save(path, doc); err != nil {
@@ -89,8 +92,10 @@ func TestSyncProjectAddRemoveAndViews(t *testing.T) {
 	}
 
 	fx := testFake()
-	dash := dashboard.New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), nil)
+	dash := newDash(fx, nil)
 	mux := server.NewMux(server.Options{
+		Addr:        testAddr,
+		Log:         observability.NewLogger(),
 		ConfigPath:  path,
 		Doc:         loaded,
 		Dash:        dash,
@@ -98,7 +103,7 @@ func TestSyncProjectAddRemoveAndViews(t *testing.T) {
 		PollSeconds: 30,
 	})
 
-	res := httptest.NewRequest(http.MethodPost, "/api/sync/projects", bytes.NewBufferString(`{"action":"add","host":"github","path":"acme/beta"}`))
+	res := apiRequest(http.MethodPost, "/api/sync/projects", bytes.NewBufferString(`{"action":"add","host":"github","path":"acme/beta"}`))
 	res.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
@@ -106,7 +111,7 @@ func TestSyncProjectAddRemoveAndViews(t *testing.T) {
 		t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
 	}
 
-	res = httptest.NewRequest(http.MethodPut, "/api/views", bytes.NewBufferString(`{"views":[{"id":"work","label":"Work","projects":["gh-app","beta"]}]}`))
+	res = apiRequest(http.MethodPut, "/api/views", bytes.NewBufferString(`{"views":[{"id":"work","label":"Work","projects":["gh-app","beta"]}]}`))
 	res.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
@@ -127,7 +132,7 @@ func TestSyncProjectAddRemoveAndViews(t *testing.T) {
 		t.Fatalf("views: %+v", got.Views)
 	}
 
-	res = httptest.NewRequest(http.MethodPost, "/api/sync/projects", bytes.NewBufferString(`{"action":"remove","id":"beta"}`))
+	res = apiRequest(http.MethodPost, "/api/sync/projects", bytes.NewBufferString(`{"action":"remove","id":"beta"}`))
 	res.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
@@ -149,7 +154,7 @@ func TestSyncProjectAddRemoveAndViews(t *testing.T) {
 func TestSyncSourcesPut(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	doc := config.File{Projects: []config.Project{}}
+	doc := boardconfig.File{Projects: []boardconfig.Project{}}
 	if err := config.Save(path, doc); err != nil {
 		t.Fatal(err)
 	}
@@ -157,14 +162,16 @@ func TestSyncSourcesPut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dash := dashboard.New(remotegit.NewGitHub(testFake()), remotegit.NewGitLab(testFake()), remotegit.NewAzureDevOps(testFake()), remotegit.NewBitbucket(testFake()), nil)
+	dash := newDash(testFake(), nil)
 	mux := server.NewMux(server.Options{
+		Addr:       testAddr,
+		Log:        observability.NewLogger(),
 		ConfigPath: path,
 		Doc:        loaded,
 		Dash:       dash,
 		Commands:   dashboard.NewCommands(dash),
 	})
-	res := httptest.NewRequest(http.MethodPut, "/api/sync/sources", bytes.NewBufferString(`{"github_orgs":["acme"],"gitlab_groups":[]}`))
+	res := apiRequest(http.MethodPut, "/api/sync/sources", bytes.NewBufferString(`{"github_orgs":["acme"],"gitlab_groups":[]}`))
 	res.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
@@ -183,9 +190,9 @@ func TestSyncSourcesPut(t *testing.T) {
 func TestLocalRootsAndProjectLocalPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 		},
 	}
 	if err := config.Save(path, doc); err != nil {
@@ -195,15 +202,17 @@ func TestLocalRootsAndProjectLocalPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dash := dashboard.New(remotegit.NewGitHub(testFake()), remotegit.NewGitLab(testFake()), remotegit.NewAzureDevOps(testFake()), remotegit.NewBitbucket(testFake()), nil)
+	dash := newDash(testFake(), nil)
 	mux := server.NewMux(server.Options{
+		Addr:       testAddr,
+		Log:        observability.NewLogger(),
 		ConfigPath: path,
 		Doc:        loaded,
 		Dash:       dash,
 		Commands:   dashboard.NewCommands(dash),
 	})
 
-	res := httptest.NewRequest(http.MethodPut, "/api/local/roots", bytes.NewBufferString(`{"roots":["~/code","~/code","~/work"]}`))
+	res := apiRequest(http.MethodPut, "/api/local/roots", bytes.NewBufferString(`{"roots":["~/code","~/code","~/work"]}`))
 	res.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)
@@ -218,7 +227,7 @@ func TestLocalRootsAndProjectLocalPath(t *testing.T) {
 		t.Fatalf("roots: %+v", got.Local.Roots)
 	}
 
-	res = httptest.NewRequest(http.MethodPost, "/api/sync/projects", bytes.NewBufferString(`{"action":"set_local_path","id":"gh-app","local_path":"~/code/app"}`))
+	res = apiRequest(http.MethodPost, "/api/sync/projects", bytes.NewBufferString(`{"action":"set_local_path","id":"gh-app","local_path":"~/code/app"}`))
 	res.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, res)

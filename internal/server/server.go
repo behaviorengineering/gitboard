@@ -1,30 +1,25 @@
 package server
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
+	ollyhttp "github.com/behaviorengineering/olly/pkg/http"
+
+	"github.com/behaviorengineering/gitboard/internal/ai/pruneagent"
+	"github.com/behaviorengineering/gitboard/internal/ai/triage"
 	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/internal/observability"
-	"github.com/behaviorengineering/gitboard/internal/pruneagent"
-	"github.com/behaviorengineering/gitboard/internal/servertiming"
-	"github.com/behaviorengineering/gitboard/internal/triage"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/dashboard"
-	"github.com/behaviorengineering/strop/agentsession"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/codes"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 )
 
 //go:embed static/*
@@ -32,22 +27,48 @@ var staticFS embed.FS
 
 const maxJSONBody = 4 << 20 // 4 MiB.
 
+// Request budgets, one per route family. Each handler sets its budget once
+// from the request context; the services below take the deadline as given.
+const (
+	metaBudget        = 5 * time.Second
+	dashboardBudget   = 60 * time.Second
+	projectRowBudget  = 15 * time.Second
+	failuresBudget    = 45 * time.Second
+	triageBudget      = 120 * time.Second
+	pruneBudget       = 60 * time.Second
+	pullBudget        = 90 * time.Second
+	investigateBudget = 90 * time.Second
+	agentBudget       = 120 * time.Second
+	sessionBudget     = 15 * time.Second
+	syncBudget        = 3 * time.Minute
+)
+
 // HTTP error message constants for repeated handler responses.
 const (
 	errMethodNotAllowed     = "method not allowed"
 	errDashboardUnavailable = "dashboard unavailable"
-	errForgeClientMissing   = "forge client missing"
-	errUnknownProject       = "unknown project"
+	errPruneUnavailable     = "prune agent unavailable"
 )
+
+// defaultServiceName names the server spans when Options.ServiceName is empty.
+const defaultServiceName = "gitboard"
 
 // Options configures the HTTP server.
 type Options struct {
+	// Addr is the listen address. The API accepts only Host headers that
+	// reach this address (see hostsFor).
 	Addr string
+	// Token, when set, must arrive in X-Gitboard-Token on every mutating API
+	// request. GET /api/meta serves it to the same-origin UI. serve sets it
+	// with --allow-non-localhost.
+	Token string
+	// ServiceName names the API server spans. Empty uses "gitboard".
+	ServiceName string
 	// ConfigPath, when set, reloads the full config file when mtime advances
 	// (so gitboard sync and ui edits update a running board).
 	ConfigPath string
 	// Doc is the initial full config snapshot (from config.Load).
-	Doc         config.File
+	Doc         boardconfig.File
 	Dash        *dashboard.Service
 	Commands    *dashboard.Commands
 	Triage      *triage.Analyzer
@@ -56,417 +77,136 @@ type Options struct {
 	Log         observability.Logger
 }
 
-// NewMux returns the gitboard HTTP handler.
-func NewMux(opts Options) http.Handler {
-	mux := http.NewServeMux()
-	sub, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		panic("server: embed static: " + err.Error())
-	}
-	fileServer := http.FileServer(http.FS(sub))
+// api holds the handlers' shared state: the options and the live config.
+type api struct {
+	opts Options
+	live *configLive
+	log  observability.Logger
+}
 
+// newAPI validates opts and builds the live config. Panics if opts.Log is
+// nil (required dependency at wire-up).
+func newAPI(opts Options) *api {
+	if opts.Log == nil {
+		panic("server.NewMux: Log is required")
+	}
+	poll := opts.PollSeconds
+	if poll == 0 {
+		poll = config.EffectivePollSeconds(opts.Doc)
+	}
 	clearCaches := func() {
 		if opts.Dash != nil {
 			opts.Dash.ClearCaches()
 		}
 	}
-	poll := opts.PollSeconds
-	if poll == 0 {
-		poll = opts.Doc.EffectivePollSeconds()
+	return &api{
+		opts: opts,
+		live: newConfigLive(opts.ConfigPath, opts.Doc, poll, clearCaches, opts.Log),
+		log:  opts.Log,
 	}
-	log := opts.Log
-	if log == nil {
-		log = observability.NewLogger()
-	}
-	live := newConfigLive(opts.ConfigPath, opts.Doc, poll, clearCaches, log)
+}
 
-	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		if r.Method == http.MethodGet {
-			_, _ = w.Write([]byte("ok\n"))
-		}
-	})
-
-	mux.HandleFunc("/api/meta", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		doc, poll, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		payload := map[string]any{
-			"poll_interval_seconds": poll,
-			"ui":                    boardUIConfig(doc),
-			"views":                 dashboard.ViewSummaries(doc),
-		}
-		if opts.Dash != nil {
-			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-			defer cancel()
-			payload["tooling"] = opts.Dash.ToolingStatus(ctx)
-		}
-		_ = writeJSON(w, payload)
-	})
-
-	mux.HandleFunc("/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Dash == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		fresh := r.URL.Query().Get("fresh") == "1" || strings.EqualFold(r.URL.Query().Get("fresh"), "true")
-		viewID := strings.TrimSpace(r.URL.Query().Get("view"))
-		stream := r.URL.Query().Get("stream") == "1" || strings.EqualFold(r.URL.Query().Get("stream"), "true")
-		if stream {
-			writeDashboardStream(w, r, live, opts, fresh, viewID)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-		defer cancel()
-		doc, poll, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		timing := servertiming.New()
-		var payload board.Dashboard
-		var err error
-		timing.Track("collect", func() {
-			payload, err = opts.Dash.Collect(ctx, doc, fresh, viewID)
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		payload.PollIntervalSeconds = poll
-		payload.UI = boardUIConfig(doc)
-		if err := ctx.Err(); err != nil {
-			http.Error(w, "dashboard timed out or canceled", http.StatusGatewayTimeout)
-			return
-		}
-		cacheDesc := "warm"
-		if fresh {
-			cacheDesc = "fresh"
-		}
-		timing.Add("cache", 0, cacheDesc)
-		timing.WriteHeader(w)
-		_ = writeJSON(w, payload)
-	})
-
-	registerSyncRoutes(mux, live, opts)
-
-	mux.HandleFunc("/api/failures", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Dash == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		doc, _, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		projectID := strings.TrimSpace(r.URL.Query().Get("project"))
-		runID := strings.TrimSpace(r.URL.Query().Get("run_id"))
-		p, ok := dashboard.FindProject(doc.Projects, projectID)
-		if !ok {
-			http.Error(w, errUnknownProject, http.StatusBadRequest)
-			return
-		}
-		client := dashboard.ClientFor(opts.Dash, p)
-		if client == nil {
-			http.Error(w, errForgeClientMissing, http.StatusInternalServerError)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
-		defer cancel()
-		jobs, err := client.FailedJobs(ctx, p, runID)
-		if err != nil {
-			http.Error(w, "failed to list jobs", http.StatusBadGateway)
-			return
-		}
-		_ = writeJSON(w, map[string]any{"jobs": jobs})
-	})
-
-	mux.HandleFunc("/api/triage", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Dash == nil || opts.Triage == nil {
-			http.Error(w, "triage unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		var body triage.Request
-		if err := decodeJSONBody(w, r, &body); err != nil {
-			return
-		}
-		doc, _, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		p, ok := dashboard.FindProject(doc.Projects, body.ProjectID)
-		if !ok {
-			http.Error(w, errUnknownProject, http.StatusBadRequest)
-			return
-		}
-		client := dashboard.ClientFor(opts.Dash, p)
-		if client == nil {
-			http.Error(w, errForgeClientMissing, http.StatusInternalServerError)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
-		defer cancel()
-		if strings.TrimSpace(body.Log) == "" {
-			logText, err := client.JobLog(ctx, p, body.RunID, body.JobID)
-			if err != nil {
-				http.Error(w, "failed to fetch job log", http.StatusBadGateway)
-				return
-			}
-			body.Log = logText
-		}
-		resp, err := opts.Triage.Analyze(ctx, body)
-		if err != nil {
-			http.Error(w, "triage failed", http.StatusBadGateway)
-			return
-		}
-		_ = writeJSON(w, resp)
-	})
-
-	mux.HandleFunc("/api/prune/safe", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Commands == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		var body dashboard.PruneSafeRequest
-		if err := decodeJSONBody(w, r, &body); err != nil {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-		defer cancel()
-		doc, _, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		if err := opts.Commands.PruneSafe(ctx, doc, body); err != nil {
-			if writeCommandError(w, err) {
-				return
-			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		_ = writeJSON(w, map[string]any{"ok": true})
-	})
-
-	mux.HandleFunc("/api/pull/ff", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Commands == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		var body dashboard.PullFFRequest
-		if err := decodeJSONBody(w, r, &body); err != nil {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-		defer cancel()
-		doc, _, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		timing := servertiming.New()
-		var result dashboard.PullFFResult
-		var err error
-		timing.Track("pull", func() {
-			result, err = opts.Commands.PullFF(ctx, doc, body)
-		})
-		if err != nil {
-			if writeCommandError(w, err) {
-				return
-			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if result.FetchMs > 0 {
-			timing.Add("pull_fetch", time.Duration(result.FetchMs)*time.Millisecond, "")
-		}
-		if result.SubmodulePreMs > 0 {
-			timing.Add("pull_submodule_pre", time.Duration(result.SubmodulePreMs)*time.Millisecond, "")
-		}
-		if result.MergeMs > 0 {
-			timing.Add("pull_merge", time.Duration(result.MergeMs)*time.Millisecond, "")
-		}
-		if result.SubmodulePostMs > 0 {
-			timing.Add("pull_submodule_post", time.Duration(result.SubmodulePostMs)*time.Millisecond, "")
-		}
-		timing.WriteHeader(w)
-		_ = writeJSON(w, result)
-	})
-
-	mux.HandleFunc("/api/local/sync/investigate", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Commands == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		var body dashboard.SyncInvestigationRequest
-		if err := decodeJSONBody(w, r, &body); err != nil {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-		defer cancel()
-		doc, _, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		result, err := opts.Commands.InvestigateSync(ctx, doc, body)
-		if err != nil {
-			code := http.StatusInternalServerError
-			if dashboard.IsBadRequest(err) {
-				code = http.StatusBadRequest
-			}
-			http.Error(w, err.Error(), code)
-			return
-		}
-		_ = writeJSON(w, result)
-	})
-
-	mux.HandleFunc("/api/agents/prune/investigate", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		if opts.Prune == nil {
-			http.Error(w, "prune agent unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if opts.Dash == nil || opts.Commands == nil {
-			http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
-			return
-		}
-		var body pruneagent.Request
-		if err := decodeJSONBody(w, r, &body); err != nil {
-			return
-		}
-		if strings.TrimSpace(body.ProjectID) == "" {
-			http.Error(w, "project_id is required", http.StatusBadRequest)
-			return
-		}
-		doc, _, ok := liveDoc(w, live)
-		if !ok {
-			return
-		}
-		if _, ok := dashboard.FindProject(doc.Projects, body.ProjectID); !ok {
-			http.Error(w, errUnknownProject, http.StatusBadRequest)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
-		defer cancel()
-		abs, err := opts.Commands.RequireMappedPath(ctx, doc, body.ProjectID, body.WorktreePath)
-		if err != nil {
-			code := http.StatusBadRequest
-			if !dashboard.IsBadRequest(err) {
-				code = http.StatusInternalServerError
-			}
-			http.Error(w, err.Error(), code)
-			return
-		}
-		body.WorktreePath = abs
-		tr := otel.Tracer("gitboard")
-		ctx, span := tr.Start(ctx, "agents.prune.investigate")
-		defer span.End()
-		resp, err := opts.Prune.Investigate(ctx, body)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			http.Error(w, "investigate failed", http.StatusBadGateway)
-			return
-		}
-		span.SetStatus(codes.Ok, "")
-		_ = writeJSON(w, resp)
-	})
-
-	mux.HandleFunc("/api/agents/sessions/", func(w http.ResponseWriter, r *http.Request) {
-		if opts.Prune == nil || opts.Prune.Store == nil {
-			http.Error(w, "prune agent unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		rest := strings.TrimPrefix(r.URL.Path, "/api/agents/sessions/")
-		rest = strings.Trim(rest, "/")
-		parts := strings.Split(rest, "/")
-		if len(parts) == 0 || parts[0] == "" {
-			http.Error(w, "missing session id", http.StatusBadRequest)
-			return
-		}
-		id := parts[0]
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-		defer cancel()
-		if len(parts) == 2 && parts[1] == "failure" && r.Method == http.MethodGet {
-			dir, err := opts.Prune.Store.Dir(id)
-			if err != nil {
-				http.Error(w, "invalid session id", http.StatusBadRequest)
-				return
-			}
-			path := filepath.Join(dir, agentsession.FileFailure)
-			st, err := os.Stat(path)
-			if err != nil || st.IsDir() {
-				http.Error(w, "failure dump not found", http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			http.ServeFile(w, r, path)
-			return
-		}
-		if r.Method != http.MethodGet || len(parts) != 1 {
-			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
-			return
-		}
-		meta, err := opts.Prune.Store.Load(ctx, id)
-		if err != nil {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
-		var card pruneagent.Card
-		cardErr := opts.Prune.Store.LoadJSON(ctx, id, agentsession.FileCard, &card)
-		turns, turnsErr := opts.Prune.Store.ReadTurns(ctx, id)
-		out := map[string]any{
-			"meta":  meta,
-			"card":  card,
-			"turns": turns,
-		}
-		if cardErr != nil && !errors.Is(cardErr, os.ErrNotExist) {
-			out["card_error"] = "failed to load card"
-		}
-		if turnsErr != nil && !errors.Is(turnsErr, os.ErrNotExist) {
-			out["turns_error"] = "failed to load turns"
-		}
-		_ = writeJSON(w, out)
-	})
-
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+// NewMux returns the gitboard HTTP handler: the /api/ routes behind the
+// same-origin guard and a server span, and the embedded UI. Panics if
+// opts.Log is nil (required dependency at wire-up).
+func NewMux(opts Options) http.Handler {
+	a := newAPI(opts)
+	routes := http.NewServeMux()
+	routes.HandleFunc("/api/health", allow(a.health, http.MethodGet, http.MethodHead))
+	routes.HandleFunc("/api/meta", allow(a.meta, http.MethodGet))
+	routes.HandleFunc("/api/dashboard", allow(a.dashboard, http.MethodGet))
+	a.registerSyncRoutes(routes)
+	routes.HandleFunc("/api/failures", allow(a.failures, http.MethodGet))
+	routes.HandleFunc("/api/triage", allow(a.triage, http.MethodPost))
+	routes.HandleFunc("/api/prune/safe", allow(a.pruneSafe, http.MethodPost))
+	routes.HandleFunc("/api/pull/ff", allow(a.pullFF, http.MethodPost))
+	routes.HandleFunc("/api/local/sync/investigate", allow(a.investigateSync, http.MethodPost))
+	routes.HandleFunc("/api/agents/prune/investigate", allow(a.investigatePrune, http.MethodPost))
+	routes.HandleFunc("/api/agents/sessions/", a.agentSession)
+	routes.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 	})
-	mux.Handle("/", fileServer)
+
+	serviceName := opts.ServiceName
+	if serviceName == "" {
+		serviceName = defaultServiceName
+	}
+	guarded := apiGuard{hosts: hostsFor(opts.Addr), token: opts.Token, next: routes, log: a.log}
+	mux := http.NewServeMux()
+	mux.Handle("/api/", ollyhttp.WrapHandler(guarded, serviceName, ollyhttp.WithSkipPaths("/api/health")))
+	mux.Handle("/", staticHandler())
 	return mux
+}
+
+// staticHandler serves the embedded UI.
+func staticHandler() http.Handler {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic("server: embed static: " + err.Error())
+	}
+	return http.FileServer(http.FS(sub))
+}
+
+// allow answers 405 unless the request method is one of methods.
+func allow(h http.HandlerFunc, methods ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		for _, m := range methods {
+			if r.Method == m {
+				h(w, r)
+				return
+			}
+		}
+		http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
+	}
+}
+
+// getOrPut routes GET to get and PUT to put, and answers 405 otherwise.
+func getOrPut(get, put http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			get(w, r)
+		case http.MethodPut:
+			put(w, r)
+		default:
+			http.Error(w, errMethodNotAllowed, http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+// requireDash answers 503 when the dashboard service is not wired.
+func (a *api) requireDash(w http.ResponseWriter) bool {
+	if a.opts.Dash == nil {
+		http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// requireCommands answers 503 when the dashboard commands are not wired.
+func (a *api) requireCommands(w http.ResponseWriter) bool {
+	if a.opts.Commands == nil {
+		http.Error(w, errDashboardUnavailable, http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+// liveDoc returns the current config snapshot and poll interval, or writes
+// a 503 and reports false.
+func (a *api) liveDoc(w http.ResponseWriter) (boardconfig.File, int, bool) {
+	doc, poll, err := a.live.snapshot()
+	if err != nil {
+		writeError(w, a.log, "config.snapshot", gberr.Wrap(err, gberr.CodeUnavailable, "server.liveDoc", "config unavailable"))
+		return boardconfig.File{}, 0, false
+	}
+	return doc, poll, true
+}
+
+// queryFlag reports whether the query parameter name is "1" or "true".
+func queryFlag(r *http.Request, name string) bool {
+	v := r.URL.Query().Get(name)
+	return v == "1" || strings.EqualFold(v, "true")
 }
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -488,125 +228,8 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	return nil
 }
 
-func liveDoc(w http.ResponseWriter, live *configLive) (config.File, int, bool) {
-	doc, poll, err := live.snapshot()
-	if err != nil {
-		http.Error(w, "config unavailable: "+err.Error(), http.StatusServiceUnavailable)
-		return config.File{}, 0, false
-	}
-	return doc, poll, true
-}
-
-func writeJSON(w http.ResponseWriter, v any) error {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		return err
-	}
-	return nil
-}
-
-// writeDashboardStream emits NDJSON: shell stubs, then each project as it finishes, then done.
-func writeDashboardStream(w http.ResponseWriter, r *http.Request, live *configLive, opts Options, fresh bool, viewID string) {
-	doc, poll, ok := liveDoc(w, live)
-	if !ok {
-		return
-	}
-	shell, err := dashboard.Shell(doc, viewID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	shell.PollIntervalSeconds = poll
-	shell.UI = boardUIConfig(doc)
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(http.StatusOK)
-
-	enc := json.NewEncoder(w)
-	var writeMu sync.Mutex
-	writeEvent := func(v any) bool {
-		writeMu.Lock()
-		defer writeMu.Unlock()
-		if err := enc.Encode(v); err != nil {
-			return false
-		}
-		flusher.Flush()
-		return true
-	}
-	if !writeEvent(map[string]any{
-		"type": "shell",
-		"dashboard": map[string]any{
-			"generated_at":          shell.GeneratedAt,
-			"poll_interval_seconds": shell.PollIntervalSeconds,
-			"ui":                    shell.UI,
-			"views":                 shell.Views,
-			"active_view":           shell.ActiveView,
-			"projects":              shell.Projects,
-			// tooling omitted: zero-value would look like missing CLIs; UI keeps last / pending until done.
-		},
-	}) {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	payload, err := opts.Dash.CollectStream(ctx, doc, dashboard.CollectOpts{Fresh: fresh, ViewID: viewID}, func(row board.ProjectSummary) {
-		if !writeEvent(map[string]any{"type": "project", "project": row}) {
-			cancel()
-		}
-	})
-	if err != nil {
-		_ = writeEvent(map[string]any{"type": "error", "error": err.Error()})
-		return
-	}
-	if err := ctx.Err(); err != nil {
-		_ = writeEvent(map[string]any{"type": "error", "error": "dashboard timed out or canceled"})
-		return
-	}
-	_ = writeEvent(map[string]any{
-		"type":         "done",
-		"tooling":      payload.Tooling,
-		"generated_at": payload.GeneratedAt,
-	})
-}
-
-// writeCommandError maps dashboard validation and confirm errors to HTTP.
-// Returns true when the response was written.
-func writeCommandError(w http.ResponseWriter, err error) bool {
-	if err == nil {
-		return false
-	}
-	if dashboard.IsConfirmRequired(err) {
-		var cre dashboard.ConfirmRequiredError
-		if !errors.As(err, &cre) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return true
-		}
-		w.WriteHeader(http.StatusConflict)
-		_ = writeJSON(w, cre)
-		return true
-	}
-	if dashboard.IsMutationCanceled(err) {
-		http.Error(w, err.Error(), http.StatusGatewayTimeout)
-		return true
-	}
-	if dashboard.IsBadRequest(err) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return true
-	}
-	return false
-}
-
 // boardUIConfig copies presentation settings the UI may display (read-only).
-func boardUIConfig(doc config.File) board.UIConfig {
+func boardUIConfig(doc boardconfig.File) board.UIConfig {
 	patterns := doc.UI.HideBranches
 	out := make([]string, 0, len(patterns))
 	for _, p := range patterns {

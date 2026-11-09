@@ -2,14 +2,17 @@ package remotegit
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/remotegit/remotegittest"
 )
 
-func githubHappyExec() *fakeExec {
-	return &fakeExec{
+func githubHappyExec() *remotegittest.FakeExec {
+	return &remotegittest.FakeExec{
 		Responses: map[string][]byte{
 			"auth status":         []byte(""),
 			"repos/acme/app --jq": []byte(`{"default":"main"}`),
@@ -34,8 +37,8 @@ func githubHappyExec() *fakeExec {
 	}
 }
 
-func gitlabHappyExec() *fakeExec {
-	return &fakeExec{
+func gitlabHappyExec() *remotegittest.FakeExec {
+	return &remotegittest.FakeExec{
 		Responses: map[string][]byte{
 			"auth status":                     []byte(""),
 			"projects/acme%2Fapp?simple=true": []byte(`{"default_branch":"main"}`),
@@ -62,8 +65,8 @@ func gitlabHappyExec() *fakeExec {
 
 func TestGitHubProjectSummaryHappy(t *testing.T) {
 	gh := NewGitHub(githubHappyExec())
-	p := config.Project{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"}
-	sum, err := gh.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true, Cache: NewTTLCache()})
+	p := boardconfig.Project{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"}
+	sum, err := gh.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true, Now: time.Now, Cache: NewTTLCache(time.Now)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +103,7 @@ func TestGitHubProjectSummaryHappy(t *testing.T) {
 
 func TestGitHubFailedJobsHappy(t *testing.T) {
 	gh := NewGitHub(githubHappyExec())
-	p := config.Project{ID: "gh-app", Host: config.HostGitHub, Path: "acme/app"}
+	p := boardconfig.Project{ID: "gh-app", Host: boardconfig.HostGitHub, Path: "acme/app"}
 	jobs, err := gh.FailedJobs(context.Background(), p, "99")
 	if err != nil {
 		t.Fatal(err)
@@ -112,8 +115,8 @@ func TestGitHubFailedJobsHappy(t *testing.T) {
 
 func TestGitLabProjectSummaryHappy(t *testing.T) {
 	gl := NewGitLab(gitlabHappyExec())
-	p := config.Project{ID: "gl-app", Label: "App", Host: config.HostGitLab, Path: "acme/app"}
-	sum, err := gl.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true, Cache: NewTTLCache()})
+	p := boardconfig.Project{ID: "gl-app", Label: "App", Host: boardconfig.HostGitLab, Path: "acme/app"}
+	sum, err := gl.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true, Now: time.Now, Cache: NewTTLCache(time.Now)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +149,7 @@ func TestGitLabProjectSummaryHappy(t *testing.T) {
 
 func TestGitLabFailedJobsHappy(t *testing.T) {
 	gl := NewGitLab(gitlabHappyExec())
-	p := config.Project{ID: "gl-app", Host: config.HostGitLab, Path: "acme/app"}
+	p := boardconfig.Project{ID: "gl-app", Host: boardconfig.HostGitLab, Path: "acme/app"}
 	jobs, err := gl.FailedJobs(context.Background(), p, "55")
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +184,7 @@ func TestGithubHasConflict(t *testing.T) {
 }
 
 func TestGitHubMergedForBranch(t *testing.T) {
-	fk := &fakeExec{
+	fk := &remotegittest.FakeExec{
 		Responses: map[string][]byte{
 			"--head feat/old":     []byte(`[{"number":7,"headRefName":"feat/old","url":"https://example/pr/7","mergedAt":"2026-01-01T12:00:00Z"}]`),
 			"--head feat/missing": []byte(`[]`),
@@ -203,7 +206,7 @@ func TestGitHubMergedForBranch(t *testing.T) {
 }
 
 func TestGitLabMergedForBranch(t *testing.T) {
-	fk := &fakeExec{
+	fk := &remotegittest.FakeExec{
 		Responses: map[string][]byte{
 			"--source-branch feat/done":    []byte(`[{"iid":2,"source_branch":"feat/done","web_url":"https://gitlab.example/mr/2","merged_at":"2026-01-01T12:00:00Z"}]`),
 			"--source-branch feat/missing": []byte(`[]`),
@@ -220,8 +223,8 @@ func TestGitLabMergedForBranch(t *testing.T) {
 	}
 }
 
-func azureHappyExec() *fakeExec {
-	return &fakeExec{
+func azureHappyExec() *remotegittest.FakeExec {
+	return &remotegittest.FakeExec{
 		Responses: map[string][]byte{
 			"account show": []byte(`{"id":"sub"}`),
 			"repos show":   []byte(`{"defaultBranch":"refs/heads/main"}`),
@@ -237,8 +240,8 @@ func azureHappyExec() *fakeExec {
 
 func TestAzureDevOpsProjectSummaryHappy(t *testing.T) {
 	az := NewAzureDevOps(azureHappyExec())
-	p := config.Project{ID: "az-app", Label: "App", Host: config.HostAzureDevOps, Path: "acme/proj/app"}
-	sum, err := az.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true, Cache: NewTTLCache()})
+	p := boardconfig.Project{ID: "az-app", Label: "App", Host: boardconfig.HostAzureDevOps, Path: "acme/proj/app"}
+	sum, err := az.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true, Now: time.Now, Cache: NewTTLCache(time.Now)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,26 +254,13 @@ func TestAzureDevOpsProjectSummaryHappy(t *testing.T) {
 }
 
 func TestBitbucketAuthAndSeedHeads(t *testing.T) {
-	t.Setenv("BITBUCKET_TOKEN", "test-token")
-	fk := &fakeExec{
-		Responses: map[string][]byte{
-			"repositories/acme/app/refs/branches": []byte(`{"values":[
-				{"name":"main","target":{"date":"2026-01-01T00:00:00Z"}},
-				{"name":"feat/b","target":{"date":"2026-01-02T00:00:00Z"}}
-			]}`),
-			"repositories/acme/app/pullrequests?state=OPEN":   []byte(`{"values":[]}`),
-			"repositories/acme/app/pullrequests?state=MERGED": []byte(`{"values":[]}`),
-			"repositories/acme/app/pipelines/":                []byte(`{"values":[]}`),
-			"repositories/acme/app":                           []byte(`{"mainbranch":{"name":"main"}}`),
-		},
-	}
-	bb := NewBitbucket(fk)
+	bb := newTestBitbucket(t, remotegittest.ConformityBitbucketHTTP(), BitbucketCredentials{Token: "test-token"})
 	installed, authed, detail := bb.AuthStatus(context.Background())
 	if !installed || !authed {
 		t.Fatalf("auth: installed=%v authed=%v detail=%s", installed, authed, detail)
 	}
-	p := config.Project{ID: "bb-app", Label: "App", Host: config.HostBitbucket, Path: "acme/app"}
-	sum, err := bb.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true, Cache: NewTTLCache()})
+	p := boardconfig.Project{ID: "bb-app", Label: "App", Host: boardconfig.HostBitbucket, Path: "acme/app"}
+	sum, err := bb.ProjectSummary(deadlineCtx(t), p, SummaryOpts{Fresh: true, Now: time.Now, Cache: NewTTLCache(time.Now)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,12 +273,21 @@ func TestBitbucketAuthAndSeedHeads(t *testing.T) {
 }
 
 func TestOpenURLAzureAndBitbucket(t *testing.T) {
-	az := config.Project{Host: config.HostAzureDevOps, Path: "org/proj/repo"}
+	az := boardconfig.Project{Host: boardconfig.HostAzureDevOps, Path: "org/proj/repo"}
 	if got := az.OpenURL(); got != "https://dev.azure.com/org/proj/_git/repo" {
 		t.Fatalf("azure url: %s", got)
 	}
-	bb := config.Project{Host: config.HostBitbucket, Path: "ws/repo"}
+	bb := boardconfig.Project{Host: boardconfig.HostBitbucket, Path: "ws/repo"}
 	if got := bb.OpenURL(); got != "https://bitbucket.org/ws/repo" {
 		t.Fatalf("bitbucket url: %s", got)
+	}
+}
+
+func TestProjectSummaryRequiresClock(t *testing.T) {
+	gh := NewGitHub(githubHappyExec())
+	p := boardconfig.Project{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"}
+	sum, err := gh.ProjectSummary(context.Background(), p, SummaryOpts{Fresh: true})
+	if !errors.Is(err, errSummaryClockMissing) || sum.Error == "" {
+		t.Fatalf("want clock error, got err=%v summary=%q", err, sum.Error)
 	}
 }

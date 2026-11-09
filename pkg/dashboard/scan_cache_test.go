@@ -6,9 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
-	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 type countingScanLocal struct {
@@ -24,12 +23,15 @@ func (c *countingScanLocal) ScanRoots(context.Context, []string) localgit.Discov
 func TestScanRootsCachedRespectsTTLAndFresh(t *testing.T) {
 	fx := dualHostFake()
 	local := &countingScanLocal{}
-	s := New(remotegit.NewGitHub(fx), remotegit.NewGitLab(fx), remotegit.NewAzureDevOps(fx), remotegit.NewBitbucket(fx), local)
-	doc := config.File{
-		Projects: []config.Project{
-			{ID: "gh-app", Label: "App", Host: config.HostGitHub, Path: "acme/app"},
+	now := time.Date(2026, 11, 8, 9, 0, 0, 0, time.UTC)
+	cfg := testConfig(fx, local)
+	cfg.Clock = func() time.Time { return now }
+	s := cfg.CreateService()
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{
+			{ID: "gh-app", Label: "App", Host: boardconfig.HostGitHub, Path: "acme/app"},
 		},
-		Local: config.Local{Roots: []string{"/tmp/gitboard-scan-cache"}},
+		Local: boardconfig.Local{Roots: []string{"/tmp/gitboard-scan-cache"}},
 	}
 
 	if _, err := s.Collect(context.Background(), doc, false, ""); err != nil {
@@ -58,9 +60,7 @@ func TestScanRootsCachedRespectsTTLAndFresh(t *testing.T) {
 	}
 
 	// Expired TTL forces a rescan (default scan TTL is 300s).
-	s.scanMu.Lock()
-	s.scanAt = time.Now().Add(-6 * time.Minute)
-	s.scanMu.Unlock()
+	now = now.Add(6 * time.Minute)
 	if _, err := s.Collect(context.Background(), doc, false, ""); err != nil {
 		t.Fatal(err)
 	}

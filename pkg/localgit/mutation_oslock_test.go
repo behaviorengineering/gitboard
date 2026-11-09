@@ -14,7 +14,7 @@ import (
 func TestFlockOSLockerCrossProcessExclusive(t *testing.T) {
 	dir := t.TempDir()
 	// Mimic a git common dir by ensuring the lock file parent exists.
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -26,7 +26,7 @@ func TestFlockOSLockerCrossProcessExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer leaseA.Release()
+	defer releaseOrFail(t, leaseA)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
@@ -35,7 +35,7 @@ func TestFlockOSLockerCrossProcessExclusive(t *testing.T) {
 		t.Fatalf("second coordinator should wait then cancel, got %v", err)
 	}
 
-	leaseA.Release()
+	releaseOrFail(t, leaseA)
 
 	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
 	defer cancel2()
@@ -43,7 +43,7 @@ func TestFlockOSLockerCrossProcessExclusive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("after release: %v", err)
 	}
-	leaseB.Release()
+	releaseOrFail(t, leaseB)
 
 	lockPath := filepath.Join(dir, mutationLockName)
 	if _, err := os.Stat(lockPath); err != nil {

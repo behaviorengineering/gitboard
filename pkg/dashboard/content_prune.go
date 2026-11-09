@@ -7,62 +7,28 @@ import (
 	"github.com/behaviorengineering/gitboard/pkg/board"
 )
 
-// annotateContentOnDefault sets LocalWorktree.ContentOnDefault for remote-gone,
-// clean, non-default worktrees before EnrichPruneHints runs.
+// annotateContentOnDefault sets LocalWorktree.ContentOnDefault for every
+// prune candidate (pruneVerdict passed its gates) before enrichPruneHints
+// runs. A failed check leaves it false (fail closed).
 func (s *Service) annotateContentOnDefault(ctx context.Context, row *board.ProjectSummary) {
-	if s == nil || s.Local == nil || row == nil || row.Local == nil || !row.Local.Mapped {
+	if s == nil || s.local == nil || row == nil || row.Local == nil || !row.Local.Mapped {
 		return
 	}
-	if !row.RemoteNamesOK {
-		return
-	}
-
-	remote := make(map[string]struct{}, len(row.RemoteNames))
-	for _, name := range row.RemoteNames {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			remote[name] = struct{}{}
-		}
-	}
-
-	defaultName := strings.TrimSpace(row.Local.DefaultBranch)
-	for _, b := range row.Branches {
-		if b.Default {
-			if n := strings.TrimSpace(b.Name); n != "" {
-				defaultName = n
-			}
-			break
-		}
-	}
-	if defaultName == "" {
-		defaultName = "main"
-	}
-
 	repoPath := strings.TrimSpace(row.Local.Path)
 	if repoPath == "" {
 		return
 	}
-
+	sc := newPruneScope(row)
 	for i := range row.Local.Worktrees {
 		wt := &row.Local.Worktrees[i]
-		branch := strings.TrimSpace(wt.Branch)
-		if branch == "" || wt.Detached || wt.Bare || wt.Dirty {
-			continue
-		}
-		if branch == defaultName {
-			continue
-		}
-		if _, onRemote := remote[branch]; onRemote {
+		if !pruneVerdict(sc.inputs(*wt)).Candidate {
 			continue
 		}
 		checkPath := strings.TrimSpace(wt.Path)
 		if checkPath == "" {
 			checkPath = repoPath
 		}
-		ok, _, err := s.Local.ContentOnDefault(ctx, checkPath, branch, defaultName)
-		if err != nil || !ok {
-			continue
-		}
-		wt.ContentOnDefault = true
+		ok, _, err := s.local.ContentOnDefault(ctx, checkPath, strings.TrimSpace(wt.Branch), sc.defaultBranch)
+		wt.ContentOnDefault = err == nil && ok
 	}
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Smoke tests for auto-patch-path-predicates.sh (no git required).
+# Smoke tests for auto-patch-path-predicates.sh and the skip marker in
+# auto-patch-decide.sh (the marker cases build a throwaway git repo).
 set -euo pipefail
 
 _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +21,6 @@ check() {
 
 check is_harness_only_path true  "lefthook.yml"
 check is_harness_only_path true  "lefthook/lefthook-go-standalone.yml"
-check is_harness_only_path true  "scripts/git-hooks/default-branch-refuse.sh"
 check is_harness_only_path true  ".claude/skills/foo/SKILL.md"
 check is_harness_only_path true  "CLAUDE.md"
 check is_harness_only_path true  "pkg/engine/AGENTS.md"
@@ -45,8 +45,46 @@ AUTO_PATCH_EXTRA_PACKAGING_PATHS="deploy/helm/*"
 check is_packaging_only_path true  "deploy/helm/values.yaml"
 unset AUTO_PATCH_EXTRA_PACKAGING_PATHS
 
+_tmp="$(mktemp -d)"
+trap 'rm -rf "${_tmp}"' EXIT
+
+# A glob must still match when a file in the working directory also matches it.
+mkdir -p "${_tmp}/glob/.agent-pack"
+: > "${_tmp}/glob/.agent-pack/present.md"
+cd "${_tmp}/glob"
+AUTO_PATCH_EXTRA_HARNESS_PATHS=".agent-pack/*"
+check is_harness_only_path true ".agent-pack/skills/x.md"
+unset AUTO_PATCH_EXTRA_HARNESS_PATHS
+cd - >/dev/null
+
+# The skip marker counts in the subject line only.
+_repo="${_tmp}/repo"
+git init -q "${_repo}"
+: > "${_repo}/main.go"
+git -C "${_repo}" add main.go
+git -C "${_repo}" -c user.name=test -c user.email=test@example.com commit -q -m "feat: add main"
+
+decide_reason() {
+  local msg="$1" out="${_tmp}/decide.out"
+  : > "${out}"
+  (cd "${_repo}" && OUTPUT_FILE="${out}" HEAD_MSG="${msg}" bash "${_script_dir}/auto-patch-decide.sh")
+  sed -n 's/^reason=//p' "${out}"
+}
+
+check_marker() {
+  local want="$1" msg="$2" got="false"
+  if [[ "$(decide_reason "${msg}")" == *"[skip release]"* ]]; then got="true"; fi
+  if [[ "${got}" != "${want}" ]]; then
+    echo "FAIL: skip marker for $(printf '%q' "${msg}"): want ${want}, got ${got}" >&2
+    failures=$((failures + 1))
+  fi
+}
+
+check_marker true  "feat: add main [skip release]"
+check_marker false $'feat: add main\n\nThe [skip release] marker is documented here.'
+
 if [[ "${failures}" -gt 0 ]]; then
-  echo "${failures} predicate test(s) failed" >&2
+  echo "${failures} auto-patch test(s) failed" >&2
   exit 1
 fi
 

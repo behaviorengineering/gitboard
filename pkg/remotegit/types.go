@@ -1,10 +1,14 @@
+// Package remotegit is public API: forge clients for GitHub, GitLab, Azure
+// DevOps and Bitbucket that build board rows (pkg/board) for tracked projects
+// (pkg/boardconfig) through the forge CLIs, with an in-memory TTL cache.
+// Test fixtures live in pkg/remotegit/remotegittest.
 package remotegit
 
 import (
 	"context"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 )
 
 // HeadsSnapshot is the cached remote branch list for one project.
@@ -23,16 +27,15 @@ type RemoteHead struct {
 // Client summarizes one forge via its official CLI.
 type Client interface {
 	AuthStatus(ctx context.Context) (installed, authed bool, detail string)
-	ProjectSummary(ctx context.Context, p config.Project, opts SummaryOpts) (board.ProjectSummary, error)
-	FailedJobs(ctx context.Context, p config.Project, runID string) ([]board.FailedJob, error)
-	JobLog(ctx context.Context, p config.Project, runID, jobID string) (string, error)
+	ProjectSummary(ctx context.Context, p boardconfig.Project, opts SummaryOpts) (board.ProjectSummary, error)
+	FailedJobs(ctx context.Context, p boardconfig.Project, runID string) ([]board.FailedJob, error)
+	JobLog(ctx context.Context, p boardconfig.Project, runID, jobID string) (string, error)
 	MergedForBranch(ctx context.Context, repo, branch string) ([]board.MergedReview, error)
 }
 
 // RepoRef is a discoverable repository from an org or group.
 type RepoRef struct {
-	Host     config.Host
-	Path     string // owner/repo.
-	Name     string
-	Archived bool
+	Host boardconfig.Host
+	Path string // owner/repo.
+	Name string
 }

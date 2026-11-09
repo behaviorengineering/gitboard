@@ -3,7 +3,6 @@
 package localgit_test
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,7 +37,7 @@ func TestContentOnDefaultSquashIdenticalTrees(t *testing.T) {
 	run(local, "checkout", "feature")
 
 	in := localgit.NewInspector(cliexec.New())
-	ok, reason, err := in.ContentOnDefault(context.Background(), local, "feature", "main")
+	ok, reason, err := in.ContentOnDefault(testCtx(t), local, "feature", "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +61,7 @@ func TestContentOnDefaultLeftoverChange(t *testing.T) {
 	run(local, "commit", "-m", "feat")
 
 	in := localgit.NewInspector(cliexec.New())
-	ok, reason, err := in.ContentOnDefault(context.Background(), local, "feature", "main")
+	ok, reason, err := in.ContentOnDefault(testCtx(t), local, "feature", "main")
 	if err != nil {
 		t.Fatal(err)
 	}

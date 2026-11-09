@@ -5,40 +5,71 @@ alwaysApply: true
 
 # Architecture
 
-Local code-change board (not deployments/runtime ops). Talks to forges via CLIs on the machine.
+Local code-change board (not deployments/runtime ops). Talks to GitHub, GitLab and Azure DevOps through their CLIs on the machine, and to Bitbucket through its REST API.
 
 | Layer | Choice |
 |-------|--------|
 | GitHub | `gh` |
 | GitLab | `glab` |
-| Auth | Existing CLI login sessions |
+| Azure DevOps | `az devops` / `az repos` / `az pipelines` |
+| Bitbucket | Bitbucket Cloud REST API over `net/http` (no curl); credentials from the environment (`BITBUCKET_TOKEN`, or `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD`) |
+| Auth | Existing CLI login sessions; Bitbucket env credentials |
+| Tracing | [olly](https://github.com/behaviorengineering/olly) `olly.Init` + `pkg/dump` failure dumps, set up in `serve` and `sync` |
 | AI triage | Optional OpenAI-compatible chat in config `llm` |
 | Agent sessions | `strop/agentsession` (prune investigate) via published module |
 | Supervision | process-compose (`go tool task serve`); `gitboard serve` for one-off |
 
 ## Packages
 
+`pkg/` is a public library for other Go modules: its exported API never takes or
+returns an `internal/` type, and every `pkg/` package comment says it is public API.
+`internal/` holds the binary's wiring and is grouped by domain.
+
 ```
-cmd/gitboard/           # entrypoint: version stamp, signals, cli.Execute
-internal/cli/           # Cobra command tree: init, sync, serve, version, agent guide
-pkg/cliexec/            # shared gh/glab/git exec
-pkg/board/              # shared JSON data types (DTOs) for dashboard UI and forge adapters
-pkg/remotegit/          # forge adapters (GitHub, GitLab, …; uses board for shared types)
-pkg/localgit/           # checkouts, worktrees, pull ff-only
-pkg/dashboard/          # aggregate rows for UI; Service (read) and Commands (write) types
-internal/config/        # XDG config load/save
-internal/syncproj/      # discover + select tracked projects
-internal/server/        # HTTP + static UI
-internal/server/static/ # dashboard assets
-internal/triage/        # AI failure triage
-internal/llm/           # OpenAI-compatible client
-internal/pruneagent/    # investigate removable branches
-internal/observability/ # OTEL hooks
-internal/conformity/    # network retrieval contracts across upstreams
-internal/benchnet/      # call-count and latency benchmarks
+cmd/gitboard/                # entrypoint: version stamp, signals, cli.Execute
+pkg/board/                   # JSON DTOs for the dashboard UI and forge adapters (PruneHint, AppearanceRole)
+pkg/boardconfig/             # config document types and pure rules (File, Project, Host, View, Normalize)
+pkg/clock/                   # Clock: the one injected time source for stamps and TTLs
+pkg/gberr/                   # domain error: Code, Op, client-safe Msg, Fields, Cause
+pkg/cliexec/                 # shared gh/glab/az/git exec (re-exports gitvalet gitexec)
+pkg/remotegit/               # forge adapters (GitHub, GitLab, Azure DevOps, Bitbucket) + TTLCache
+pkg/remotegit/remotegittest/ # test-only fake Exec and forge fixtures (conformity, benchmarks)
+pkg/localgit/                # checkouts and worktrees: read-only Inspector, lease-bound Mutator
+pkg/projectsync/             # forge discovery from sync sources + tracked-set selection rules
+pkg/dashboard/               # Service (read) and Commands (write); ServiceConfig.CreateService
+internal/cli/                # Cobra command tree: init, sync, serve, version, agent guide
+internal/cli/syncprompt/     # interactive sync terminal UI (candidate list, prompts)
+internal/config/             # config file discovery, YAML load/save, init, env overlays
+internal/server/             # HTTP + static UI
+internal/server/static/      # dashboard assets
+internal/server/timing/      # Server-Timing header recorder
+internal/ai/llm/             # OpenAI-compatible client
+internal/ai/triage/          # AI failure triage
+internal/ai/pruneagent/      # investigate removable branches
+internal/observability/      # injected Logger (tracing and dumps come from olly)
+internal/testing/conformity/ # network retrieval contracts across upstreams
+internal/testing/benchnet/   # call-count and latency benchmarks
 ```
 
-**Dependency direction:** `cmd` → `internal/*` and `pkg/*`; `internal/*` may import `pkg/*`; domain packages must not import `cmd`. Prefer `cliexec` for process calls. Keep `main` to wiring; Cobra `RunE` handlers in `internal/cli` parse flags and call services.
+**Dependency direction:** `cmd` → `internal/*` and `pkg/*`; `internal/*` may import `pkg/*`; `pkg/*` never imports `internal/*`; domain packages must not import `cmd`. Prefer `cliexec` for process calls. Keep `main` to wiring; Cobra `RunE` handlers in `internal/cli` parse flags and call services. `internal/cli/wiring.go` builds the shared runner and `dashboard.ServiceConfig` for `serve` and `sync`.
+
+**Local git writes:** `localgit.Inspector` only reads. Fetch, pull, safe prune and index.lock clearing exist only on `localgit.Mutator`, obtained from a held `MutationLease` (`lease.Mutator(run)`); each method refuses a path whose common git dir is not the leased one. `dashboard.LocalGit` mirrors this (`LocalScanner`, `LocalComparer`, `Mutator(lease) LocalMutator`). The prune agent shares the dashboard's `MutationCoordinator`.
+
+**Errors:** every service returns `*gberr.Error` (`gberr.New`, `gberr.Wrap`, `.With(k, v)`). `Msg` is client-safe; `Cause` and `Fields` (paths, CLI stderr, argv) are for logs only. `gberr.CodeOf` reads the outermost code (a bare context error is `CodeCanceled`, anything untyped is `CodeInternal`). The server maps codes in one place, `internal/server/errors.go`: Invalid 400, NotFound 404, Conflict 409, ConfirmRequired 409 (with the `dashboard.ConfirmRequiredError` JSON), Canceled 504, Unavailable 503, Internal 500 (never sends `Msg`). `writeError` logs the chain with `op`, `code` and fields and sets `X-Gitboard-Error-Code`. The CLI maps the same codes to exit codes (`internal/cli/exit.go`): 0 ok, 1 internal, 2 invalid or usage, 3 conflict, 4 not found, 5 unavailable, 6 cancelled. Forge adapters return CodeUnavailable for forge failures (Canceled on cancel, Invalid for a bad path, run or job id); `remotegit.forgeErr` and `repoPathErr` build them. Display text in `summary.Error`, `local.error` and `Evidence.Notes` still carries forge and git detail.
+
+**Prune rules:** one pure function, `dashboard.pruneVerdict(PruneInputs) PruneVerdict{Allow, Hint, Candidate, Reason}` in `pkg/dashboard/prune_verdict.go`, decides every prune hint and every `PruneSafe` refusal. It refuses when remote names or open reviews did not load (`ProjectSummary.RemoteNamesOK`, `OpenOK`), when the default branch is unknown, when a merged lookup failed, and when the branch is the default, still on the forge, or has an open review. `PruneSafe` re-runs it on the unfiltered forge branches and only then takes the lease.
+
+**Origin sync:** `localgit.Inspector.OriginSync(ctx, dir) (RepoSync, error)` runs one `git for-each-ref` per common git dir (track counts plus `%(ahead-behind:origin/HEAD)` on git 2.41 and newer) and `RepoSync.Apply` copies it to each worktree; only branches whose upstream is not `origin/<same name>` run `rev-list`. Fetches go through `Mutator.FetchOriginSmart(ctx, repo, FetchPolicy{TTL, Fresh, Branches}, cache)`. `localgit.Discovery.Warnings` lists skipped roots and checkouts; the dashboard sends them as `local_warnings`.
+
+**Time:** every stamp and TTL reads one `clock.Clock` set at the entrypoint (`dashboard.ServiceConfig.Clock`, `pruneagent.Config.Clock`); `remotegit.NewTTLCache`, `localgit.NewOriginFetchCache` and `remotegit.SummaryOpts.Now` require it. Durations (`time.Since`) stay on the wall clock.
+
+**Budgets:** deadlines are set once at the entrypoint: per-route budgets in `internal/server/server.go`, `syncBudget` and `cliCallBudget` in `internal/cli`. Leaves fail closed without a deadline (`cliexec.ErrMissingDeadline`, the Bitbucket transport, `llm.Chat`) and add none of their own; the per-project forge budget is `dashboard.CollectOpts.RowBudget`, set by the HTTP handler.
+
+**Config:** `pkg/boardconfig` holds the document types and rules (`File.Normalize`, `ParseHost`, `SplitRepoPath`, TTL getters); `internal/config` only finds, loads and saves the file and applies env overlays. `pkg/projectsync` discovers candidates and applies a selection; `gitboard sync` and the Manage API both go through `dashboard.Commands` (`SetSyncSources`, `ApplySelection`, `ApplySyncSelection`, `AddTrackedProject`, `RemoveTrackedProject`).
+
+**Observability:** `serve` and `sync` call `olly.Init` once (`internal/cli/observe.go`). The OTLP endpoint is `GITBOARD_OPENINFERENCE_ENDPOINT`, `POLYPUS_OTLP_ENDPOINT` or `openinference.endpoint`, then olly's `OTEL_EXPORTER_OTLP_*` fallback. The server wraps `/api/` in an olly SERVER span per request; a request that ends 5xx writes a failure dump (`<trace id>.json`) under `openinference.failure_dump.dir` when dumps are on (`serve` only). `sync` runs under one command span. The LLM client sends through `ollyhttp.Client`. Git and forge CLI hops get client spans from gitvalet once its olly release is pinned.
+
+**API guard:** every `/api/` request passes `apiGuard` (`internal/server/guard.go`): the `Host` header must be a name of this server (loopback names on the bound port, plus the host name and interface addresses on a wildcard bind), which stops DNS rebinding on reads too. Any method other than GET or HEAD must also have a same-site `Origin` (or none) and `Content-Type: application/json`. With `serve --allow-non-localhost`, a random per-launch token is printed once at startup and required in `X-Gitboard-Token` on every write; the UI reads it from same-origin `GET /api/meta`. The UI sends every write through `mutationHeaders()` in `static/app.js`.
 
 ## strop dependency
 
@@ -72,8 +103,8 @@ After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/health` | Liveness |
-| `GET` | `/api/meta` | Server meta (`poll_interval_seconds`, `ui.hide_branches`, `views`) |
-| `GET` | `/api/dashboard` | Aggregated rows for one view (`?view=` required for non-default; `?fresh=1` forces refresh; `?stream=1` NDJSON: shell → project* → done); includes `ui`, `views`, `active_view` |
+| `GET` | `/api/meta` | Server meta (`poll_interval_seconds`, `ui.hide_branches`, `views`, `tooling`, and `token` when the server has one) |
+| `GET` | `/api/dashboard` | Aggregated rows for one view (`?view=` required for non-default; `?fresh=1` forces refresh; `?stream=1` NDJSON: shell → project* → done or error); includes `ui`, `views`, `active_view`, `local_warnings` |
 | `GET` | `/api/failures?project=&run_id=` | Failed jobs |
 | `POST` | `/api/triage` | AI log analysis |
 | `POST` | `/api/prune/safe` | Re-check hints; remove a safe local checkout (`clear_index_lock` after 409 `stale_index_lock`) |
@@ -88,5 +119,7 @@ After the strop PR/tag lands: remove the sibling `use` line (keep `go.work` with
 | `GET`/`PUT` | `/api/sync/sources` | Read/update GitHub orgs, GitLab groups, Azure DevOps orgs, and Bitbucket workspaces |
 | `GET`/`PUT` | `/api/local/roots` | Read/update `local.roots` scan directories |
 | `GET`/`PUT` | `/api/views` | Read sync state / replace named view definitions |
+
+Response bodies are typed structs in `internal/server/responses.go`. Every config write (`/api/sync/projects`, `/api/sync/selection`, the PUTs) runs one flow, `configWrite[B].handler`: guards, decode, apply through `dashboard.Commands`, save, reload, render from the reloaded file.
 
 **Review skills (on request, cursor-packs plugin):** `review-code-staged`, `review-code-smells`, `review-member-visibility`, `cli-command-surface`. Architecture review uses this file.

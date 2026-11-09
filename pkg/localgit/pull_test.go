@@ -3,7 +3,6 @@
 package localgit_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -26,17 +25,17 @@ func TestPullFFOnlyCheckedOut(t *testing.T) {
 	run(local, "fetch", "origin")
 
 	in := localgit.NewInspector(cliexec.New())
-	st := in.InspectPath(context.Background(), local)
-	in.EnrichOriginSync(context.Background(), &st)
+	st := in.InspectPath(testCtx(t), local)
+	in.EnrichOriginSync(testCtx(t), &st)
 	if st.DefaultBehind != 1 {
 		t.Fatalf("want behind=1 got %d", st.DefaultBehind)
 	}
 
-	if err := in.PullFFOnly(context.Background(), local, "main"); err != nil {
+	if _, err := mutatorFor(t, cliexec.New(), local).PullFFOnly(testCtx(t), local, "main"); err != nil {
 		t.Fatalf("PullFFOnly: %v", err)
 	}
-	st = in.InspectPath(context.Background(), local)
-	in.EnrichOriginSync(context.Background(), &st)
+	st = in.InspectPath(testCtx(t), local)
+	in.EnrichOriginSync(testCtx(t), &st)
 	if st.DefaultBehind != 0 || st.DefaultAhead != 0 {
 		t.Fatalf("after pull ahead=%d behind=%d", st.DefaultAhead, st.DefaultBehind)
 	}
@@ -53,8 +52,8 @@ func TestPullFFOnlyNotCheckedOut(t *testing.T) {
 	run(origin, "commit", "--allow-empty", "-m", "origin-ahead")
 	run(local, "fetch", "origin")
 
-	in := localgit.NewInspector(cliexec.New())
-	if err := in.PullFFOnly(context.Background(), local, "main"); err != nil {
+	m := mutatorFor(t, cliexec.New(), local)
+	if _, err := m.PullFFOnly(testCtx(t), local, "main"); err != nil {
 		t.Fatalf("PullFFOnly: %v", err)
 	}
 
@@ -84,8 +83,8 @@ func TestPullFFOnlyRefusesDirty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in := localgit.NewInspector(cliexec.New())
-	err := in.PullFFOnly(context.Background(), local, "main")
+	m := mutatorFor(t, cliexec.New(), local)
+	_, err := m.PullFFOnly(testCtx(t), local, "main")
 	if !errors.Is(err, localgit.ErrDirtyTree) {
 		t.Fatalf("want ErrDirtyTree, got %v", err)
 	}
@@ -146,8 +145,8 @@ func TestPullFFOnlyUpdatesSubmodules(t *testing.T) {
 	want := strings.TrimSpace(string(wantSHA))
 
 	run(local, "fetch", "origin")
-	in := localgit.NewInspector(cliexec.New())
-	if err := in.PullFFOnly(context.Background(), local, "main"); err != nil {
+	m := mutatorFor(t, cliexec.New(), local)
+	if _, err := m.PullFFOnly(testCtx(t), local, "main"); err != nil {
 		t.Fatalf("PullFFOnly: %v", err)
 	}
 
@@ -230,8 +229,8 @@ func TestPullFFOnlyClearsStaleSubmoduleDirtBeforePull(t *testing.T) {
 	run(origin, "commit", "--allow-empty", "-m", "origin-ahead-again")
 	run(local, "fetch", "origin")
 
-	in := localgit.NewInspector(cliexec.New())
-	if err := in.PullFFOnly(context.Background(), local, "main"); err != nil {
+	m := mutatorFor(t, cliexec.New(), local)
+	if _, err := m.PullFFOnly(testCtx(t), local, "main"); err != nil {
 		t.Fatalf("PullFFOnly: %v", err)
 	}
 	status, err = exec.Command("git", "-C", local, "status", "--porcelain").Output()
@@ -253,16 +252,16 @@ func TestPullFFOnlyRefusesDiverged(t *testing.T) {
 	run(local, "commit", "--allow-empty", "-m", "local-only")
 	run(local, "fetch", "origin")
 
-	in := localgit.NewInspector(cliexec.New())
-	err := in.PullFFOnly(context.Background(), local, "main")
+	m := mutatorFor(t, cliexec.New(), local)
+	_, err := m.PullFFOnly(testCtx(t), local, "main")
 	if !errors.Is(err, localgit.ErrDiverged) {
 		t.Fatalf("want ErrDiverged, got %v", err)
 	}
 }
 
 func TestPullFFOnlyRefusesInvalidBranch(t *testing.T) {
-	in := localgit.NewInspector(cliexec.New())
-	err := in.PullFFOnly(context.Background(), "/tmp", "evil:ref")
+	m := mutatorOn(t, cliexec.New(), t.TempDir())
+	_, err := m.PullFFOnly(testCtx(t), t.TempDir(), "evil:ref")
 	if !errors.Is(err, localgit.ErrInvalidBranch) {
 		t.Fatalf("want ErrInvalidBranch, got %v", err)
 	}

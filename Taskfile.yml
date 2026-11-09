@@ -35,8 +35,9 @@ tasks:
     cmds:
       - go test ./...
 
-  # Unlisted (no desc): called by test and ci, still runnable on its own.
+  # Helper: called by test and ci.
   test-js:
+    internal: true
     cmds:
       - node --test ./internal/server/static/*_test.js
 
@@ -89,7 +90,9 @@ tasks:
     desc: Create config if missing (never overwrites)
     summary: |
       Builds, then runs gitboard init. The binary picks the path: GITBOARD_CONFIG,
-      then ~/.config/gitboard/config.yaml. Override with: go tool task init -- --config path
+      then $XDG_CONFIG_HOME/gitboard/config.yaml (default ~/.config/gitboard/config.yaml)
+      if it exists, then ./config.yaml, else the XDG path. Run bin/gitboard for the
+      full order. Override with: go tool task init -- --config path
     deps: [build]
     cmds:
       - "{{.BIN}} init {{.CLI_ARGS}}"
@@ -121,7 +124,7 @@ tasks:
   conformity:
     desc: Network retrieval contract tests (fake exec)
     cmds:
-      - go test ./internal/conformity/ -count=1 -v
+      - go test ./internal/testing/conformity/ -count=1 -v
 
   conformity-live:
     desc: Opt-in live forge Collect (needs credentials)
@@ -129,7 +132,7 @@ tasks:
     env:
       GITBOARD_CONFORMITY_LIVE: "1"
     cmds:
-      - go test ./internal/conformity/ -run 'TestLiveAdapterContract|TestLiveDisabledByDefault' -count=1 -v
+      - go test ./internal/testing/conformity/ -run 'TestLiveAdapterContract|TestLiveDisabledByDefault' -count=1 -v
 
   hooks-install:
     desc: Install Lefthook git hooks for this clone or worktree
@@ -146,7 +149,8 @@ tasks:
         }
         lefthook install
 
-  # Unlisted (no desc): microbenchmarks, run on demand.
   bench-net:
+    desc: Run network microbenchmarks
+    summary: "go test -bench over internal/testing/benchnet (on demand; not part of test or ci)."
     cmds:
-      - go test ./internal/benchnet/ -bench=. -benchmem -count=1
+      - go test ./internal/testing/benchnet/ -bench=. -benchmem -count=1

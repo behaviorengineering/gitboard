@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
@@ -29,7 +31,7 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 	}
 	_ = st
 
-	cache := remotegit.NewTTLCache()
+	cache := remotegit.NewTTLCache(time.Now)
 	loads := 0
 	_, err = cache.GetOrLoadHeads("github/org/a", time.Minute, false, func() (remotegit.HeadsSnapshot, error) {
 		loads++
@@ -43,7 +45,7 @@ func TestConfigLiveReloadsProjectsAndClearsCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := newConfigLive(path, doc, doc.EffectivePollSeconds(), cache.Clear, nil)
+	live := newConfigLive(path, doc, config.EffectivePollSeconds(doc), cache.Clear, newRecordLogger())
 	got, _, err := live.snapshot()
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +106,7 @@ func TestConfigLiveFailsFastOnBadReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := newConfigLive(path, doc, 30, nil, nil)
+	live := newConfigLive(path, doc, 30, nil, newRecordLogger())
 
 	if err := os.WriteFile(path, []byte("projects: [\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -119,32 +121,56 @@ func TestConfigLiveFailsFastOnBadReload(t *testing.T) {
 }
 
 func TestViewsChanged(t *testing.T) {
-	a := []config.View{{ID: "work", Label: "Work", Projects: []string{"a"}}}
-	b := []config.View{{ID: "work", Label: "Work", Projects: []string{"a"}}}
-	if viewsChanged(a, b) {
+	a := []boardconfig.View{{ID: "work", Label: "Work", Projects: []string{"a"}}}
+	b := []boardconfig.View{{ID: "work", Label: "Work", Projects: []string{"a"}}}
+	if setChanged(a, b, viewFingerprint) {
 		t.Fatal("same views")
 	}
 	b[0].Projects = []string{"a", "b"}
-	if !viewsChanged(a, b) {
+	if !setChanged(a, b, viewFingerprint) {
 		t.Fatal("membership change")
 	}
 }
 
 func TestLocalRootsChanged(t *testing.T) {
-	if localRootsChanged([]string{"a"}, []string{"a"}) {
+	if rootsChanged([]string{"a"}, []string{"a"}) {
 		t.Fatal("same roots")
 	}
-	if !localRootsChanged([]string{"a"}, []string{"a", "b"}) {
+	if !rootsChanged([]string{"a"}, []string{"a", "b"}) {
 		t.Fatal("len change")
 	}
-	if !localRootsChanged([]string{"a"}, []string{"b"}) {
+	if !rootsChanged([]string{"a"}, []string{"b"}) {
 		t.Fatal("membership change")
 	}
+}
+
+func rootsChanged(a, b []string) bool {
+	return setChanged(a, b, func(s string) string { return s })
 }
 
 func writeConfig(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// When the file just saved cannot be loaded back, replace must fail and keep
+// the previous snapshot instead of serving a document the next start rejects.
+func TestConfigLiveReplaceFailsWhenReloadFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeConfig(t, path, "projects: []\n")
+	prev := boardconfig.File{}
+	live := newConfigLive(path, prev, config.DefaultPollSeconds, nil, newRecordLogger())
+
+	// Save succeeds, but Load rejects the environment override.
+	t.Setenv("GITBOARD_POLL_SECONDS", "not-a-number")
+	next := boardconfig.File{Projects: []boardconfig.Project{{ID: "a", Label: "A", Host: boardconfig.HostGitHub, Path: "org/a"}}}
+	err := live.replace(next)
+	if gberr.CodeOf(err) != gberr.CodeInternal {
+		t.Fatalf("replace: code=%q err=%v", gberr.CodeOf(err), err)
+	}
+	if len(live.doc.Projects) != 0 {
+		t.Fatalf("snapshot must stay on the previous doc: %+v", live.doc.Projects)
 	}
 }

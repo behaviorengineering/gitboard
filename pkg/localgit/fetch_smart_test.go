@@ -23,12 +23,12 @@ func TestFetchOriginBranchesEmptyIsNoop(t *testing.T) {
 	fx := &fakeExec{responses: map[string][]byte{
 		"--git-common-dir": []byte(common + "\n"),
 	}}
-	in := NewInspector(fx)
+	m := leasedMutator(t, fx, common)
 	ctx := context.Background()
-	if err := in.FetchOriginBranches(ctx, repo, nil); err != nil {
+	if err := m.fetchOriginBranches(ctx, repo, nil); err != nil {
 		t.Fatalf("empty: %v", err)
 	}
-	if err := in.FetchOriginBranches(ctx, repo, []string{"", "  "}); err != nil {
+	if err := m.fetchOriginBranches(ctx, repo, []string{"", "  "}); err != nil {
 		t.Fatalf("whitespace: %v", err)
 	}
 	for _, call := range fx.calls {
@@ -45,14 +45,13 @@ func TestFetchOriginSmartFullThenTargeted(t *testing.T) {
 		"fetch --prune origin": []byte(""),
 		"fetch origin":         []byte(""),
 	}}
-	in := NewInspector(fx)
-	cache := NewOriginFetchCache()
+	m := leasedMutator(t, fx, common)
 	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
-	cache.SetNow(func() time.Time { return now })
+	cache := NewOriginFetchCache(func() time.Time { return now })
 	ctx := context.Background()
 	ttl := time.Minute
 
-	if _, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: ttl, Branches: []string{"main", "feature/x"}}, cache); err != nil {
 		t.Fatalf("cold smart: %v", err)
 	}
 	if !hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -63,7 +62,7 @@ func TestFetchOriginSmartFullThenTargeted(t *testing.T) {
 	}
 
 	fx.calls = nil
-	updated, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"})
+	updated, err := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: ttl, Branches: []string{"main", "feature/x"}}, cache)
 	if err != nil {
 		t.Fatalf("warm within TTL: %v", err)
 	}
@@ -76,7 +75,7 @@ func TestFetchOriginSmartFullThenTargeted(t *testing.T) {
 
 	now = now.Add(2 * time.Minute)
 	fx.calls = nil
-	if _, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: ttl, Branches: []string{"main", "feature/x"}}, cache); err != nil {
 		t.Fatalf("after full TTL: %v", err)
 	}
 	if !hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -91,20 +90,19 @@ func TestFetchOriginSmartTargetedWhenFullWarm(t *testing.T) {
 		"fetch --prune origin": []byte(""),
 		"fetch origin":         []byte(""),
 	}}
-	in := NewInspector(fx)
-	cache := NewOriginFetchCache()
+	m := leasedMutator(t, fx, common)
 	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
-	cache.SetNow(func() time.Time { return now })
+	cache := NewOriginFetchCache(func() time.Time { return now })
 	ctx := context.Background()
 	ttl := time.Minute
 
-	if _, err := in.FetchOriginCached(ctx, repo, ttl, false, cache); err != nil {
+	if _, err := m.fetchOriginCached(ctx, repo, filepath.Clean(common), ttl, false, cache); err != nil {
 		t.Fatalf("full: %v", err)
 	}
 	fx.calls = nil
 
 	cache.MarkBranchesSuccess(filepath.Clean(common), []string{"main"})
-	if _, err := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main", "feature/x"}); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: ttl, Branches: []string{"main", "feature/x"}}, cache); err != nil {
 		t.Fatalf("targeted: %v", err)
 	}
 	if hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -122,12 +120,12 @@ func TestFetchOriginSmartFreshForcesPrune(t *testing.T) {
 		"--git-common-dir":     []byte(common + "\n"),
 		"fetch --prune origin": []byte(""),
 	}}
-	in := NewInspector(fx)
-	cache := NewOriginFetchCache()
+	m := leasedMutator(t, fx, common)
+	cache := NewOriginFetchCache(time.Now)
 	cache.MarkFullSuccess(filepath.Clean(common))
 	cache.MarkBranchesSuccess(filepath.Clean(common), []string{"main"})
 	ctx := context.Background()
-	if _, err := in.FetchOriginSmart(ctx, repo, time.Hour, true, cache, []string{"main"}); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: time.Hour, Fresh: true, Branches: []string{"main"}}, cache); err != nil {
 		t.Fatalf("fresh: %v", err)
 	}
 	if !hasCallSubstr(fx.calls, "fetch --prune origin") {
@@ -141,12 +139,12 @@ func TestFetchOriginSmartEmptyBranchesSkipsWhenWarm(t *testing.T) {
 		"--git-common-dir":     []byte(common + "\n"),
 		"fetch --prune origin": []byte(""),
 	}}
-	in := NewInspector(fx)
-	cache := NewOriginFetchCache()
+	m := leasedMutator(t, fx, common)
+	cache := NewOriginFetchCache(time.Now)
 	cache.MarkFullSuccess(filepath.Clean(common))
 	ctx := context.Background()
 	fx.calls = nil
-	if _, err := in.FetchOriginSmart(ctx, repo, time.Hour, false, cache, nil); err != nil {
+	if _, err := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: time.Hour}, cache); err != nil {
 		t.Fatalf("empty warm: %v", err)
 	}
 	if hasCallSubstr(fx.calls, "fetch") {
@@ -163,14 +161,13 @@ func TestFetchOriginSmartCoalescesAndCoversLeftoverBranches(t *testing.T) {
 		"fetch origin":         []byte(""),
 	}}
 	counting := &countingFetchExec{inner: fx, fetches: &fetches}
-	in := NewInspector(counting)
-	cache := NewOriginFetchCache()
+	m := leasedMutator(t, counting, common)
 	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
-	cache.SetNow(func() time.Time { return now })
+	cache := NewOriginFetchCache(func() time.Time { return now })
 	ctx := context.Background()
 	ttl := time.Minute
 
-	if _, err := in.FetchOriginCached(ctx, repo, ttl, false, cache); err != nil {
+	if _, err := m.fetchOriginCached(ctx, repo, filepath.Clean(common), ttl, false, cache); err != nil {
 		t.Fatalf("seed full: %v", err)
 	}
 	fetches.Store(0)
@@ -180,12 +177,12 @@ func TestFetchOriginSmartCoalescesAndCoversLeftoverBranches(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, e1 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"main"})
+		_, e1 := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: ttl, Branches: []string{"main"}}, cache)
 		errCh <- e1
 	}()
 	go func() {
 		defer wg.Done()
-		_, e2 := in.FetchOriginSmart(ctx, repo, ttl, false, cache, []string{"feature/x"})
+		_, e2 := m.FetchOriginSmart(ctx, repo, FetchPolicy{TTL: ttl, Branches: []string{"feature/x"}}, cache)
 		errCh <- e2
 	}()
 	wg.Wait()
@@ -204,10 +201,9 @@ func TestFetchOriginSmartCoalescesAndCoversLeftoverBranches(t *testing.T) {
 }
 
 func TestOriginFetchCachePerBranchTTLIndependent(t *testing.T) {
-	cache := NewOriginFetchCache()
 	common := filepath.Clean(filepath.Join(t.TempDir(), "repo.git"))
 	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
-	cache.SetNow(func() time.Time { return now })
+	cache := NewOriginFetchCache(func() time.Time { return now })
 	cache.MarkFullSuccess(common)
 	cache.MarkBranchesSuccess(common, []string{"main"})
 	now = now.Add(30 * time.Second)
@@ -245,4 +241,28 @@ func hasCallSubstr(calls []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// A zero-value cache (no clock, nil maps) must behave like no cache rather
+// than panic inside a dashboard collect goroutine.
+func TestOriginFetchCacheZeroValueIsSafe(t *testing.T) {
+	var c OriginFetchCache
+	c.MarkFullSuccess("/repo/.git")
+	c.MarkBranchesSuccess("/repo/.git", []string{"main"})
+	if !c.NeedsFullFetch("/repo/.git", time.Minute, false) {
+		t.Fatal("zero value must always need a full fetch")
+	}
+	if got := c.StaleBranches("/repo/.git", time.Minute, []string{"main"}); len(got) != 1 {
+		t.Fatalf("zero value must report every branch stale: %v", got)
+	}
+}
+
+// filepath.Clean("") is ".", so an empty common dir used to share one TTL
+// slot across unrelated repositories.
+func TestOriginFetchCacheEmptyCommonDirIsNotKeyed(t *testing.T) {
+	c := NewOriginFetchCache(time.Now)
+	c.MarkFullSuccess("")
+	if !c.NeedsFullFetch(".", time.Minute, false) {
+		t.Fatal(`an empty common dir must not be stored as "."`)
+	}
 }

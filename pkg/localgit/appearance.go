@@ -5,12 +5,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-)
 
-// Checkout roles for on-disk appearances of one forge remote.
-const (
-	RoleStandalone = "standalone"
-	RoleSubmodule  = "submodule"
+	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
 )
 
 // Checkout is one distinct on-disk clone of a forge remote.
@@ -18,13 +15,13 @@ type Checkout struct {
 	Path           string // absolute preferred worktree path.
 	CommonGitDir   string
 	Superproject   string // absolute parent working tree when a submodule; empty if standalone.
-	Role           string // standalone | submodule.
+	Role           board.AppearanceRole
 	RelPath        string // path relative to Superproject when submodule.
 	ParentBasename string // basename(Superproject) when submodule.
 }
 
 // Appearances returns all checkouts for a forge track key.
-func (d Discovery) Appearances(host, repoPath string) []Checkout {
+func (d Discovery) Appearances(host boardconfig.Host, repoPath string) []Checkout {
 	if d.ByKey == nil {
 		return nil
 	}
@@ -35,18 +32,6 @@ func (d Discovery) Appearances(host, repoPath string) []Checkout {
 	cp := make([]Checkout, len(out))
 	copy(cp, out)
 	return cp
-}
-
-// resolvePath picks an explicit local_path or the primary scanned checkout path.
-func resolvePath(localPath string, host, repoPath string, disc Discovery) (string, bool) {
-	if strings.TrimSpace(localPath) != "" {
-		return strings.TrimSpace(localPath), true
-	}
-	c, ok := PickPrimary("", disc.Appearances(host, repoPath))
-	if !ok {
-		return "", false
-	}
-	return c.Path, true
 }
 
 // PickPrimary selects the preferred checkout.
@@ -64,7 +49,7 @@ func PickPrimary(localPath string, checkouts []Checkout) (Checkout, bool) {
 			}
 		}
 		// Explicit override even when not in the scan list.
-		return Checkout{Path: localPath, Role: RoleStandalone}, true
+		return Checkout{Path: localPath, Role: board.AppearanceStandalone}, true
 	}
 	if len(checkouts) == 0 {
 		return Checkout{}, false
@@ -72,8 +57,8 @@ func PickPrimary(localPath string, checkouts []Checkout) (Checkout, bool) {
 	sorted := make([]Checkout, len(checkouts))
 	copy(sorted, checkouts)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		si := sorted[i].Role == RoleStandalone
-		sj := sorted[j].Role == RoleStandalone
+		si := sorted[i].Role == board.AppearanceStandalone
+		sj := sorted[j].Role == board.AppearanceStandalone
 		if si != sj {
 			return si
 		}
@@ -115,7 +100,7 @@ func homeShortPath(abs string) string {
 // DisplayID builds the UI identifier for a checkout.
 // parentLabel is the forge project label when known; otherwise ParentBasename is used.
 func DisplayID(c Checkout, parentLabel string) string {
-	if c.Role == RoleSubmodule && c.Superproject != "" {
+	if c.Role == board.AppearanceSubmodule && c.Superproject != "" {
 		label := strings.TrimSpace(parentLabel)
 		if label == "" {
 			label = c.ParentBasename
@@ -139,13 +124,13 @@ func FillCheckoutMeta(c *Checkout) {
 	}
 	c.Path = filepath.Clean(c.Path)
 	if strings.TrimSpace(c.Superproject) == "" {
-		c.Role = RoleStandalone
+		c.Role = board.AppearanceStandalone
 		c.RelPath = ""
 		c.ParentBasename = ""
 		return
 	}
 	c.Superproject = filepath.Clean(c.Superproject)
-	c.Role = RoleSubmodule
+	c.Role = board.AppearanceSubmodule
 	c.ParentBasename = filepath.Base(c.Superproject)
 
 	child := c.Path

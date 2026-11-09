@@ -13,11 +13,11 @@ func openMutationLockFile(commonDir string) (*os.File, error) {
 	if commonDir == "" || commonDir == "." {
 		return nil, ErrCommonDirRequired
 	}
-	if err := os.MkdirAll(commonDir, 0o755); err != nil {
+	if err := os.MkdirAll(commonDir, 0o755); err != nil { //nolint:gosec // G301: matches git's permissions inside .git
 		return nil, fmt.Errorf("mutation lock dir: %w", err)
 	}
 	path := filepath.Join(commonDir, mutationLockName)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644) //nolint:gosec // G302: matches git's permissions inside .git
 	if err != nil {
 		return nil, fmt.Errorf("open mutation lock: %w", err)
 	}

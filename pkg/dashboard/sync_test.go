@@ -4,9 +4,9 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
@@ -22,7 +22,9 @@ func (f *syncLocalFake) InspectPath(_ context.Context, path string) localgit.Sta
 	return localgit.Status{Mapped: true, Path: path, Branch: "main"}
 }
 
-func (f *syncLocalFake) EnrichOriginSync(context.Context, *localgit.Status) {}
+func (f *syncLocalFake) OriginSync(context.Context, string) (localgit.RepoSync, error) {
+	return localgit.RepoSync{}, nil
+}
 
 func (f *syncLocalFake) CommonGitDir(_ context.Context, path string) (string, error) {
 	return path, nil
@@ -32,11 +34,7 @@ func (f *syncLocalFake) ListLocalHeads(context.Context, string) ([]string, error
 	return nil, nil
 }
 
-func (f *syncLocalFake) FetchOriginCached(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache) (bool, error) {
-	return false, nil
-}
-
-func (f *syncLocalFake) FetchOriginSmart(context.Context, string, time.Duration, bool, *localgit.OriginFetchCache, []string) (bool, error) {
+func (f *syncLocalFake) FetchOriginSmart(context.Context, string, localgit.FetchPolicy, *localgit.OriginFetchCache) (bool, error) {
 	return true, nil
 }
 
@@ -44,8 +42,8 @@ func (f *syncLocalFake) OriginRemote(context.Context, string) (string, error) {
 	return "https://example.test/acme/app.git", nil
 }
 
-func (f *syncLocalFake) PullFFOnly(context.Context, string, string) error {
-	return nil
+func (f *syncLocalFake) PullFFOnly(context.Context, string, string) (localgit.PullPhases, error) {
+	return localgit.PullPhases{}, nil
 }
 
 func (f *syncLocalFake) RemoveSafeCheckout(context.Context, string, string, string) error {
@@ -60,12 +58,16 @@ func (f *syncLocalFake) ContentOnDefault(context.Context, string, string, string
 	return false, "", nil
 }
 
-func (f *syncLocalFake) InspectSync(context.Context, string, string) (localgit.SyncInspection, error) {
+func (f *syncLocalFake) CompareSync(context.Context, string, string) (localgit.SyncInspection, error) {
 	return f.result, nil
 }
 
-func (f *syncLocalFake) CompareSync(context.Context, string, string) (localgit.SyncInspection, error) {
-	return f.result, nil
+func (f *syncLocalFake) CanonicalCheckoutPath(_ context.Context, path string) string {
+	return path
+}
+
+func (f *syncLocalFake) Mutator(*localgit.MutationLease) (LocalMutator, error) {
+	return f, nil
 }
 
 func TestInvestigateSyncValidatesMappedPathAndReturnsEvidence(t *testing.T) {
@@ -79,12 +81,12 @@ func TestInvestigateSyncValidatesMappedPathAndReturnsEvidence(t *testing.T) {
 			BehindCount: 2,
 		},
 	}
-	service := New(nil, nil, nil, nil, fake)
+	service := newTestService(&fakeExec{}, fake)
 	commands := NewCommands(service)
-	doc := config.File{
-		Projects: []config.Project{{
+	doc := boardconfig.File{
+		Projects: []boardconfig.Project{{
 			ID:        "gh-app",
-			Host:      config.HostGitHub,
+			Host:      boardconfig.HostGitHub,
 			Path:      "acme/app",
 			LocalPath: path,
 		}},
@@ -107,7 +109,7 @@ func TestInvestigateSyncValidatesMappedPathAndReturnsEvidence(t *testing.T) {
 		Branch:    "main",
 		RepoPath:  filepath.Join(path, "other"),
 	})
-	if err == nil || !IsBadRequest(err) {
+	if err == nil || !gberr.HasCode(err, gberr.CodeInvalid) {
 		t.Fatalf("want mapped-path validation error, got %v", err)
 	}
 }

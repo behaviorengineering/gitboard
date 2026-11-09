@@ -6,9 +6,10 @@ import (
 	"testing"
 )
 
-func TestPullFFOnlyWithPhasesRejectsInvalidBranch(t *testing.T) {
-	in := NewInspector(&fakeExec{responses: map[string][]byte{}})
-	_, err := in.PullFFOnlyWithPhases(context.Background(), t.TempDir(), "evil:ref")
+func TestPullFFOnlyRejectsInvalidBranch(t *testing.T) {
+	dir := t.TempDir()
+	m := leasedMutator(t, &fakeExec{responses: map[string][]byte{}}, dir)
+	_, err := m.PullFFOnly(context.Background(), dir, "evil:ref")
 	if !errors.Is(err, ErrInvalidBranch) {
 		t.Fatalf("want ErrInvalidBranch, got %v", err)
 	}

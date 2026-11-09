@@ -20,18 +20,16 @@ type Options struct {
 	Interactive func() bool
 }
 
-// Execute runs the command tree with args and returns the process exit code.
+// Execute runs the command tree with args and returns the process exit code
+// (see exitCode).
 func Execute(ctx context.Context, opts Options, args []string) int {
-	root := NewRoot(opts)
+	root := newRoot(opts)
 	root.SetArgs(args)
-	if err := root.ExecuteContext(ctx); err != nil {
-		return 1
-	}
-	return 0
+	return exitCode(root.ExecuteContext(ctx))
 }
 
-// NewRoot builds the gitboard root command with every subcommand attached.
-func NewRoot(opts Options) *cobra.Command {
+// newRoot builds the gitboard root command with every subcommand attached.
+func newRoot(opts Options) *cobra.Command {
 	if opts.Version == "" {
 		opts.Version = "dev"
 	}
@@ -44,6 +42,7 @@ func NewRoot(opts Options) *cobra.Command {
 		Short:         "Local code-change board for GitHub, GitLab, Azure DevOps and Bitbucket",
 		SilenceUsage:  true,
 		SilenceErrors: false,
+		Args:          noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if showVersion {
 				return printVersion(cmd.OutOrStdout(), opts.Version)
@@ -52,6 +51,7 @@ func NewRoot(opts Options) *cobra.Command {
 		},
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usage(err) })
 	root.Flags().BoolVar(&showVersion, "version", false, "print the build version")
 	// Legacy alias for `gitboard version`, kept off the help catalog.
 	if err := root.Flags().MarkHidden("version"); err != nil {
@@ -71,7 +71,7 @@ func newVersionCmd(version string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the build version",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return printVersion(cmd.OutOrStdout(), version)
 		},
@@ -111,8 +111,23 @@ func agentOperatingGuide(w io.Writer, version string) error {
 		"Automation (no terminal needed)",
 		"  gitboard sync --host github --add owner/repo",
 		"  gitboard sync --remove <project-id>",
+		"  sync without a terminal and without --add, --remove or --dry-run exits 2",
 		"",
-		"Config path: --config, then GITBOARD_CONFIG, then ~/.config/gitboard/config.yaml",
+		"Config path (first match wins)",
+		"  --config <path>",
+		"  GITBOARD_CONFIG (legacy: GITBOARD_PROJECTS)",
+		"  $XDG_CONFIG_HOME/gitboard/config.yaml (default ~/.config/gitboard/config.yaml), if it exists",
+		"  ./config.yaml in the current directory (legacy: ./projects.yaml), if it exists",
+		"  otherwise the XDG path, which init and serve create",
+		"",
+		"Exit codes",
+		"  0  success",
+		"  1  internal error",
+		"  2  invalid input or usage (bad flag, unknown host or project, no terminal)",
+		"  3  conflict with the current state",
+		"  4  not found",
+		"  5  a forge, git or the network is unavailable",
+		"  6  cancelled or timed out",
 		"",
 		"Full command list: gitboard help",
 	}

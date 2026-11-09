@@ -3,7 +3,6 @@
 package localgit_test
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/behaviorengineering/gitboard/pkg/cliexec"
-	"github.com/behaviorengineering/gitboard/pkg/localgit"
 )
 
 func TestRemoveSafeCheckoutLinkedWorktree(t *testing.T) {
@@ -47,8 +45,8 @@ func TestRemoveSafeCheckoutLinkedWorktree(t *testing.T) {
 	run(mainDir, "commit", "-m", "init")
 	run(mainDir, "worktree", "add", "-b", "feature", wtDir)
 
-	in := localgit.NewInspector(cliexec.New())
-	if err := in.RemoveSafeCheckout(context.Background(), wtDir, "feature", "main"); err != nil {
+	m := mutatorFor(t, cliexec.New(), wtDir)
+	if err := m.RemoveSafeCheckout(testCtx(t), wtDir, "feature", "main"); err != nil {
 		t.Fatalf("RemoveSafeCheckout: %v", err)
 	}
 	if _, err := os.Stat(wtDir); !os.IsNotExist(err) {
@@ -83,8 +81,8 @@ func TestRemoveSafeCheckoutMainWorktree(t *testing.T) {
 	run(origin, "commit", "--allow-empty", "-m", "origin-ahead-1")
 	run(origin, "commit", "--allow-empty", "-m", "origin-ahead-2")
 
-	in := localgit.NewInspector(cliexec.New())
-	if err := in.RemoveSafeCheckout(context.Background(), local, "feature", "main"); err != nil {
+	m := mutatorFor(t, cliexec.New(), local)
+	if err := m.RemoveSafeCheckout(testCtx(t), local, "feature", "main"); err != nil {
 		t.Fatalf("RemoveSafeCheckout: %v", err)
 	}
 	cmd := exec.Command("git", "branch", "--show-current")
@@ -146,8 +144,8 @@ func TestRemoveSafeCheckoutMainWorktreeDivergedDefault(t *testing.T) {
 		t.Fatalf("setup want diverged main, got %q (ahead behind vs origin)", string(count))
 	}
 
-	in := localgit.NewInspector(cliexec.New())
-	if err := in.RemoveSafeCheckout(context.Background(), local, "feature", "main"); err != nil {
+	m := mutatorFor(t, cliexec.New(), local)
+	if err := m.RemoveSafeCheckout(testCtx(t), local, "feature", "main"); err != nil {
 		t.Fatalf("RemoveSafeCheckout: %v", err)
 	}
 	cur, err := exec.Command("git", "-C", local, "branch", "--show-current").Output()

@@ -3,7 +3,7 @@ package dashboard
 import (
 	"errors"
 
-	"github.com/behaviorengineering/gitboard/pkg/localgit"
+	"github.com/behaviorengineering/gitboard/pkg/gberr"
 )
 
 // Commands wraps Service for mutating operations: prune, pull, and sync/views config.
@@ -12,17 +12,13 @@ type Commands struct {
 	*Service
 }
 
-// Sentinel errors for missing command wiring.
+// Sentinel errors for missing service wiring. Commands wrap them in a
+// gberr.Error with gberr.CodeUnavailable; errors.Is still matches.
 var (
+	ErrServiceMissing        = errors.New("dashboard service missing")
 	ErrCommandsUnavailable   = errors.New("sync commands unavailable")
 	ErrLocalInspectorMissing = errors.New("local git inspector missing")
 )
-
-// IsMutationCanceled reports whether err means a mutation lease wait was canceled
-// (request context ended while queued for the per-repository coordinator).
-func IsMutationCanceled(err error) bool {
-	return errors.Is(err, localgit.ErrMutationCanceled)
-}
 
 // NewCommands returns a Commands backed by the given Service.
 // Panics if s is nil (required dependency at wire-up).
@@ -35,7 +31,7 @@ func NewCommands(s *Service) *Commands {
 
 func (c *Commands) requireService() error {
 	if c == nil || c.Service == nil {
-		return ErrCommandsUnavailable
+		return unavailable("dashboard.Commands", ErrCommandsUnavailable)
 	}
 	return nil
 }
@@ -44,8 +40,13 @@ func (c *Commands) requireLocal() (*Service, error) {
 	if err := c.requireService(); err != nil {
 		return nil, err
 	}
-	if c.Local == nil {
-		return nil, ErrLocalInspectorMissing
+	if c.local == nil {
+		return nil, unavailable("dashboard.Commands", ErrLocalInspectorMissing)
 	}
 	return c.Service, nil
+}
+
+// unavailable wraps a missing-wiring sentinel; its text is client-safe.
+func unavailable(op string, sentinel error) error {
+	return gberr.Wrap(sentinel, gberr.CodeUnavailable, op, sentinel.Error())
 }

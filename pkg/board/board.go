@@ -1,5 +1,6 @@
-// Package board contains the JSON data types shared across the dashboard UI,
-// forge adapters, and server handlers. No domain logic lives here.
+// Package board is public API: the JSON data types shared across the dashboard
+// UI, forge adapters (pkg/remotegit), local git (pkg/localgit) and server
+// handlers. No domain logic lives here.
 package board
 
 // CIStatus is the latest pipeline or workflow run.
@@ -43,10 +44,13 @@ type MergedReview struct {
 	MergedAt string `json:"merged_at,omitempty"`
 }
 
-// Prune hint values for local worktrees whose remote head is gone.
+// PruneHint marks a local worktree whose remote head is gone.
+type PruneHint string
+
+// Prune hint values; the zero value means no hint.
 const (
-	PruneSafe   = "safe"   // forge merged PR/MR, or local content already on default.
-	PruneLikely = "likely" // remote gone, confirmed no merged PR/MR, content not on default.
+	PruneSafe   PruneHint = "safe"   // forge merged PR/MR, or local content already on default.
+	PruneLikely PruneHint = "likely" // remote gone, confirmed no merged PR/MR, content not on default.
 )
 
 // ProjectSummary is one row in the dashboard.
@@ -71,8 +75,11 @@ type ProjectSummary struct {
 	// Loaded via forge API calls; may be incomplete only when RemoteNamesOK is false.
 	RemoteNames []string `json:"-"`
 	// RemoteNamesOK is true when heads were loaded successfully (live or cache).
-	// When false, EnrichPruneHints suppresses all prune hints (fail closed).
+	// When false, no worktree gets a prune hint (fail closed).
 	RemoteNamesOK bool `json:"-"`
+	// OpenOK is true when open reviews loaded (live or cache). When false, no
+	// worktree gets a prune hint: an open review could not be ruled out.
+	OpenOK bool `json:"-"`
 	// MergedOK is true when the bulk merged slice was loaded successfully (live or cache).
 	MergedOK bool `json:"-"`
 	// MergedChecked is true for source branches whose per-branch merged lookup
@@ -85,15 +92,18 @@ type Capabilities struct {
 	FailedJobs bool `json:"failed_jobs"`
 }
 
-// LocalAppearance roles match localgit checkout roles.
+// AppearanceRole says how a checkout sits on disk; localgit.Checkout uses it too.
+type AppearanceRole string
+
+// Appearance roles.
 const (
-	AppearanceStandalone = "standalone"
-	AppearanceSubmodule  = "submodule"
+	AppearanceStandalone AppearanceRole = "standalone"
+	AppearanceSubmodule  AppearanceRole = "submodule"
 )
 
 // LocalAppearance is one on-disk checkout of a forge project (standalone or submodule).
 type LocalAppearance struct {
-	Role          string             `json:"role,omitempty"` // standalone | submodule.
+	Role          AppearanceRole     `json:"role,omitempty"`
 	Path          string             `json:"path,omitempty"`
 	DisplayID     string             `json:"display_id,omitempty"`
 	ParentPath    string             `json:"parent_path,omitempty"`
@@ -145,23 +155,23 @@ type BranchOriginSync struct {
 
 // LocalWorktree is one git worktree for a mapped project.
 type LocalWorktree struct {
-	Path             string `json:"path"`
-	Branch           string `json:"branch,omitempty"`
-	Tag              string `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
-	Detached         bool   `json:"detached,omitempty"`
-	Bare             bool   `json:"bare,omitempty"`
-	Main             bool   `json:"main,omitempty"`
-	Dirty            bool   `json:"dirty,omitempty"`
-	Ahead            int    `json:"ahead,omitempty"`
-	Behind           int    `json:"behind,omitempty"`
-	Upstream         string `json:"upstream,omitempty"`
-	PruneHint        string `json:"prune_hint,omitempty"` // safe | likely.
-	ContentOnDefault bool   `json:"content_on_default,omitempty"`
-	MergedID         int    `json:"merged_id,omitempty"`
-	MergedURL        string `json:"merged_url,omitempty"`
-	MergedAt         string `json:"merged_at,omitempty"`
-	AppearancePath   string `json:"appearance_path,omitempty"`
-	AppearanceLabel  string `json:"appearance_label,omitempty"`
+	Path             string    `json:"path"`
+	Branch           string    `json:"branch,omitempty"`
+	Tag              string    `json:"tag,omitempty"` // Exact tag when Detached and HEAD is tagged.
+	Detached         bool      `json:"detached,omitempty"`
+	Bare             bool      `json:"bare,omitempty"`
+	Main             bool      `json:"main,omitempty"`
+	Dirty            bool      `json:"dirty,omitempty"`
+	Ahead            int       `json:"ahead,omitempty"`
+	Behind           int       `json:"behind,omitempty"`
+	Upstream         string    `json:"upstream,omitempty"`
+	PruneHint        PruneHint `json:"prune_hint,omitempty"`
+	ContentOnDefault bool      `json:"content_on_default,omitempty"`
+	MergedID         int       `json:"merged_id,omitempty"`
+	MergedURL        string    `json:"merged_url,omitempty"`
+	MergedAt         string    `json:"merged_at,omitempty"`
+	AppearancePath   string    `json:"appearance_path,omitempty"`
+	AppearanceLabel  string    `json:"appearance_label,omitempty"`
 }
 
 // FailedJob is a failed CI job suitable for triage.
@@ -220,4 +230,7 @@ type Dashboard struct {
 	ActiveView          string           `json:"active_view"`
 	Tooling             Tooling          `json:"tooling"`
 	Projects            []ProjectSummary `json:"projects"`
+	// LocalWarnings lists local roots and checkouts the scan skipped (bad
+	// path, unreadable directory, unresolvable git dir). Display text.
+	LocalWarnings []string `json:"local_warnings,omitempty"`
 }

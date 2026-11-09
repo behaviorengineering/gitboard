@@ -2,11 +2,14 @@ package remotegit
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/clock"
 )
 
 // DefaultOpenTTL caches open reviews when SummaryOpts.OpenTTL is zero and Cache is set.
@@ -18,6 +21,7 @@ const DefaultCITTL = 30 * time.Second
 // SummaryOpts controls which forge slices use the TTL cache.
 type SummaryOpts struct {
 	Fresh     bool
+	Now       clock.Clock // required: marks branch staleness; ProjectSummary fails without it.
 	Cache     *TTLCache
 	Auth      *AuthCache    // optional request-scoped auth reuse.
 	HeadsTTL  time.Duration // 0 = always refetch heads.
@@ -26,10 +30,13 @@ type SummaryOpts struct {
 	CITTL     time.Duration // 0 = DefaultCITTL when Cache set; negative = always refetch.
 }
 
+// errSummaryClockMissing fails ProjectSummary closed when SummaryOpts.Now is nil.
+var errSummaryClockMissing = errors.New("remotegit.ProjectSummary: SummaryOpts.Now is required")
+
 // AuthCache reuses AuthStatus results within one dashboard collect (or similar request).
 type AuthCache struct {
-	mu   sync.Mutex
-	byID map[string]authResult
+	mu     sync.Mutex
+	byHost map[boardconfig.Host]authResult
 }
 
 type authResult struct {
@@ -40,16 +47,20 @@ type authResult struct {
 
 // NewAuthCache returns an empty request-scoped auth cache.
 func NewAuthCache() *AuthCache {
-	return &AuthCache{byID: map[string]authResult{}}
+	return &AuthCache{byHost: map[boardconfig.Host]authResult{}}
 }
 
-// GetOrCheck returns a cached auth result or calls check once per id.
-func (a *AuthCache) GetOrCheck(id string, check func() (installed, authed bool, detail string)) (installed, authed bool, detail string) {
+// GetOrCheck returns a cached auth result or calls check once per host.
+// A nil check reports the forge as not installed rather than panicking.
+func (a *AuthCache) GetOrCheck(host boardconfig.Host, check func() (installed, authed bool, detail string)) (installed, authed bool, detail string) {
+	if check == nil {
+		return false, false, "auth check missing"
+	}
 	if a == nil {
 		return check()
 	}
 	a.mu.Lock()
-	if got, ok := a.byID[id]; ok {
+	if got, ok := a.byHost[host]; ok {
 		a.mu.Unlock()
 		return got.installed, got.authed, got.detail
 	}
@@ -57,14 +68,14 @@ func (a *AuthCache) GetOrCheck(id string, check func() (installed, authed bool, 
 
 	installed, authed, detail = check()
 	a.mu.Lock()
-	if a.byID == nil {
-		a.byID = map[string]authResult{}
+	if a.byHost == nil {
+		a.byHost = map[boardconfig.Host]authResult{}
 	}
-	if got, ok := a.byID[id]; ok {
+	if got, ok := a.byHost[host]; ok {
 		a.mu.Unlock()
 		return got.installed, got.authed, got.detail
 	}
-	a.byID[id] = authResult{installed: installed, authed: authed, detail: detail}
+	a.byHost[host] = authResult{installed: installed, authed: authed, detail: detail}
 	a.mu.Unlock()
 	return installed, authed, detail
 }
@@ -73,8 +84,8 @@ func (a *AuthCache) GetOrCheck(id string, check func() (installed, authed bool, 
 // the ProjectSummary loading flow. Unexported methods are package-internal.
 type summaryLoader interface {
 	AuthStatus(ctx context.Context) (installed, authed bool, detail string)
-	// authCacheID is a stable key for request-scoped AuthCache (for example "github").
-	authCacheID() string
+	// host is the forge this loader serves; it keys the request-scoped AuthCache.
+	host() boardconfig.Host
 	// unauthMsg formats the not-authenticated error message for this forge.
 	unauthMsg(detail string) string
 	// seedHeads loads the default branch and a bounded first page of branch heads.
@@ -88,17 +99,33 @@ type summaryLoader interface {
 }
 
 // projectSummaryShared is the shared ProjectSummary flow used by forge adapters.
-// Loading order:
+// ready is the client's own readiness check: a client that is not ready
+// returns a stub row carrying the error. Loading order:
 //  1. auth check (request-scoped reuse when Auth is set)
 //  2. seed heads (default branch + first page; no 50-page census)
 //  3. loadOpenReviews (short TTL)
 //  4. loadCI (short TTL)
 //  5. loadMerged (via cache)
-func projectSummaryShared(ctx context.Context, p config.Project, opts SummaryOpts, loader summaryLoader) (board.ProjectSummary, error) {
-	summary := baseSummary(p)
+func projectSummaryShared(ctx context.Context, p boardconfig.Project, opts SummaryOpts, ready error, loader summaryLoader) (board.ProjectSummary, error) {
+	if ready != nil {
+		summary := BaseSummary(p)
+		summary.Error = ready.Error()
+		return summary, ready
+	}
+	if opts.Now == nil {
+		summary := BaseSummary(p)
+		summary.Error = errSummaryClockMissing.Error()
+		return summary, errSummaryClockMissing
+	}
+	return loadProjectSummary(ctx, p, opts, loader)
+}
+
+// loadProjectSummary is projectSummaryShared once opts carries a clock.
+func loadProjectSummary(ctx context.Context, p boardconfig.Project, opts SummaryOpts, loader summaryLoader) (board.ProjectSummary, error) {
+	summary := BaseSummary(p)
 
 	// Step 1: auth.
-	installed, authed, detail := opts.Auth.GetOrCheck(loader.authCacheID(), func() (bool, bool, string) {
+	installed, authed, detail := opts.Auth.GetOrCheck(loader.host(), func() (bool, bool, string) {
 		return loader.AuthStatus(ctx)
 	})
 	if !installed {
@@ -111,8 +138,8 @@ func projectSummaryShared(ctx context.Context, p config.Project, opts SummaryOpt
 	}
 
 	repo := p.Path
-	key := cacheKey(string(p.Host), repo)
-	branches := newBranchAccum()
+	key := CacheKey(p.Host, repo)
+	branches := newBranchAccum(opts.Now)
 
 	openTTL := opts.OpenTTL
 	if openTTL == 0 {
@@ -131,10 +158,10 @@ func projectSummaryShared(ctx context.Context, p config.Project, opts SummaryOpt
 	heads, headsErr := opts.Cache.GetOrLoadHeads(key, opts.HeadsTTL, opts.Fresh, func() (HeadsSnapshot, error) {
 		return loader.seedHeads(ctx, repo)
 	})
+	// loadErrs keeps every failed slice; summary.Error shows them all.
+	var loadErrs []error
 	if headsErr != nil {
-		if summary.Error == "" {
-			summary.Error = headsErr.Error()
-		}
+		loadErrs = append(loadErrs, headsErr)
 		summary.RemoteNamesOK = false
 	} else {
 		summary.RemoteNamesOK = true
@@ -151,13 +178,16 @@ func projectSummaryShared(ctx context.Context, p config.Project, opts SummaryOpt
 		summary.RemoteNames = names
 	}
 
-	// Step 3: open reviews (seeds PR/MR branches into branchAccum).
+	// Step 3: open reviews (seeds PR/MR branches into branchAccum). A failed
+	// load is never cached as "no open reviews"; openErr is the signal that
+	// the open-review gate is unknown for this row.
 	open, openErr := opts.Cache.GetOrLoadOpen(key, openTTL, opts.Fresh, func() (OpenReviewsSnapshot, error) {
 		return loader.loadOpenReviews(ctx, repo)
 	})
-	if openErr != nil && summary.Error == "" {
-		summary.Error = openErr.Error()
-	} else if openErr == nil {
+	summary.OpenOK = openErr == nil
+	if openErr != nil {
+		loadErrs = append(loadErrs, openErr)
+	} else {
 		applyOpenReviews(&summary, branches, open)
 	}
 
@@ -165,19 +195,26 @@ func projectSummaryShared(ctx context.Context, p config.Project, opts SummaryOpt
 	ci, ciErr := opts.Cache.GetOrLoadCI(key, ciTTL, opts.Fresh, func() (CISnapshot, error) {
 		return loader.loadCI(ctx, repo)
 	})
-	if ciErr != nil && summary.Error == "" {
-		summary.Error = ciErr.Error()
-	} else if ciErr == nil {
+	if ciErr != nil {
+		loadErrs = append(loadErrs, ciErr)
+	} else {
 		applyCI(&summary, branches, ci)
 	}
 
 	// Step 5: merged reviews (for prune hints).
-	merged, mergedOK := opts.Cache.GetOrLoadMerged(key, opts.MergedTTL, opts.Fresh, func() ([]board.MergedReview, error) {
+	merged, mergedErr := opts.Cache.GetOrLoadMerged(key, opts.MergedTTL, opts.Fresh, func() ([]board.MergedReview, error) {
 		return loader.loadMerged(ctx, repo)
 	})
+	if mergedErr != nil {
+		loadErrs = append(loadErrs, mergedErr)
+	}
 	summary.Merged = merged
-	summary.MergedOK = mergedOK
+	summary.MergedOK = mergedErr == nil
 	summary.Branches = branches.list()
+	if err := errors.Join(loadErrs...); err != nil {
+		// Display only: the row keeps every slice that did load.
+		summary.Error = strings.ReplaceAll(err.Error(), "\n", "; ")
+	}
 	return summary, nil
 }
 
@@ -207,6 +244,6 @@ func applyCI(summary *board.ProjectSummary, branches *branchAccum, ci CISnapshot
 		summary.CI = &cp
 	}
 	for _, r := range ci.Runs {
-		branches.setCI(r.Branch, r.Status, r.URL, r.UpdatedAt, r.RunID)
+		branches.setCI(r)
 	}
 }

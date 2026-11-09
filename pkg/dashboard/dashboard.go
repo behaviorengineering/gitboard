@@ -1,28 +1,35 @@
+// Package dashboard is public API: it aggregates tracked projects into board
+// rows from forge clients (pkg/remotegit) and local checkouts (pkg/localgit).
+// Service reads; Commands mutates local checkouts under a per-repository
+// lease and edits the config document (pkg/boardconfig).
 package dashboard
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/behaviorengineering/gitboard/internal/config"
 	"github.com/behaviorengineering/gitboard/pkg/board"
+	"github.com/behaviorengineering/gitboard/pkg/boardconfig"
+	"github.com/behaviorengineering/gitboard/pkg/cliexec"
+	"github.com/behaviorengineering/gitboard/pkg/clock"
 	"github.com/behaviorengineering/gitboard/pkg/localgit"
 	"github.com/behaviorengineering/gitboard/pkg/remotegit"
 )
 
 // Service aggregates project rows via forge CLIs and optional local git.
+// Build it with ServiceConfig.CreateService.
 type Service struct {
-	GitHub      *remotegit.GitHub
-	GitLab      *remotegit.GitLab
-	AzureDevOps *remotegit.AzureDevOps
-	Bitbucket   *remotegit.Bitbucket
-	Local       LocalGit
-	Cache       *remotegit.TTLCache
-	OriginFetch *localgit.OriginFetchCache
-	Mutations   *localgit.MutationCoordinator
+	gitHub      *remotegit.GitHub
+	gitLab      *remotegit.GitLab
+	azureDevOps *remotegit.AzureDevOps
+	bitbucket   *remotegit.Bitbucket
+	local       LocalGit
+	cache       *remotegit.TTLCache
+	originFetch *localgit.OriginFetchCache
+	mutations   *localgit.MutationCoordinator
+	clock       clock.Clock
 
 	scanMu   sync.Mutex
 	scanKey  string
@@ -30,17 +37,60 @@ type Service struct {
 	scanDisc localgit.Discovery
 }
 
-// New returns a dashboard service with in-memory upstream and origin-fetch caches.
-func New(gh *remotegit.GitHub, gl *remotegit.GitLab, az *remotegit.AzureDevOps, bb *remotegit.Bitbucket, local LocalGit) *Service {
+// ServiceConfig holds what a Service needs at construction time.
+type ServiceConfig struct {
+	// GitHub, GitLab, AzureDevOps and Bitbucket are the forge clients. Required.
+	GitHub      *remotegit.GitHub
+	GitLab      *remotegit.GitLab
+	AzureDevOps *remotegit.AzureDevOps
+	Bitbucket   *remotegit.Bitbucket
+	// Local reads and mutates checkouts. Optional: nil for sync-only callers;
+	// local columns and pull, prune and investigate commands are then off.
+	Local LocalGit
+	// Mutations serialises local git writes per common git directory.
+	// Optional: nil builds one with the platform OS lock. Pass the same
+	// coordinator to every service that writes the same repositories.
+	Mutations *localgit.MutationCoordinator
+	// Clock stamps responses and drives every TTL cache. Optional: nil uses
+	// the wall clock.
+	Clock clock.Clock
+}
+
+// DefaultServiceConfig returns a config with the four forge clients: GitHub,
+// GitLab and Azure DevOps run their CLIs on run; Bitbucket calls its REST API
+// with environment credentials. Callers set Local (for example
+// NewLocalGit(run)) when they need local checkouts.
+func DefaultServiceConfig(run cliexec.Exec) ServiceConfig {
+	return ServiceConfig{
+		GitHub:      remotegit.NewGitHub(run),
+		GitLab:      remotegit.NewGitLab(run),
+		AzureDevOps: remotegit.NewAzureDevOps(run),
+		Bitbucket:   remotegit.DefaultBitbucketConfig().CreateBitbucket(),
+	}
+}
+
+// CreateService validates the config and builds a Service with in-memory
+// forge and origin-fetch caches on the config clock.
+// Panics if a forge client is nil (required dependencies at wire-up).
+func (cfg ServiceConfig) CreateService() *Service {
+	if cfg.GitHub == nil || cfg.GitLab == nil || cfg.AzureDevOps == nil || cfg.Bitbucket == nil {
+		panic("dashboard.CreateService: GitHub, GitLab, AzureDevOps and Bitbucket clients are required")
+	}
+	now := clock.OrWall(cfg.Clock)
+	mutations := cfg.Mutations
+	if mutations == nil {
+		mutations = localgit.NewMutationCoordinator(localgit.DefaultOSLocker())
+	}
 	return &Service{
-		GitHub:      gh,
-		GitLab:      gl,
-		AzureDevOps: az,
-		Bitbucket:   bb,
-		Local:       local,
-		Cache:       remotegit.NewTTLCache(),
-		OriginFetch: localgit.NewOriginFetchCache(),
-		Mutations:   localgit.NewMutationCoordinator(localgit.DefaultOSLocker()),
+		gitHub:      cfg.GitHub,
+		gitLab:      cfg.GitLab,
+		azureDevOps: cfg.AzureDevOps,
+		bitbucket:   cfg.Bitbucket,
+		local:       cfg.Local,
+		cache:       remotegit.NewTTLCache(now),
+		originFetch: localgit.NewOriginFetchCache(now),
+		mutations:   mutations,
+		clock:       now,
 	}
 }
 
@@ -49,12 +99,8 @@ func (s *Service) ClearCaches() {
 	if s == nil {
 		return
 	}
-	if s.Cache != nil {
-		s.Cache.Clear()
-	}
-	if s.OriginFetch != nil {
-		s.OriginFetch.Clear()
-	}
+	s.cache.Clear()
+	s.originFetch.Clear()
 	s.scanMu.Lock()
 	s.scanKey = ""
 	s.scanAt = time.Time{}
@@ -69,90 +115,78 @@ func (s *Service) ToolingStatus(ctx context.Context) board.Tooling {
 	if s == nil {
 		return out
 	}
-	auth := remotegit.NewAuthCache()
-	if s.GitHub != nil {
-		out.GitHub.Installed, out.GitHub.Authed, out.GitHub.Detail = auth.GetOrCheck("github", func() (bool, bool, string) {
-			return s.GitHub.AuthStatus(ctx)
+	return s.toolingStatus(ctx, remotegit.NewAuthCache(), boardconfig.HostGitHub, boardconfig.HostGitLab)
+}
+
+// toolingStatus probes each host's forge client once through auth and fills
+// its Tooling entry. Hosts not listed stay zero.
+func (s *Service) toolingStatus(ctx context.Context, auth *remotegit.AuthCache, hosts ...boardconfig.Host) board.Tooling {
+	var out board.Tooling
+	for _, host := range hosts {
+		c := s.clientFor(host)
+		if c == nil {
+			continue
+		}
+		installed, authed, detail := auth.GetOrCheck(host, func() (bool, bool, string) {
+			return c.AuthStatus(ctx)
 		})
-	}
-	if s.GitLab != nil {
-		out.GitLab.Installed, out.GitLab.Authed, out.GitLab.Detail = auth.GetOrCheck("gitlab", func() (bool, bool, string) {
-			return s.GitLab.AuthStatus(ctx)
-		})
+		setToolStatus(&out, host, installed, authed, detail)
 	}
 	return out
+}
+
+// setToolStatus writes one forge's probe result into its Tooling field.
+func setToolStatus(t *board.Tooling, host boardconfig.Host, installed, authed bool, detail string) {
+	switch host {
+	case boardconfig.HostGitHub:
+		t.GitHub.Installed, t.GitHub.Authed, t.GitHub.Detail = installed, authed, detail
+	case boardconfig.HostGitLab:
+		t.GitLab.Installed, t.GitLab.Authed, t.GitLab.Detail = installed, authed, detail
+	case boardconfig.HostAzureDevOps:
+		t.AzureDevOps.Installed, t.AzureDevOps.Authed, t.AzureDevOps.Detail = installed, authed, detail
+	case boardconfig.HostBitbucket:
+		t.Bitbucket.Installed, t.Bitbucket.Authed, t.Bitbucket.Detail = installed, authed, detail
+	}
 }
 
 // CollectOpts controls dashboard aggregation.
 type CollectOpts struct {
 	Fresh  bool
 	ViewID string
+	// RowBudget bounds each project's forge summary, so one slow forge
+	// cannot hold the whole board. Zero leaves the caller's deadline as the
+	// only bound. The HTTP handler sets it; library callers choose their own.
+	RowBudget time.Duration
 }
 
 // Collect builds the dashboard for projects in the resolved view.
 // When fresh is true, forge and origin-fetch TTL caches are bypassed for this request.
 // Empty viewID selects the first effective view. Unknown viewID returns an error.
-func (s *Service) Collect(ctx context.Context, doc config.File, fresh bool, viewID string) (board.Dashboard, error) {
-	return s.CollectWith(ctx, doc, CollectOpts{Fresh: fresh, ViewID: viewID})
+func (s *Service) Collect(ctx context.Context, doc boardconfig.File, fresh bool, viewID string) (board.Dashboard, error) {
+	return s.CollectStream(ctx, doc, CollectOpts{Fresh: fresh, ViewID: viewID}, nil)
 }
 
-// CollectWith builds the dashboard using CollectOpts.
-func (s *Service) CollectWith(ctx context.Context, doc config.File, opts CollectOpts) (board.Dashboard, error) {
-	return s.CollectStream(ctx, doc, opts, nil)
-}
-
-// CollectStream builds the dashboard like CollectWith. When onProject is set, it is
+// CollectStream builds the dashboard like Collect. When onProject is set, it is
 // called as each project row finishes (completion order, may be concurrent).
 // The returned Dashboard.Projects slice is always in view membership order.
-func (s *Service) CollectStream(ctx context.Context, doc config.File, opts CollectOpts, onProject func(board.ProjectSummary)) (board.Dashboard, error) {
+func (s *Service) CollectStream(ctx context.Context, doc boardconfig.File, opts CollectOpts, onProject func(board.ProjectSummary)) (board.Dashboard, error) {
+	if s == nil {
+		return board.Dashboard{}, unavailable("dashboard.CollectStream", ErrServiceMissing)
+	}
 	out := board.Dashboard{
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		GeneratedAt: s.clock().UTC().Format(time.RFC3339),
 		Views:       ViewSummaries(doc),
 	}
 	projects, view, err := doc.ProjectsForView(opts.ViewID)
 	if err != nil {
-		return out, err
+		return out, invalidCause("dashboard.CollectStream", "unknown view", err)
 	}
 	out.ActiveView = view.ID
-	if s == nil {
-		return out, nil
-	}
 	auth := remotegit.NewAuthCache()
-	if s.GitHub != nil {
-		installed, authed, detail := auth.GetOrCheck("github", func() (bool, bool, string) {
-			return s.GitHub.AuthStatus(ctx)
-		})
-		out.Tooling.GitHub.Installed = installed
-		out.Tooling.GitHub.Authed = authed
-		out.Tooling.GitHub.Detail = detail
-	}
-	if s.GitLab != nil {
-		installed, authed, detail := auth.GetOrCheck("gitlab", func() (bool, bool, string) {
-			return s.GitLab.AuthStatus(ctx)
-		})
-		out.Tooling.GitLab.Installed = installed
-		out.Tooling.GitLab.Authed = authed
-		out.Tooling.GitLab.Detail = detail
-	}
-	if s.AzureDevOps != nil {
-		installed, authed, detail := auth.GetOrCheck("azuredevops", func() (bool, bool, string) {
-			return s.AzureDevOps.AuthStatus(ctx)
-		})
-		out.Tooling.AzureDevOps.Installed = installed
-		out.Tooling.AzureDevOps.Authed = authed
-		out.Tooling.AzureDevOps.Detail = detail
-	}
-	if s.Bitbucket != nil {
-		installed, authed, detail := auth.GetOrCheck("bitbucket", func() (bool, bool, string) {
-			return s.Bitbucket.AuthStatus(ctx)
-		})
-		out.Tooling.Bitbucket.Installed = installed
-		out.Tooling.Bitbucket.Authed = authed
-		out.Tooling.Bitbucket.Detail = detail
-	}
+	out.Tooling = s.toolingStatus(ctx, auth, boardconfig.Hosts()...)
 
 	var disc localgit.Discovery
-	if s.Local != nil && len(doc.Local.Roots) > 0 {
+	if s.local != nil && len(doc.Local.Roots) > 0 {
 		scanTTL := time.Duration(doc.EffectiveScanSeconds()) * time.Second
 		disc = s.scanRootsCached(ctx, doc.Local.Roots, scanTTL, opts.Fresh)
 	}
@@ -160,50 +194,75 @@ func (s *Service) CollectStream(ctx context.Context, doc config.File, opts Colle
 
 	summaryOpts := remotegit.SummaryOpts{
 		Fresh:     opts.Fresh,
-		Cache:     s.Cache,
+		Now:       s.clock,
+		Cache:     s.cache,
 		Auth:      auth,
 		HeadsTTL:  time.Duration(doc.EffectiveHeadsSeconds()) * time.Second,
 		MergedTTL: time.Duration(doc.EffectiveMergedSeconds()) * time.Second,
 	}
-	fetchTTL := time.Duration(doc.EffectiveFetchSeconds()) * time.Second
+	local := localInputs{
+		disc:     disc,
+		labels:   labelByKey,
+		fresh:    opts.Fresh,
+		fetchTTL: time.Duration(doc.EffectiveFetchSeconds()) * time.Second,
+	}
+
+	out.LocalWarnings = disc.Warnings
+	row := rowInputs{summary: summaryOpts, local: local, budget: opts.RowBudget}
 
 	rows := make([]board.ProjectSummary, len(projects))
-	sem := make(chan struct{}, originFetchParallel)
-	var wg sync.WaitGroup
 	var emitMu sync.Mutex
-	for i, p := range projects {
+	parallel(len(projects), collectParallel, func(i int) {
 		if ctx.Err() != nil {
-			break
+			return
 		}
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int, p config.Project) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if ctx.Err() != nil {
-				return
-			}
-			rowCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			defer cancel()
-			row := s.summarize(rowCtx, p, summaryOpts)
-			forgeBranches := filterHiddenBranches(row.Branches, doc.UI.HideBranches)
-			row.Local = s.attachLocal(ctx, p, disc, labelByKey, opts.Fresh, fetchTTL, forgeBranchNames(forgeBranches))
-			s.annotateContentOnDefault(ctx, &row)
-			s.confirmMergedForCandidates(ctx, p, &row, summaryOpts)
-			remotegit.EnrichPruneHints(&row)
-			row.Branches = forgeBranches
-			syncOpenItemsToVisibleBranches(&row)
-			rows[i] = row
-			if onProject != nil {
-				emitMu.Lock()
-				onProject(row)
-				emitMu.Unlock()
-			}
-		}(i, p)
-	}
-	wg.Wait()
+		rows[i] = s.collectRow(ctx, doc, projects[i], row)
+		if onProject != nil {
+			emitMu.Lock()
+			onProject(rows[i])
+			emitMu.Unlock()
+		}
+	})
 	out.Projects = rows
 	return out, nil
+}
+
+// rowInputs is what every project row of one collect shares.
+type rowInputs struct {
+	summary remotegit.SummaryOpts
+	local   localInputs
+	// budget bounds the forge summary; zero means the caller's deadline only.
+	budget time.Duration
+}
+
+// collectRow builds one project's board row: the forge summary, the local
+// checkouts, prune hints, then the hide_branches filter.
+func (s *Service) collectRow(ctx context.Context, doc boardconfig.File, p boardconfig.Project, in rowInputs) board.ProjectSummary {
+	summaryCtx := ctx
+	if in.budget > 0 {
+		var cancel context.CancelFunc
+		summaryCtx, cancel = context.WithTimeout(ctx, in.budget)
+		defer cancel()
+	}
+	row := s.summarize(summaryCtx, p, in.summary)
+	forgeBranches := filterHiddenBranches(row.Branches, doc.UI.HideBranches)
+	local := in.local
+	local.forgeBranches = forgeBranchNames(forgeBranches)
+	row.Local = s.attachLocal(ctx, p, local)
+	s.annotatePrune(ctx, p, &row, in.summary)
+	row.Branches = forgeBranches
+	syncOpenItemsToVisibleBranches(&row)
+	return row
+}
+
+// annotatePrune gathers prune evidence for the row's candidates (content on
+// default, per-branch merged lookups) and sets every worktree's prune hint.
+// It runs on the unfiltered forge branches, so a hidden branch row still
+// blocks a prune.
+func (s *Service) annotatePrune(ctx context.Context, p boardconfig.Project, row *board.ProjectSummary, opts remotegit.SummaryOpts) {
+	s.annotateContentOnDefault(ctx, row)
+	s.confirmMergedForCandidates(ctx, p, row, opts)
+	enrichPruneHints(row)
 }
 
 func rootsCacheKey(roots []string) string {
@@ -213,35 +272,35 @@ func rootsCacheKey(roots []string) string {
 // scanRootsCached returns a TTL-gated Discovery for local roots.
 // fresh bypasses the cache; a successful scan always replaces the entry.
 func (s *Service) scanRootsCached(ctx context.Context, roots []string, ttl time.Duration, fresh bool) localgit.Discovery {
-	if s == nil || s.Local == nil || len(roots) == 0 {
+	if s == nil || s.local == nil || len(roots) == 0 {
 		return localgit.Discovery{}
 	}
 	key := rootsCacheKey(roots)
 	if !fresh && ttl > 0 {
 		s.scanMu.Lock()
-		hit := s.scanKey == key && !s.scanAt.IsZero() && time.Since(s.scanAt) < ttl
+		hit := s.scanKey == key && !s.scanAt.IsZero() && s.clock().Sub(s.scanAt) < ttl
 		disc := s.scanDisc
 		s.scanMu.Unlock()
 		if hit {
 			return disc
 		}
 	}
-	disc := s.Local.ScanRoots(ctx, roots)
+	disc := s.local.ScanRoots(ctx, roots)
 	if ctx.Err() != nil {
 		return disc
 	}
 	s.scanMu.Lock()
 	s.scanKey = key
-	s.scanAt = time.Now()
+	s.scanAt = s.clock()
 	s.scanDisc = disc
 	s.scanMu.Unlock()
 	return disc
 }
 
-func projectLabelsByKey(projects []config.Project) map[string]string {
+func projectLabelsByKey(projects []boardconfig.Project) map[string]string {
 	out := make(map[string]string, len(projects))
 	for _, p := range projects {
-		key := localgit.TrackKey(string(p.Host), p.Path)
+		key := localgit.TrackKey(p.Host, p.Path)
 		label := strings.TrimSpace(p.Label)
 		if label == "" {
 			label = strings.TrimSpace(p.ID)
@@ -252,253 +311,6 @@ func projectLabelsByKey(projects []config.Project) map[string]string {
 		out[key] = label
 	}
 	return out
-}
-
-func (s *Service) attachLocal(ctx context.Context, p config.Project, disc localgit.Discovery, labelByKey map[string]string, fresh bool, fetchTTL time.Duration, forgeBranches []string) *board.LocalStatus {
-	if s.Local == nil {
-		return nil
-	}
-	checkouts := disc.Appearances(string(p.Host), p.Path)
-	explicit := strings.TrimSpace(p.LocalPath)
-	if len(checkouts) == 0 && explicit == "" {
-		if len(disc.ByKey) == 0 {
-			return nil
-		}
-		return &board.LocalStatus{Mapped: false}
-	}
-
-	primary, ok := localgit.PickPrimary(explicit, checkouts)
-	if !ok {
-		return &board.LocalStatus{Mapped: false}
-	}
-
-	// Ensure primary path is in the inspect list even when local_path is outside scan.
-	inspectList := checkouts
-	if explicit != "" {
-		absPrimary := primary.Path
-		if expanded, err := localgit.ExpandPath(primary.Path); err == nil {
-			absPrimary = expanded
-			primary.Path = absPrimary
-		}
-		found := false
-		for _, c := range inspectList {
-			if filepath.Clean(c.Path) == filepath.Clean(absPrimary) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			localgit.FillCheckoutMeta(&primary)
-			inspectList = append([]localgit.Checkout{primary}, inspectList...)
-		}
-	}
-
-	targetBranches := s.originFetchBranches(ctx, inspectList, forgeBranches)
-	fetchErrByCommon := s.refreshOrigins(ctx, inspectList, fresh, fetchTTL, targetBranches)
-	// Capture epochs after our own fetch bump so only concurrent mutations invalidate.
-	epochsBeforeInspect := s.mutationEpochs(ctx, inspectList)
-
-	type inspected struct {
-		checkout localgit.Checkout
-		status   localgit.Status
-	}
-	results := make([]inspected, len(inspectList))
-	var wg sync.WaitGroup
-	for i, c := range inspectList {
-		wg.Add(1)
-		go func(i int, c localgit.Checkout) {
-			defer wg.Done()
-			st := s.Local.InspectPath(ctx, c.Path)
-			s.Local.EnrichOriginSync(ctx, &st)
-			if st.Error == "" {
-				if err := fetchErrFor(c, fetchErrByCommon, s.Local, ctx); err != nil {
-					st.Error = err.Error()
-					localgit.InvalidateOriginSync(&st)
-				}
-			}
-			if s.mutationEpochChanged(ctx, c, epochsBeforeInspect) {
-				localgit.InvalidateOriginSync(&st)
-			}
-			results[i] = inspected{checkout: c, status: st}
-		}(i, c)
-	}
-	wg.Wait()
-
-	parentLabelCache := map[string]string{}
-	appearances := make([]board.LocalAppearance, 0, len(results))
-	var union []board.LocalWorktree
-	var primaryLocal *board.LocalStatus
-
-	primaryPath := filepath.Clean(primary.Path)
-	for _, r := range results {
-		c := r.checkout
-		parentLabel := ""
-		if c.Role == localgit.RoleSubmodule && c.Superproject != "" {
-			parentLabel = s.parentLabel(ctx, c.Superproject, labelByKey, parentLabelCache)
-		}
-		displayID := localgit.DisplayID(c, parentLabel)
-		app := statusToAppearance(c, r.status, displayID, parentLabel)
-		isPrimary := filepath.Clean(c.Path) == primaryPath
-		app.Primary = isPrimary
-		appearances = append(appearances, app)
-
-		for _, wt := range app.Worktrees {
-			if wt.Bare {
-				continue
-			}
-			wt.AppearancePath = c.Path
-			wt.AppearanceLabel = displayID
-			union = append(union, wt)
-		}
-
-		if isPrimary {
-			primaryLocal = toBoardLocal(r.status)
-		}
-	}
-
-	if primaryLocal == nil {
-		// Explicit path inspect may have failed matching; inspect primary alone.
-		st := s.Local.InspectPath(ctx, primary.Path)
-		s.Local.EnrichOriginSync(ctx, &st)
-		if st.Error == "" {
-			if err := fetchErrFor(primary, fetchErrByCommon, s.Local, ctx); err != nil {
-				st.Error = err.Error()
-				localgit.InvalidateOriginSync(&st)
-			}
-		}
-		primaryLocal = toBoardLocal(st)
-	}
-	primaryLocal.Appearances = appearances
-	primaryLocal.Worktrees = union
-	return primaryLocal
-}
-
-// refreshOrigins runs TTL-gated origin refresh once per unique common git dir.
-// Fresh or expired full TTL uses `git fetch --prune origin`. Warm TTL uses a
-// targeted fetch of the supplied branches (empty list skips network).
-// At most originFetchParallel fetches run at once to bound network load.
-const originFetchParallel = 8
-
-func (s *Service) refreshOrigins(ctx context.Context, checkouts []localgit.Checkout, fresh bool, fetchTTL time.Duration, branches []string) map[string]error {
-	out := map[string]error{}
-	if s.Local == nil || len(checkouts) == 0 {
-		return out
-	}
-	type job struct {
-		path   string
-		common string
-	}
-	jobs := make([]job, 0, len(checkouts))
-	seen := map[string]struct{}{}
-	for _, c := range checkouts {
-		path := c.Path
-		if path == "" {
-			continue
-		}
-		common := strings.TrimSpace(c.CommonGitDir)
-		if common == "" {
-			cd, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, path)
-			if err != nil {
-				muCommon := filepath.Clean(path)
-				out[muCommon] = err
-				continue
-			}
-			common = cd
-		}
-		common = filepath.Clean(common)
-		if _, ok := seen[common]; ok {
-			continue
-		}
-		seen[common] = struct{}{}
-		jobs = append(jobs, job{path: path, common: common})
-	}
-
-	limit := originFetchParallel
-	if limit < 1 {
-		limit = 1
-	}
-	sem := make(chan struct{}, limit)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, j := range jobs {
-		wg.Add(1)
-		go func(j job) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			if err := s.fetchOriginLocked(ctx, j.path, j.common, fetchTTL, fresh, branches); err != nil {
-				mu.Lock()
-				out[j.common] = err
-				mu.Unlock()
-			}
-		}(j)
-	}
-	wg.Wait()
-	return out
-}
-
-func (s *Service) fetchOriginLocked(ctx context.Context, path, common string, fetchTTL time.Duration, fresh bool, branches []string) error {
-	lease, err := s.Mutations.Acquire(ctx, common)
-	if err != nil {
-		return err
-	}
-	defer lease.Release()
-	updated, err := s.Local.FetchOriginSmart(ctx, path, fetchTTL, fresh, s.OriginFetch, branches)
-	if err != nil {
-		return err
-	}
-	if updated {
-		lease.BumpEpoch()
-	}
-	return nil
-}
-
-func (s *Service) mutationEpochs(ctx context.Context, checkouts []localgit.Checkout) map[string]uint64 {
-	out := map[string]uint64{}
-	if s == nil || s.Mutations == nil {
-		return out
-	}
-	for _, c := range checkouts {
-		common := s.checkoutCommonDir(ctx, c)
-		if common == "" {
-			continue
-		}
-		if _, ok := out[common]; ok {
-			continue
-		}
-		out[common] = s.Mutations.Epoch(common)
-	}
-	return out
-}
-
-func (s *Service) mutationEpochChanged(ctx context.Context, c localgit.Checkout, before map[string]uint64) bool {
-	if s == nil || s.Mutations == nil || before == nil {
-		return false
-	}
-	common := s.checkoutCommonDir(ctx, c)
-	if common == "" {
-		return false
-	}
-	prev, ok := before[common]
-	if !ok {
-		return false
-	}
-	return s.Mutations.Epoch(common) != prev
-}
-
-func (s *Service) checkoutCommonDir(ctx context.Context, c localgit.Checkout) string {
-	common := strings.TrimSpace(c.CommonGitDir)
-	if common != "" {
-		return filepath.Clean(common)
-	}
-	if s.Local == nil || c.Path == "" {
-		return ""
-	}
-	cd, err := localgit.ResolveCommonDir(ctx, s.Local.CommonGitDir, c.Path)
-	if err != nil {
-		return ""
-	}
-	return cd
 }
 
 func forgeBranchNames(branches []board.BranchRef) []string {
@@ -513,262 +325,48 @@ func forgeBranchNames(branches []board.BranchRef) []string {
 	return out
 }
 
-// originFetchBranches unions visible forge branch names with local heads so
-// OriginSync and attention ranking stay accurate after a targeted fetch.
-func (s *Service) originFetchBranches(ctx context.Context, checkouts []localgit.Checkout, forgeBranches []string) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	add := func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	for _, name := range forgeBranches {
-		add(name)
-	}
-	if s == nil || s.Local == nil {
-		return out
-	}
-	for _, c := range checkouts {
-		if c.Path == "" || ctx.Err() != nil {
-			continue
-		}
-		heads, err := s.Local.ListLocalHeads(ctx, c.Path)
-		if err != nil {
-			continue
-		}
-		for _, name := range heads {
-			add(name)
-		}
-	}
-	return out
-}
-
-func fetchErrFor(c localgit.Checkout, byCommon map[string]error, in LocalGit, ctx context.Context) error {
-	if len(byCommon) == 0 {
-		return nil
-	}
-	common := strings.TrimSpace(c.CommonGitDir)
-	if common == "" && in != nil && c.Path != "" {
-		if cd, err := in.CommonGitDir(ctx, c.Path); err == nil && cd != "" {
-			common = cd
-		} else {
-			common = c.Path
-		}
-	}
-	common = filepath.Clean(common)
-	if err, ok := byCommon[common]; ok {
-		return err
-	}
-	return nil
-}
-
-func (s *Service) parentLabel(ctx context.Context, parentPath string, labelByKey map[string]string, cache map[string]string) string {
-	parentPath = filepath.Clean(parentPath)
-	if v, ok := cache[parentPath]; ok {
-		return v
-	}
-	label := filepath.Base(parentPath)
-	if s.Local != nil {
-		url, err := s.Local.OriginRemote(ctx, parentPath)
-		if err == nil {
-			if ref, ok := localgit.ParseRemoteURL(url); ok {
-				if lb, ok := labelByKey[localgit.TrackKey(ref.Host, ref.Path)]; ok {
-					label = lb
-				}
-			}
-		}
-	}
-	cache[parentPath] = label
-	return label
-}
-
-func statusToAppearance(c localgit.Checkout, st localgit.Status, displayID, parentLabel string) board.LocalAppearance {
-	app := board.LocalAppearance{
-		Role:          c.Role,
-		Path:          c.Path,
-		DisplayID:     displayID,
-		ParentPath:    c.Superproject,
-		ParentLabel:   parentLabel,
-		RelPath:       c.RelPath,
-		Error:         st.Error,
-		Branch:        st.Branch,
-		Tag:           st.Tag,
-		Detached:      st.Detached,
-		Dirty:         st.Dirty,
-		Ahead:         st.Ahead,
-		Behind:        st.Behind,
-		Upstream:      st.Upstream,
-		DefaultBranch: st.DefaultBranch,
-		DefaultBehind: st.DefaultBehind,
-		DefaultAhead:  st.DefaultAhead,
-		OriginSync:    originSyncToBoard(st.OriginSync),
-	}
-	if app.Role == "" {
-		app.Role = board.AppearanceStandalone
-	}
-	for _, wt := range st.Worktrees {
-		if wt.Bare {
-			continue
-		}
-		app.Worktrees = append(app.Worktrees, board.LocalWorktree{
-			Path:            wt.Path,
-			Branch:          wt.Branch,
-			Tag:             wt.Tag,
-			Detached:        wt.Detached,
-			Bare:            wt.Bare,
-			Main:            wt.Main,
-			Dirty:           wt.Dirty,
-			Ahead:           wt.Ahead,
-			Behind:          wt.Behind,
-			Upstream:        wt.Upstream,
-			AppearancePath:  c.Path,
-			AppearanceLabel: displayID,
-		})
-	}
-	return app
-}
-
-func toBoardLocal(st localgit.Status) *board.LocalStatus {
-	out := &board.LocalStatus{
-		Mapped:        st.Mapped,
-		Path:          st.Path,
-		Error:         st.Error,
-		Branch:        st.Branch,
-		Tag:           st.Tag,
-		Detached:      st.Detached,
-		Dirty:         st.Dirty,
-		Ahead:         st.Ahead,
-		Behind:        st.Behind,
-		Upstream:      st.Upstream,
-		DefaultBranch: st.DefaultBranch,
-		DefaultBehind: st.DefaultBehind,
-		DefaultAhead:  st.DefaultAhead,
-		OriginSync:    originSyncToBoard(st.OriginSync),
-	}
-	for _, wt := range st.Worktrees {
-		if wt.Bare {
-			continue
-		}
-		out.Worktrees = append(out.Worktrees, board.LocalWorktree{
-			Path:     wt.Path,
-			Branch:   wt.Branch,
-			Tag:      wt.Tag,
-			Detached: wt.Detached,
-			Bare:     wt.Bare,
-			Main:     wt.Main,
-			Dirty:    wt.Dirty,
-			Ahead:    wt.Ahead,
-			Behind:   wt.Behind,
-			Upstream: wt.Upstream,
-		})
-	}
-	return out
-}
-
-func originSyncToBoard(in []localgit.BranchSync) []board.BranchOriginSync {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]board.BranchOriginSync, len(in))
-	for i, s := range in {
-		out[i] = board.BranchOriginSync{Name: s.Name, Ahead: s.Ahead, Behind: s.Behind}
-	}
-	return out
-}
-
-func (s *Service) summarize(ctx context.Context, p config.Project, opts remotegit.SummaryOpts) board.ProjectSummary {
-	missing := func(client string) board.ProjectSummary {
-		return board.ProjectSummary{
-			ID: p.ID, Label: p.Label, Host: string(p.Host), Path: p.Path, Org: forgeOrg(p.Path),
-			OpenURL: p.OpenURL(), Capabilities: remotegit.HostCapabilities(p.Host), Error: client + " client missing",
-		}
-	}
-	switch p.Host {
-	case config.HostGitHub:
-		if s.GitHub == nil {
-			return missing("github")
-		}
-		row, _ := s.GitHub.ProjectSummary(ctx, p, opts)
+func (s *Service) summarize(ctx context.Context, p boardconfig.Project, opts remotegit.SummaryOpts) board.ProjectSummary {
+	client := s.clientFor(p.Host)
+	if client == nil {
+		row := remotegit.BaseSummary(p)
+		row.Error = "unsupported host"
 		return row
-	case config.HostGitLab:
-		if s.GitLab == nil {
-			return missing("gitlab")
-		}
-		row, _ := s.GitLab.ProjectSummary(ctx, p, opts)
-		return row
-	case config.HostAzureDevOps:
-		if s.AzureDevOps == nil {
-			return missing("azuredevops")
-		}
-		row, _ := s.AzureDevOps.ProjectSummary(ctx, p, opts)
-		return row
-	case config.HostBitbucket:
-		if s.Bitbucket == nil {
-			return missing("bitbucket")
-		}
-		row, _ := s.Bitbucket.ProjectSummary(ctx, p, opts)
-		return row
-	default:
-		return board.ProjectSummary{
-			ID: p.ID, Label: p.Label, Host: string(p.Host), Path: p.Path, Org: forgeOrg(p.Path),
-			OpenURL: p.OpenURL(), Capabilities: remotegit.HostCapabilities(p.Host), Error: "unsupported host",
-		}
 	}
-}
-
-func forgeOrg(path string) string {
-	path = strings.Trim(path, "/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		return ""
-	}
-	return strings.Join(parts[:len(parts)-1], "/")
+	// The row carries any load error in row.Error; the returned error only
+	// repeats it for callers that need the chain.
+	row, _ := client.ProjectSummary(ctx, p, opts)
+	return row
 }
 
 // FindProject returns a project by id.
-func FindProject(projects []config.Project, id string) (config.Project, bool) {
+func FindProject(projects []boardconfig.Project, id string) (boardconfig.Project, bool) {
 	for _, p := range projects {
 		if p.ID == id {
 			return p, true
 		}
 	}
-	return config.Project{}, false
+	return boardconfig.Project{}, false
 }
 
-// ClientFor returns the forge client for a project host.
-// A missing client is a true nil interface (not a typed nil pointer).
-func ClientFor(s *Service, p config.Project) remotegit.Client {
+// ClientFor returns the forge client for a project host, or nil for an
+// unsupported host or a nil Service.
+func ClientFor(s *Service, p boardconfig.Project) remotegit.Client {
 	if s == nil {
 		return nil
 	}
-	switch p.Host {
-	case config.HostGitHub:
-		if s.GitHub == nil {
-			return nil
-		}
-		return s.GitHub
-	case config.HostGitLab:
-		if s.GitLab == nil {
-			return nil
-		}
-		return s.GitLab
-	case config.HostAzureDevOps:
-		if s.AzureDevOps == nil {
-			return nil
-		}
-		return s.AzureDevOps
-	case config.HostBitbucket:
-		if s.Bitbucket == nil {
-			return nil
-		}
-		return s.Bitbucket
+	return s.clientFor(p.Host)
+}
+
+func (s *Service) clientFor(host boardconfig.Host) remotegit.Client {
+	switch host {
+	case boardconfig.HostGitHub:
+		return s.gitHub
+	case boardconfig.HostGitLab:
+		return s.gitLab
+	case boardconfig.HostAzureDevOps:
+		return s.azureDevOps
+	case boardconfig.HostBitbucket:
+		return s.bitbucket
 	default:
 		return nil
 	}

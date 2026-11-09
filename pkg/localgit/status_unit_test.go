@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestInspectPathWithFakeExec(t *testing.T) {
@@ -53,7 +54,7 @@ func TestLooksLikeGitDir(t *testing.T) {
 func TestInspectPathResolvesSubmoduleGitDir(t *testing.T) {
 	checkout := t.TempDir()
 	gitdir := filepath.Join(checkout, ".git", "modules", "prov")
-	if err := os.MkdirAll(gitdir, 0o755); err != nil {
+	if err := os.MkdirAll(gitdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	fk := &fakeExec{
@@ -104,11 +105,14 @@ func TestEnrichOriginSyncWithFakeExec(t *testing.T) {
 	dir := t.TempDir()
 	fk := &fakeExec{
 		responses: map[string][]byte{
-			"symbolic-ref --quiet refs/remotes/origin/HEAD":                                  []byte("refs/remotes/origin/main\n"),
-			"for-each-ref --format=%(refname:short) refs/heads/":                             []byte("main\nfeature\n"),
-			"for-each-ref --format=%(refname:short) refs/remotes/origin/":                    []byte("origin/main\norigin/feature\n"),
-			"rev-list --left-right --count refs/remotes/origin/main...refs/heads/main":       []byte("1\t0\n"),
-			"rev-list --left-right --count refs/remotes/origin/feature...refs/heads/feature": []byte("0\t2\n"),
+			"for-each-ref --format=" + refFormat + " refs/heads/ refs/remotes/origin/": []byte(refLines(
+				"refs/heads/main\x00\x00\x00",
+				"refs/heads/feature\x00refs/remotes/origin/feature\x00ahead 2\x00",
+				"refs/remotes/origin/HEAD\x00\x00\x00refs/remotes/origin/main",
+				"refs/remotes/origin/main\x00\x00\x00",
+				"refs/remotes/origin/feature\x00\x00\x00",
+			)),
+			"rev-list --left-right --count refs/remotes/origin/main...refs/heads/main": []byte("1\t0\n"),
 		},
 	}
 
@@ -133,10 +137,11 @@ func TestEnrichOriginSyncWithFakeExec(t *testing.T) {
 	}
 }
 
-func TestFetchOriginNilInspector(t *testing.T) {
-	var in *Inspector
-	if err := in.FetchOrigin(context.Background(), filepath.Join(t.TempDir(), "repo")); !errors.Is(err, ErrInspectorMissing) {
-		t.Fatalf("want ErrInspectorMissing, got %v", err)
+func TestNilMutatorRefusesWrites(t *testing.T) {
+	var m *Mutator
+	_, err := m.FetchOriginSmart(context.Background(), filepath.Join(t.TempDir(), "repo"), FetchPolicy{TTL: time.Minute, Fresh: true}, nil)
+	if !errors.Is(err, ErrLeaseNotHeld) {
+		t.Fatalf("want ErrLeaseNotHeld, got %v", err)
 	}
 }
 
