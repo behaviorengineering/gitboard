@@ -3,11 +3,11 @@ module github.com/behaviorengineering/gitboard
 go 1.27.0
 
 require (
-	github.com/behaviorengineering/gitvalet v0.1.2
-	github.com/behaviorengineering/olly v0.2.0
+	github.com/behaviorengineering/gitvalet v0.2.0
+	github.com/behaviorengineering/olly v0.2.1
 	github.com/behaviorengineering/strop v0.2.0
 	github.com/charmbracelet/huh v1.0.0
-	github.com/failsafe-go/failsafe-go v0.9.7
+	github.com/failsafe-go/failsafe-go v0.9.8
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/trace v1.46.0
@@ -320,8 +320,8 @@ require (
 	golang.org/x/tools v0.50.0 // indirect
 	google.golang.org/api v0.299.0 // indirect
 	google.golang.org/genproto v0.0.0-20260724162435-b2f20204f0df // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20261019180522-ce908d29299b // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

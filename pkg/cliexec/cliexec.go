@@ -17,7 +17,14 @@ type Runner = gitexec.Runner
 // ErrMissingDeadline is returned when Run is called without a context deadline.
 var ErrMissingDeadline = gitexec.ErrMissingDeadline
 
-// New returns a runner with a sensible default timeout.
+// DefaultMaxConcurrent caps how many CLI processes one runner starts at once.
+// It is a safety net above the dashboard's own worker pools, so a refresh
+// queues instead of exhausting process and file-descriptor limits.
+const DefaultMaxConcurrent = 16
+
+// New returns a runner with gitvalet's default timeout and DefaultMaxConcurrent.
 func New() *Runner {
-	return gitexec.New()
+	r := gitexec.New()
+	r.MaxConcurrent = DefaultMaxConcurrent
+	return r
 }

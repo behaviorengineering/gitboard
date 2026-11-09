@@ -15,6 +15,12 @@ func TestRunRequiresDeadline(t *testing.T) {
 	}
 }
 
+func TestNewCapsConcurrency(t *testing.T) {
+	if got := New().MaxConcurrent; got != DefaultMaxConcurrent {
+		t.Fatalf("MaxConcurrent = %d, want %d", got, DefaultMaxConcurrent)
+	}
+}
+
 func TestRunEcho(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
