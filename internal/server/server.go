@@ -62,6 +62,10 @@ type Options struct {
 	// request. GET /api/meta serves it to the same-origin UI. serve sets it
 	// with --allow-non-localhost.
 	Token string
+	// RedactErrorDetail swaps error and detail text in responses for a fixed
+	// message and logs the original, because that text can hold local paths
+	// and CLI stderr. serve sets it with --allow-non-localhost.
+	RedactErrorDetail bool
 	// ServiceName names the API server spans. Empty uses "gitboard".
 	ServiceName string
 	// ConfigPath, when set, reloads the full config file when mtime advances
@@ -79,9 +83,10 @@ type Options struct {
 
 // api holds the handlers' shared state: the options and the live config.
 type api struct {
-	opts Options
-	live *configLive
-	log  observability.Logger
+	opts   Options
+	live   *configLive
+	log    observability.Logger
+	redact detailRedactor
 }
 
 // newAPI validates opts and builds the live config. Panics if opts.Log is
@@ -100,9 +105,10 @@ func newAPI(opts Options) *api {
 		}
 	}
 	return &api{
-		opts: opts,
-		live: newConfigLive(opts.ConfigPath, opts.Doc, poll, clearCaches, opts.Log),
-		log:  opts.Log,
+		opts:   opts,
+		live:   newConfigLive(opts.ConfigPath, opts.Doc, poll, clearCaches, opts.Log),
+		log:    opts.Log,
+		redact: detailRedactor{on: opts.RedactErrorDetail, log: opts.Log},
 	}
 }
 

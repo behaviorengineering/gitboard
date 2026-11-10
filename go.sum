@@ -182,8 +182,8 @@ github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiE
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ12Gv5o=
 github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
-github.com/behaviorengineering/gitvalet v0.2.0 h1:cpsTBIdabo8iq+WAscdvduw8URS07d/d/hKF36zx+Rc=
-github.com/behaviorengineering/gitvalet v0.2.0/go.mod h1:bzcBpe6uT6WZ02rBlOFLfnDzLZ/jbTzSBEjz7e7EU3U=
+github.com/behaviorengineering/gitvalet v0.2.1 h1:fP6W9C1KohrudFNb+hM0t1KGJ/bgnafr3acgfJ3LBgE=
+github.com/behaviorengineering/gitvalet v0.2.1/go.mod h1:bzcBpe6uT6WZ02rBlOFLfnDzLZ/jbTzSBEjz7e7EU3U=
 github.com/behaviorengineering/olly v0.2.1 h1:h3u/fv3SGrwPtp5i3CPb+iQbkoUJNQkOrxsp8z/B2+M=
 github.com/behaviorengineering/olly v0.2.1/go.mod h1:uLAIgbzqYyfnwdwLY+5vV1MOIjC5bSVFnC2Wwwcb7Ag=
 github.com/behaviorengineering/strop v0.2.0 h1:wT7RlBV1QrVxsVUXWsECC2UC9LgRf7GCFjdfdQC36pU=
